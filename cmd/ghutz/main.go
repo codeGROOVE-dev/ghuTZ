@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,7 +28,7 @@ var (
 	gcpProject   = flag.String("gcp-project", os.Getenv("GOOGLE_CLOUD_PROJECT"), "Google Cloud project ID")
 	verbose      = flag.Bool("verbose", false, "Enable verbose logging")
 	jsonOutput   = flag.Bool("json", false, "Output as JSON")
-	activity     = flag.Bool("activity", false, "Always show activity-based timezone analysis")
+	activity     = flag.Bool("activity-only", false, "Force activity-only timezone detection (skip geocoding/Gemini)")
 )
 
 func main() {
@@ -98,14 +99,31 @@ func main() {
 	if tzConfidence == 0 {
 		tzConfidence = result.Confidence
 	}
-	// Get current local time in detected timezone
+	// Get current local time in detected timezone and UTC offset
 	localTimeStr := ""
-	if loc, err := time.LoadLocation(result.Timezone); err == nil {
+	offsetStr := ""
+	if strings.HasPrefix(result.Timezone, "UTC") {
+		// Already in UTC offset format
+		offsetStr = ""  // No need to duplicate
+		// Handle UTC offset format (e.g., "UTC+5", "UTC-8")
+		utcOffsetStr := strings.TrimPrefix(result.Timezone, "UTC")
+		if offset, err := strconv.Atoi(utcOffsetStr); err == nil {
+			now := time.Now().UTC().Add(time.Duration(offset) * time.Hour)
+			localTimeStr = fmt.Sprintf(" (Local time: %s)", now.Format("3:04 PM"))
+		}
+	} else if loc, err := time.LoadLocation(result.Timezone); err == nil {
 		now := time.Now().In(loc)
+		_, offset := now.Zone()
+		offsetHours := offset / 3600
+		if offsetHours >= 0 {
+			offsetStr = fmt.Sprintf(" (UTC+%d)", offsetHours)
+		} else {
+			offsetStr = fmt.Sprintf(" (UTC%d)", offsetHours)
+		}
 		localTimeStr = fmt.Sprintf(" (Local time: %s)", now.Format("3:04 PM MST"))
 	}
 
-	fmt.Printf("  🕐 User TZ:       %s%s ", result.Timezone, localTimeStr)
+	fmt.Printf("  🕐 User TZ:       %s%s%s ", result.Timezone, offsetStr, localTimeStr)
 	printConfidenceBadge(tzConfidence)
 	fmt.Println()
 
@@ -553,13 +571,37 @@ func getLocationNameForTimezone(timezone string) string {
 
 // formatActiveHours formats the active hours with relative times from now
 func formatActiveHours(timezone string, startHour, endHour int) string {
-	loc, err := time.LoadLocation(timezone)
-	if err != nil {
-		return fmt.Sprintf("%dam - %dpm", startHour, endHour)
+	var loc *time.Location
+	var err error
+	var offsetStr string
+	
+	// Handle UTC offset format
+	if strings.HasPrefix(timezone, "UTC") {
+		offsetStr = timezone // Use UTC format directly
+		utcOffsetStr := strings.TrimPrefix(timezone, "UTC")
+		if offset, parseErr := strconv.Atoi(utcOffsetStr); parseErr == nil {
+			loc = time.FixedZone(timezone, offset*3600)
+		} else {
+			return fmt.Sprintf("%dam - %dpm %s", startHour, endHour, timezone)
+		}
+	} else {
+		loc, err = time.LoadLocation(timezone)
+		if err != nil {
+			return fmt.Sprintf("%dam - %dpm", startHour, endHour)
+		}
+		// Get the UTC offset for display
+		_, offset := time.Now().In(loc).Zone()
+		offsetHours := offset / 3600
+		if offsetHours >= 0 {
+			offsetStr = fmt.Sprintf("UTC+%d", offsetHours)
+		} else {
+			offsetStr = fmt.Sprintf("UTC%d", offsetHours)
+		}
 	}
 
 	now := time.Now().In(loc)
 	currentHour := now.Hour()
+	currentMinute := now.Minute()
 
 	// Create times for start and end of active hours today
 	startTime := time.Date(now.Year(), now.Month(), now.Day(), startHour, 0, 0, 0, loc)
@@ -575,32 +617,66 @@ func formatActiveHours(timezone string, startHour, endHour int) string {
 		endStr = endTime.Format("3am")
 	}
 
-	result := fmt.Sprintf("%s - %s", startStr, endStr)
-
-	// Add relative time information
-	if currentHour < startHour {
-		// Before work hours
-		hoursUntil := startHour - currentHour
-		if hoursUntil == 1 {
-			result += " (starts in 1 hour)"
+	// Calculate hours and minutes until/since start
+	startDiff := float64(startHour - currentHour) - float64(currentMinute)/60.0
+	endDiff := float64(endHour - currentHour) - float64(currentMinute)/60.0
+	
+	startRelative := ""
+	if startDiff > 0 {
+		hours := int(startDiff)
+		if hours == 0 {
+			startRelative = fmt.Sprintf("in %d min", int(startDiff*60))
+		} else if hours == 1 {
+			startRelative = "in 1 hour"
 		} else {
-			result += fmt.Sprintf(" (starts in %d hours)", hoursUntil)
+			startRelative = fmt.Sprintf("in %d hours", hours)
 		}
-	} else if currentHour >= startHour && currentHour < endHour {
-		// During work hours
-		hoursLeft := endHour - currentHour
-		if hoursLeft == 1 {
-			result += " (1 hour left today)"
+	} else if startDiff < 0 {
+		hours := int(-startDiff)
+		if hours == 0 {
+			startRelative = fmt.Sprintf("%d min ago", int(-startDiff*60))
+		} else if hours == 1 {
+			startRelative = "1 hour ago"
 		} else {
-			result += fmt.Sprintf(" (%d hours left today)", hoursLeft)
+			startRelative = fmt.Sprintf("%d hours ago", hours)
 		}
 	} else {
-		// After work hours
-		hoursUntilTomorrow := 24 - currentHour + startHour
-		if hoursUntilTomorrow == 1 {
-			result += " (starts again in 1 hour)"
+		startRelative = "now"
+	}
+	
+	endRelative := ""
+	if endDiff > 0 {
+		hours := int(endDiff)
+		if hours == 0 {
+			endRelative = fmt.Sprintf("in %d min", int(endDiff*60))
+		} else if hours == 1 {
+			endRelative = "in 1 hour"
 		} else {
-			result += fmt.Sprintf(" (starts again in %d hours)", hoursUntilTomorrow)
+			endRelative = fmt.Sprintf("in %d hours", hours)
+		}
+	} else if endDiff < 0 {
+		hours := int(-endDiff)
+		if hours == 0 {
+			endRelative = fmt.Sprintf("%d min ago", int(-endDiff*60))
+		} else if hours == 1 {
+			endRelative = "1 hour ago"
+		} else {
+			endRelative = fmt.Sprintf("%d hours ago", hours)
+		}
+	} else {
+		endRelative = "now"
+	}
+
+	// Format: "7am (3 hours ago) - 5pm (in 3 hours) UTC+5"
+	result := fmt.Sprintf("%s (%s) - %s (%s) %s", startStr, startRelative, endStr, endRelative, offsetStr)
+
+	// If currently in work hours, add that info
+	if currentHour >= startHour && currentHour < endHour {
+		hoursLeft := int(endDiff)
+		if hoursLeft == 1 {
+			result += " [active now, 1 hour left]"
+		} else if hoursLeft > 1 {
+			result += fmt.Sprintf(" [active now, %d hours left]", hoursLeft)
 		}
 	}
 

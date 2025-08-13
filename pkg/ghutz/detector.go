@@ -10,8 +10,11 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +31,7 @@ type Detector struct {
 	logger        *slog.Logger
 	httpClient    *http.Client
 	forceActivity bool
+	cache         *DiskCache
 }
 
 // retryableHTTPDo performs an HTTP request with exponential backoff and jitter
@@ -94,6 +98,20 @@ func NewWithLogger(logger *slog.Logger, opts ...Option) *Detector {
 		opt(optHolder)
 	}
 	
+	// Initialize cache
+	var cache *DiskCache
+	if userCacheDir, err := os.UserCacheDir(); err == nil {
+		cacheDir := filepath.Join(userCacheDir, "ghutz")
+		cache, err = NewDiskCache(cacheDir, 7*24*time.Hour, logger)
+		if err != nil {
+			logger.Debug("cache initialization failed", "error", err)
+			// Cache is optional, continue without it
+			cache = nil
+		}
+	} else {
+		logger.Debug("could not determine user cache directory", "error", err)
+	}
+	
 	return &Detector{
 		githubToken:   optHolder.githubToken,
 		mapsAPIKey:    optHolder.mapsAPIKey,  
@@ -103,6 +121,7 @@ func NewWithLogger(logger *slog.Logger, opts ...Option) *Detector {
 		logger:        logger,
 		httpClient:    &http.Client{Timeout: 30 * time.Second},
 		forceActivity: optHolder.forceActivity,
+		cache:         cache,
 	}
 }
 
@@ -127,15 +146,15 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	
 	d.logger.Info("detecting timezone", "username", username)
 	
-	// Always perform activity analysis if flag is set or if other methods fail
+	// Perform activity analysis if flag is set (for comparison)
 	var activityResult *Result
 	if d.forceActivity {
-		d.logger.Debug("forcing activity pattern analysis", "username", username)
+		d.logger.Debug("performing activity pattern analysis", "username", username)
 		activityResult = d.tryActivityPatterns(ctx, username)
 	}
 	
-	// Try quick detection methods first if not forcing activity
-	if !d.forceActivity {
+	// Try quick detection methods first
+	{
 		d.logger.Debug("trying profile HTML scraping", "username", username)
 		if result := d.tryProfileScraping(ctx, username); result != nil {
 			d.logger.Info("detected from profile HTML", "username", username, "timezone", result.Timezone)
@@ -161,8 +180,10 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 			return result, nil
 		}
 		d.logger.Debug("location field analysis failed", "username", username)
-		
-		// Now try activity patterns if we haven't already
+	}
+	
+	// Now try activity patterns if we haven't already
+	if activityResult == nil {
 		d.logger.Debug("trying activity pattern analysis", "username", username)
 		activityResult = d.tryActivityPatterns(ctx, username)
 	}
@@ -375,13 +396,11 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 		contextData["activity_confidence"] = activityResult.Confidence
 		
 		// Add timezone candidates based on the detected offset
-		if strings.HasPrefix(activityResult.Timezone, "Etc/GMT") || strings.HasPrefix(activityResult.Timezone, "Asia/") || strings.HasPrefix(activityResult.Timezone, "Europe/") {
-			// Extract offset from the activity timezone
-			loc, err := time.LoadLocation(activityResult.Timezone)
-			if err == nil {
-				_, offset := time.Now().In(loc).Zone()
-				offsetHours := float64(offset) / 3600.0
-				candidates := getTimezoneCandidatesForOffset(offsetHours)
+		if strings.HasPrefix(activityResult.Timezone, "UTC") {
+			// Extract offset from UTC format (e.g., "UTC+5", "UTC-8")
+			offsetStr := strings.TrimPrefix(activityResult.Timezone, "UTC")
+			if offset, err := strconv.Atoi(offsetStr); err == nil {
+				candidates := getTimezoneCandidatesForOffset(float64(offset))
 				if len(candidates) > 0 {
 					contextData["timezone_candidates"] = candidates
 				}
@@ -591,19 +610,17 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 		"offset_rounded", offsetInt)
 	
 	timezone := timezoneFromOffset(offsetInt)
-	d.logger.Debug("DST-aware timezone selected", "username", username, "offset", offsetInt, "timezone", timezone)
+	d.logger.Debug("Activity-based UTC offset", "username", username, "offset", offsetInt, "timezone", timezone)
 	
+	// Log the detected offset for verification
 	if timezone != "" {
-		loc, err := time.LoadLocation(timezone)
-		if err == nil {
-			now := time.Now()
-			localTime := now.In(loc)
-			utcTime := now.UTC()
-			d.logger.Debug("timezone verification", "username", username, "timezone", timezone,
-				"utc_time", utcTime.Format("15:04 MST"), 
-				"local_time", localTime.Format("15:04 MST"),
-				"current_offset_hours", float64(localTime.Hour() - utcTime.Hour()))
-		}
+		now := time.Now().UTC()
+		// Calculate what the local time would be with this offset
+		localTime := now.Add(time.Duration(offsetInt) * time.Hour)
+		d.logger.Debug("timezone verification", "username", username, "timezone", timezone,
+			"utc_time", now.Format("15:04 MST"), 
+			"estimated_local_time", localTime.Format("15:04"),
+			"offset_hours", offsetInt)
 	}
 	
 	// Calculate typical active hours in local time (excluding outliers)
@@ -701,7 +718,7 @@ func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]Pu
 		req.Header.Set("Authorization", "token "+d.githubToken)
 	}
 	
-	resp, err := d.retryableHTTPDo(ctx, req)
+	resp, err := d.cachedHTTPDo(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching pull requests: %w", err)
 	}
@@ -755,7 +772,7 @@ func (d *Detector) fetchIssues(ctx context.Context, username string) ([]Issue, e
 		req.Header.Set("Authorization", "token "+d.githubToken)
 	}
 	
-	resp, err := d.retryableHTTPDo(ctx, req)
+	resp, err := d.cachedHTTPDo(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching issues: %w", err)
 	}
@@ -837,7 +854,7 @@ func (d *Detector) fetchUserComments(ctx context.Context, username string) ([]Co
 	req.Header.Set("Authorization", "bearer "+d.githubToken)
 	req.Header.Set("Content-Type", "application/json")
 	
-	resp, err := d.retryableHTTPDo(ctx, req)
+	resp, err := d.cachedHTTPDo(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching comments: %w", err)
 	}
@@ -920,7 +937,7 @@ func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]O
 		req.Header.Set("Authorization", "token "+d.githubToken)
 	}
 	
-	resp, err := d.retryableHTTPDo(ctx, req)
+	resp, err := d.cachedHTTPDo(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching organizations: %w", err)
 	}
@@ -955,8 +972,7 @@ func (d *Detector) fetchUser(ctx context.Context, username string) *GitHubUser {
 		req.Header.Set("Authorization", "token "+d.githubToken)
 	}
 	
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := d.cachedHTTPDo(ctx, req)
 	if err != nil {
 		return nil
 	}
@@ -1239,75 +1255,12 @@ func findQuietHours(hourCounts map[int]int) []int {
 }
 
 func timezoneFromOffset(offsetHours int) string {
-	now := time.Now()
-	
-	candidates := getTimezoneCandidatesForOffset(float64(offsetHours))
-	
-	for _, tzName := range candidates {
-		loc, err := time.LoadLocation(tzName)
-		if err != nil {
-			continue
-		}
-		
-		_, currentOffset := now.In(loc).Zone()
-		currentOffsetHours := float64(currentOffset) / 3600.0
-		
-		if currentOffsetHours == float64(offsetHours) {
-			return tzName
-		}
+	// Return a simple UTC offset format for activity-only detection
+	// This avoids making assumptions about specific locations
+	if offsetHours >= 0 {
+		return fmt.Sprintf("UTC+%d", offsetHours)
 	}
-	
-	// For US timezones, we need to be careful about DST
-	// The challenge is that during DST, the offset alone is ambiguous:
-	// UTC-4 could be Eastern (DST) or Atlantic (standard)
-	// UTC-5 could be Central (DST) or Eastern (standard)
-	// UTC-6 could be Mountain (DST) or Central (standard)
-	// UTC-7 could be Pacific (DST) or Mountain (standard)
-	
-	// We'll return the most populous/common timezone for each offset
-	// Gemini or other context can refine this further
-	switch offsetHours {
-	case -8:
-		return "America/Los_Angeles" // Pacific Standard Time
-	case -7:
-		return "America/Denver" // Mountain Standard Time (or Pacific DST)
-	case -6:
-		return "America/Chicago" // Central Standard Time (or Mountain DST)
-	case -5:
-		return "America/New_York" // Eastern Standard Time (or Central DST) - prefer Eastern
-	case -4:
-		return "America/New_York" // Eastern Daylight Time - most populous
-	case -3:
-		return "America/Sao_Paulo"
-	case 0:
-		return "Europe/London"
-	case 1:
-		return "Europe/Paris"
-	case 2:
-		return "Europe/Berlin"
-	case 3:
-		return "Europe/Moscow"
-	case 4:
-		return "Asia/Dubai"
-	case 5:
-		return "Asia/Karachi"
-	case 6:
-		return "Asia/Dhaka"
-	case 7:
-		return "Asia/Bangkok"
-	case 8:
-		return "Asia/Shanghai"
-	case 9:
-		return "Asia/Tokyo"
-	case 10:
-		return "Australia/Sydney"
-	default:
-		// Fall back to Etc/GMT notation (note: inverted!)
-		if offsetHours < 0 {
-			return fmt.Sprintf("Etc/GMT+%d", -offsetHours)
-		}
-		return fmt.Sprintf("Etc/GMT-%d", offsetHours)
-	}
+	return fmt.Sprintf("UTC%d", offsetHours) // Negative sign is already included
 }
 
 func getTimezoneCandidatesForOffset(offsetHours float64) []string {
