@@ -7,29 +7,84 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/codeGROOVE-dev/retry"
 )
 
-// Detector is Rob Pike's simplified version - no unnecessary abstractions
 type Detector struct {
 	githubToken  string
 	mapsAPIKey   string
 	geminiAPIKey string
 	logger       *slog.Logger
+	httpClient   *http.Client
 }
 
-// New creates a simple, reliable detector
+// retryableHTTPDo performs an HTTP request with exponential backoff and jitter
+func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*http.Response, error) {
+	var resp *http.Response
+	var lastErr error
+	
+	err := retry.Do(
+		func() error {
+			var err error
+			resp, err = d.httpClient.Do(req.WithContext(ctx))
+			if err != nil {
+				// Network errors are retryable
+				lastErr = err
+				return err
+			}
+			
+			// Check for rate limiting or server errors
+			if resp.StatusCode == 429 || resp.StatusCode == 403 || resp.StatusCode >= 500 {
+				body, _ := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+				d.logger.Debug("retryable HTTP error", 
+					"status", resp.StatusCode, 
+					"url", req.URL.String(),
+					"body", string(body))
+				return lastErr
+			}
+			
+			// Success or non-retryable error
+			return nil
+		},
+		retry.Context(ctx),
+		retry.Attempts(5),
+		retry.Delay(time.Second),
+		retry.MaxDelay(2*time.Minute),
+		retry.DelayType(retry.BackOffDelay),
+		retry.OnRetry(func(n uint, err error) {
+			d.logger.Debug("retrying HTTP request", 
+				"attempt", n+1,
+				"url", req.URL.String(),
+				"error", err)
+		}),
+		retry.RetryIf(func(err error) bool {
+			// Retry on network errors and rate limits
+			return err != nil
+		}),
+	)
+	
+	if err != nil {
+		return nil, fmt.Errorf("request failed after retries: %w", lastErr)
+	}
+	
+	return resp, nil
+}
+
 func New(opts ...Option) *Detector {
 	return NewWithLogger(slog.Default(), opts...)
 }
 
-// NewWithLogger creates a detector with a specific logger
 func NewWithLogger(logger *slog.Logger, opts ...Option) *Detector {
-	// Apply options using temporary option holder
 	optHolder := &OptionHolder{}
 	for _, opt := range opts {
 		opt(optHolder)
@@ -40,18 +95,31 @@ func NewWithLogger(logger *slog.Logger, opts ...Option) *Detector {
 		mapsAPIKey:   optHolder.mapsAPIKey,  
 		geminiAPIKey: optHolder.geminiAPIKey,
 		logger:       logger,
+		httpClient:   &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
-// Detect finds timezone using the simplest reliable methods
 func (d *Detector) Detect(ctx context.Context, username string) (*Result, error) {
 	if username == "" {
 		return nil, fmt.Errorf("username cannot be empty")
 	}
 	
+	// Validate username to prevent injection attacks
+	// GitHub usernames can only contain alphanumeric characters or hyphens
+	// Cannot have multiple consecutive hyphens
+	// Cannot begin or end with a hyphen
+	// Maximum 39 characters
+	if len(username) > 39 {
+		return nil, fmt.Errorf("username too long (max 39 characters)")
+	}
+	
+	validUsername := regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$`)
+	if !validUsername.MatchString(username) {
+		return nil, fmt.Errorf("invalid username format")
+	}
+	
 	d.logger.Info("detecting timezone", "username", username)
 	
-	// Method 1: Try GitHub profile scraping (most reliable)
 	d.logger.Debug("trying profile HTML scraping", "username", username)
 	if result := d.tryProfileScraping(ctx, username); result != nil {
 		d.logger.Info("detected from profile HTML", "username", username, "timezone", result.Timezone)
@@ -59,7 +127,6 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	}
 	d.logger.Debug("profile HTML scraping failed", "username", username)
 	
-	// Method 2: Try GitHub profile location field
 	d.logger.Debug("trying location field analysis", "username", username)
 	if result := d.tryLocationField(ctx, username); result != nil {
 		d.logger.Info("detected from location field", "username", username, "timezone", result.Timezone, "location", result.LocationName)
@@ -67,11 +134,9 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	}
 	d.logger.Debug("location field analysis failed", "username", username)
 	
-	// Method 3: Try activity patterns + Gemini analysis in one call
 	d.logger.Debug("trying activity pattern analysis", "username", username)
 	activityResult := d.tryActivityPatterns(ctx, username)
 	
-	// Method 4: Single Gemini call with or without activity data
 	d.logger.Debug("trying Gemini analysis with contextual data", "username", username, "has_activity_data", activityResult != nil)
 	if result := d.tryUnifiedGeminiAnalysis(ctx, username, activityResult); result != nil {
 		if activityResult != nil {
@@ -84,7 +149,6 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	}
 	d.logger.Debug("Gemini analysis failed", "username", username)
 	
-	// Fallback to activity-only if available but Gemini failed
 	if activityResult != nil {
 		d.logger.Info("using activity-only result as fallback", "username", username, "timezone", activityResult.Timezone)
 		return activityResult, nil
@@ -93,7 +157,6 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	return nil, fmt.Errorf("could not determine timezone for %s", username)
 }
 
-// tryProfileScraping attempts to extract timezone from GitHub profile HTML
 func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Result {
 	url := fmt.Sprintf("https://github.com/%s", username)
 	
@@ -118,7 +181,6 @@ func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Res
 		return nil
 	}
 	
-	// Look for timezone in profile HTML
 	html := string(body)
 	if tz := extractTimezoneFromHTML(html); tz != "" {
 		return &Result{
@@ -132,9 +194,7 @@ func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Res
 	return nil
 }
 
-// extractTimezoneFromHTML extracts timezone from GitHub profile HTML
 func extractTimezoneFromHTML(html string) string {
-	// Look for timezone in various HTML patterns
 	patterns := []string{
 		`data-timezone="([^"]+)"`,
 		`timezone:([^,}]+)`,
@@ -154,7 +214,6 @@ func extractTimezoneFromHTML(html string) string {
 	return ""
 }
 
-// tryLocationField attempts to detect timezone from GitHub profile location field using APIs
 func (d *Detector) tryLocationField(ctx context.Context, username string) *Result {
 	user := d.fetchUser(ctx, username)
 	if user == nil || user.Location == "" {
@@ -164,13 +223,11 @@ func (d *Detector) tryLocationField(ctx context.Context, username string) *Resul
 	
 	d.logger.Debug("analyzing location field", "username", username, "location", user.Location)
 	
-	// Check if location is too vague for reliable geocoding
 	if d.isLocationTooVague(user.Location) {
 		d.logger.Debug("location too vague for geocoding", "username", username, "location", user.Location)
 		return nil
 	}
 	
-	// Use geocoding to convert location string to coordinates
 	coords, err := d.geocodeLocation(ctx, user.Location)
 	if err != nil {
 		d.logger.Debug("geocoding failed", "username", username, "location", user.Location, "error", err)
@@ -180,7 +237,6 @@ func (d *Detector) tryLocationField(ctx context.Context, username string) *Resul
 	d.logger.Debug("geocoded location", "username", username, "location", user.Location, 
 		"latitude", coords.Latitude, "longitude", coords.Longitude)
 	
-	// Convert coordinates to timezone
 	timezone, err := d.timezoneForCoordinates(ctx, coords.Latitude, coords.Longitude)
 	if err != nil {
 		d.logger.Debug("timezone lookup failed", "username", username, "coordinates", 
@@ -201,83 +257,6 @@ func (d *Detector) tryLocationField(ctx context.Context, username string) *Resul
 	}
 }
 
-// tryGeminiAnalysis uses Gemini to analyze contextual clues for timezone detection
-func (d *Detector) tryGeminiAnalysis(ctx context.Context, username string) *Result {
-	if d.geminiAPIKey == "" {
-		d.logger.Debug("Gemini API key not configured", "username", username)
-		return nil
-	}
-	
-	// Gather contextual data about the user
-	user := d.fetchUser(ctx, username)
-	if user == nil {
-		d.logger.Debug("could not fetch user data for Gemini analysis", "username", username)
-		return nil
-	}
-	
-	// Get recent PRs for additional context (up to 100)
-	prs, _ := d.fetchPullRequests(ctx, username)
-	
-	// Extract only title and time for Gemini (reduce token usage)
-	prSummary := make([]map[string]interface{}, len(prs))
-	for i, pr := range prs {
-		prSummary[i] = map[string]interface{}{
-			"title":      pr.Title,
-			"created_at": pr.CreatedAt,
-		}
-	}
-	
-	// Try to fetch blog/website content for additional context
-	var websiteContent string
-	if user.Blog != "" {
-		d.logger.Debug("fetching website content for additional context", "username", username, "blog_url", user.Blog)
-		websiteContent = d.fetchWebsiteContent(ctx, user.Blog)
-	}
-	
-	// Build context for Gemini - pass complete data
-	contextData := map[string]interface{}{
-		"github_user_json": user,        // Complete GitHub user JSON
-		"pull_requests": prSummary,      // PR titles and timestamps only
-		"website_content": websiteContent, // Blog/website content for location clues
-	}
-	
-	d.logger.Debug("analyzing with Gemini", "username", username, "profile_location", user.Location, "company", user.Company, "pr_count", len(prs))
-	d.logger.Debug("Gemini context summary", "profile_fields", map[string]string{
-		"location": user.Location,
-		"company": user.Company, 
-		"blog": user.Blog,
-		"email": user.Email,
-		"bio": user.Bio,
-	}, "pr_titles_sample", func() []string {
-		sample := make([]string, 0, 5)
-		for i, pr := range prSummary {
-			if i >= 5 { break }
-			if title, ok := pr["title"].(string); ok {
-				sample = append(sample, title)
-			}
-		}
-		return sample
-	}())
-	
-	timezone, location, confidence, err := d.queryUnifiedGeminiForTimezone(ctx, contextData, true) // verbose logging enabled
-	if err != nil {
-		d.logger.Debug("Gemini analysis failed", "username", username, "error", err)
-		return nil
-	}
-	
-	if timezone == "" {
-		d.logger.Debug("Gemini could not determine timezone", "username", username)
-		return nil
-	}
-	
-	return &Result{
-		Username:                username,
-		Timezone:                timezone,
-		GeminiSuggestedLocation: location,
-		Confidence:              confidence,
-		Method:                  "gemini_analysis",
-	}
-}
 
 // tryUnifiedGeminiAnalysis uses Gemini with all available data (activity + context) in a single call
 func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string, activityResult *Result) *Result {
@@ -293,10 +272,38 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 		return nil
 	}
 	
-	// Get PRs for additional context
-	prs, _ := d.fetchPullRequests(ctx, username)
+	prs, err := d.fetchPullRequests(ctx, username)
+	if err != nil {
+		d.logger.Debug("failed to fetch pull requests", "username", username, "error", err)
+		prs = []PullRequest{}
+	}
+	issues, err := d.fetchIssues(ctx, username)
+	if err != nil {
+		d.logger.Debug("failed to fetch issues", "username", username, "error", err)
+		issues = []Issue{}
+	}
 	
-	// Extract only title and time for Gemini (reduce token usage)
+	// Find longest PR/issue body for language analysis
+	var longestBody string
+	var longestTitle string
+	for _, pr := range prs {
+		if len(pr.Body) > len(longestBody) {
+			longestBody = pr.Body
+			longestTitle = pr.Title
+		}
+	}
+	for _, issue := range issues {
+		if len(issue.Body) > len(longestBody) {
+			longestBody = issue.Body
+			longestTitle = issue.Title
+		}
+	}
+	
+	// Limit body to 5000 chars for token efficiency
+	if len(longestBody) > 5000 {
+		longestBody = longestBody[:5000] + "..."
+	}
+	
 	prSummary := make([]map[string]interface{}, len(prs))
 	for i, pr := range prs {
 		prSummary[i] = map[string]interface{}{
@@ -305,30 +312,48 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 		}
 	}
 	
-	// Try to fetch blog/website content for additional context
 	var websiteContent string
 	if user.Blog != "" {
 		d.logger.Debug("fetching website content for Gemini analysis", "username", username, "blog_url", user.Blog)
 		websiteContent = d.fetchWebsiteContent(ctx, user.Blog)
 	}
 	
-	// Fetch GitHub organization data for additional context
-	orgs, _ := d.fetchOrganizations(ctx, username)
+	orgs, err := d.fetchOrganizations(ctx, username)
+	if err != nil {
+		d.logger.Debug("failed to fetch organizations", "username", username, "error", err)
+		orgs = []Organization{}
+	}
 	d.logger.Debug("fetched organization data", "username", username, "org_count", len(orgs))
 	
-	// Build context for Gemini - include activity data if available
 	contextData := map[string]interface{}{
 		"github_user_json": user,
 		"pull_requests":    prSummary,
 		"website_content":  websiteContent,
 		"organizations":    orgs,
+		"longest_pr_issue_body": longestBody,
+		"longest_pr_issue_title": longestTitle,
+		"issue_count": len(issues),
 	}
 	
-	// Add activity data if available
 	var method string
 	if activityResult != nil {
 		contextData["activity_detected_timezone"] = activityResult.Timezone
 		contextData["activity_confidence"] = activityResult.Confidence
+		
+		// Add timezone candidates based on the detected offset
+		if strings.HasPrefix(activityResult.Timezone, "Etc/GMT") || strings.HasPrefix(activityResult.Timezone, "Asia/") || strings.HasPrefix(activityResult.Timezone, "Europe/") {
+			// Extract offset from the activity timezone
+			loc, err := time.LoadLocation(activityResult.Timezone)
+			if err == nil {
+				_, offset := time.Now().In(loc).Zone()
+				offsetHours := float64(offset) / 3600.0
+				candidates := getTimezoneCandidatesForOffset(offsetHours)
+				if len(candidates) > 0 {
+					contextData["timezone_candidates"] = candidates
+				}
+			}
+		}
+		
 		method = "gemini_refined_activity"
 		d.logger.Debug("analyzing with Gemini + activity data", "username", username, 
 			"activity_timezone", activityResult.Timezone, "profile_location", user.Location, 
@@ -339,7 +364,7 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 			"profile_location", user.Location, "company", user.Company, "website_available", websiteContent != "")
 	}
 	
-	timezone, location, confidence, err := d.queryUnifiedGeminiForTimezone(ctx, contextData, true) // verbose logging enabled
+	timezone, location, confidence, err := d.queryUnifiedGeminiForTimezone(ctx, contextData, true)
 	if err != nil {
 		d.logger.Debug("Gemini analysis failed", "username", username, "error", err)
 		return nil
@@ -359,29 +384,45 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 	}
 }
 
-// tryActivityPatterns analyzes GitHub activity to infer timezone
 func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Result {
-	prs, err := d.fetchPullRequests(ctx, username)
-	if err != nil {
-		d.logger.Debug("failed to fetch pull requests", "username", username, "error", err)
+	// Fetch all activity data in parallel
+	activity := d.fetchAllActivity(ctx, username)
+	
+	totalActivity := len(activity.PullRequests) + len(activity.Issues) + len(activity.Comments)
+	if totalActivity < 20 {
+		d.logger.Debug("insufficient activity data", "username", username, 
+			"pr_count", len(activity.PullRequests), 
+			"issue_count", len(activity.Issues),
+			"comment_count", len(activity.Comments),
+			"total", totalActivity, "minimum_required", 20)
 		return nil
 	}
 	
-	if len(prs) < 10 {
-		d.logger.Debug("insufficient activity data", "username", username, "pr_count", len(prs), "minimum_required", 10)
-		return nil
-	}
+	d.logger.Debug("analyzing activity patterns", "username", username, 
+		"pr_count", len(activity.PullRequests),
+		"issue_count", len(activity.Issues),
+		"comment_count", len(activity.Comments))
 	
-	d.logger.Debug("analyzing activity patterns", "username", username, "pr_count", len(prs))
-	
-	// Count activity by hour (UTC)
 	hourCounts := make(map[int]int)
-	for _, pr := range prs {
+	
+	// Count PRs
+	for _, pr := range activity.PullRequests {
 		hour := pr.CreatedAt.UTC().Hour()
 		hourCounts[hour]++
 	}
 	
-	// Find most active hours for better logging
+	// Count issues
+	for _, issue := range activity.Issues {
+		hour := issue.CreatedAt.UTC().Hour()
+		hourCounts[hour]++
+	}
+	
+	// Count comments
+	for _, comment := range activity.Comments {
+		hour := comment.CreatedAt.UTC().Hour()
+		hourCounts[hour]++
+	}
+	
 	maxActivity := 0
 	mostActiveHours := []int{}
 	for hour, count := range hourCounts {
@@ -393,7 +434,6 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 		}
 	}
 	
-	// Find quiet hours (likely sleeping time)
 	quietHours := findQuietHours(hourCounts)
 	if len(quietHours) < 4 {
 		d.logger.Debug("insufficient quiet hours", "username", username, "quiet_hours", len(quietHours))
@@ -401,39 +441,124 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 	}
 	
 	d.logger.Debug("activity pattern summary", "username", username, 
-		"total_prs", len(prs),
+		"total_activity", totalActivity,
 		"quiet_hours", quietHours, 
 		"most_active_hours", mostActiveHours,
 		"max_activity_count", maxActivity)
 	
-	// Log hourly distribution for debugging
 	hourlyActivity := make([]int, 24)
 	for hour := 0; hour < 24; hour++ {
 		hourlyActivity[hour] = hourCounts[hour]
 	}
 	d.logger.Debug("hourly activity distribution", "username", username, "hours_utc", hourlyActivity)
 	
-	// Estimate timezone based on quiet hours  
-	// Assume sleep is 2am-7am local time (4:30am is middle)
-	midSleep := float64(quietHours[0] + quietHours[len(quietHours)-1]) / 2.0
+	// Find the middle of quiet hours, handling wrap-around
+	start := quietHours[0]
+	end := quietHours[len(quietHours)-1]
+	var midQuiet float64
 	
-	// If midSleep is X UTC and we assume that's 4:30am local time,
-	// then local_time = UTC + offset, so: 4.5 = X + offset, therefore offset = 4.5 - X
-	offsetFromUTC := int(4.5 - midSleep)
+	// Check if quiet hours wrap around midnight
+	if end < start || (start == 0 && end == 23) {
+		// Wraps around (e.g., 22-3)
+		totalHours := (24 - start) + end + 1
+		midQuiet = float64(start) + float64(totalHours)/2.0
+		if midQuiet >= 24 {
+			midQuiet -= 24
+		}
+	} else {
+		// Normal case (e.g., 3-8)
+		// For a 6-hour window from start to end, the middle is (start + end) / 2
+		midQuiet = (float64(start) + float64(end)) / 2.0
+	}
 	
-	d.logger.Debug("calculated timezone offset", "username", username, 
-		"mid_sleep_utc", midSleep, "estimated_offset", offsetFromUTC)
+	// Analyze the activity pattern to determine likely region
+	// European pattern: more activity in hours 6-16 UTC (morning/afternoon in Europe)
+	// American pattern: more activity in hours 12-22 UTC (morning/afternoon in Americas)
+	europeanActivity := 0
+	americanActivity := 0
+	for hour := 6; hour <= 16; hour++ {
+		europeanActivity += hourCounts[hour]
+	}
+	for hour := 12; hour <= 22; hour++ {
+		americanActivity += hourCounts[hour]
+	}
 	
+	// Sleep patterns are more reliable than work patterns for timezone detection
+	// The middle of quiet time varies by region:
+	// - Americans tend to sleep later (midpoint ~3:30am)
+	// - Europeans tend to sleep earlier (midpoint ~2:30am)
+	// - Asians vary widely
+	var assumedSleepMidpoint float64
+	if float64(europeanActivity) > float64(americanActivity)*1.2 {
+		// Strong European pattern  
+		// Europeans typically have earlier sleep patterns, midpoint around 2am
+		assumedSleepMidpoint = 2.0
+		d.logger.Debug("detected European activity pattern", "username", username, 
+			"european_activity", europeanActivity, "american_activity", americanActivity)
+	} else if float64(americanActivity) > float64(europeanActivity)*1.2 {
+		// Strong American pattern
+		// Americans typically sleep midnight-5am, midpoint around 2.5am
+		// Using 2.5 instead of 3.5 to better match Eastern Time patterns
+		assumedSleepMidpoint = 2.5
+		d.logger.Debug("detected American activity pattern", "username", username,
+			"european_activity", europeanActivity, "american_activity", americanActivity)
+	} else {
+		// Unclear or Asian pattern, use default
+		assumedSleepMidpoint = 3.0
+		d.logger.Debug("unclear activity pattern", "username", username,
+			"european_activity", europeanActivity, "american_activity", americanActivity)
+	}
+	
+	offsetFromUTC := assumedSleepMidpoint - midQuiet
+	
+	d.logger.Debug("offset calculation details", "username", username,
+		"assumedSleepMidpoint", assumedSleepMidpoint,
+		"midQuiet", midQuiet,
+		"rawOffset", offsetFromUTC)
+	
+	// For US timezones, check if the pattern matches known US work/activity patterns
+	// US developers often have evening activity (7-11pm local) for open source
+	// This would be roughly 13-17 UTC for Central Time (UTC-6)
+	
+	// Count activity in typical US evening hours (converted to UTC for different zones)
+	// For Central Time (UTC-6): 7-11pm local = 1-5am UTC (next day) or 13-17 UTC (same day DST)
+	// For Eastern Time (UTC-5): 7-11pm local = 0-4am UTC (next day) or 12-16 UTC (same day DST)
+	// For Pacific Time (UTC-8): 7-11pm local = 3-7am UTC (next day) or 15-19 UTC (same day DST)
+	
+	// Check if this looks like a US pattern based on quiet hours
+	// US timezones typically have quiet hours (midnight-5am local) that map to:
+	// - Eastern (UTC-4 DST): quiet hours 4-9 UTC  
+	// - Central (UTC-5 DST): quiet hours 5-10 UTC
+	// - Mountain (UTC-6 DST): quiet hours 6-11 UTC
+	// - Pacific (UTC-7 DST): quiet hours 7-12 UTC
+	
+	// If we detected American activity pattern and quiet hours suggest US timezone,
+	// use the calculated offset as-is rather than forcing to Central
+	if americanActivity > europeanActivity && midQuiet >= 4 && midQuiet <= 12 {
+		// This looks like a US pattern, trust the calculated offset
+		d.logger.Debug("detected US timezone pattern", "username", username,
+			"mid_quiet_utc", midQuiet, "calculated_offset", offsetFromUTC)
+		// Keep the calculated offset as-is
+	}
+	
+	// Normalize to [-12, 12] range
 	if offsetFromUTC > 12 {
 		offsetFromUTC -= 24
-	} else if offsetFromUTC < -12 {
+	} else if offsetFromUTC <= -12 {
 		offsetFromUTC += 24
 	}
 	
-	timezone := timezoneFromOffset(offsetFromUTC)
-	d.logger.Debug("DST-aware timezone selected", "username", username, "offset", offsetFromUTC, "timezone", timezone)
+	offsetInt := int(math.Round(offsetFromUTC))
 	
-	// Log what this means in terms of local time
+	d.logger.Debug("calculated timezone offset", "username", username, 
+		"quiet_hours", quietHours,
+		"mid_quiet_utc", midQuiet,
+		"offset_calculated", offsetFromUTC,
+		"offset_rounded", offsetInt)
+	
+	timezone := timezoneFromOffset(offsetInt)
+	d.logger.Debug("DST-aware timezone selected", "username", username, "offset", offsetInt, "timezone", timezone)
+	
 	if timezone != "" {
 		loc, err := time.LoadLocation(timezone)
 		if err == nil {
@@ -447,8 +572,6 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 		}
 	}
 	
-	// Let Gemini handle name-based improvements via context analysis
-	
 	return &Result{
 		Username:   username,
 		Timezone:   timezone,
@@ -457,45 +580,106 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 	}
 }
 
-// fetchPullRequests gets recent pull requests for activity analysis
-func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]PullRequest, error) {
-	url := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:pr&sort=created&order=desc&per_page=100", username)
+func (d *Detector) fetchAllActivity(ctx context.Context, username string) *ActivityData {
+	type result struct {
+		prs      []PullRequest
+		issues   []Issue
+		comments []Comment
+	}
 	
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	ch := make(chan result, 1)
+	
+	go func() {
+		var res result
+		
+		// Fetch in parallel using goroutines
+		var wg sync.WaitGroup
+		wg.Add(3)
+		
+		// Fetch PRs
+		go func() {
+			defer wg.Done()
+			if prs, err := d.fetchPullRequests(ctx, username); err == nil {
+				res.prs = prs
+			} else {
+				d.logger.Debug("failed to fetch PRs", "username", username, "error", err)
+			}
+		}()
+		
+		// Fetch Issues
+		go func() {
+			defer wg.Done()
+			if issues, err := d.fetchIssues(ctx, username); err == nil {
+				res.issues = issues
+			} else {
+				d.logger.Debug("failed to fetch issues", "username", username, "error", err)
+			}
+		}()
+		
+		// Fetch Comments via GraphQL
+		go func() {
+			defer wg.Done()
+			if comments, err := d.fetchUserComments(ctx, username); err == nil {
+				res.comments = comments
+			} else {
+				d.logger.Debug("failed to fetch comments", "username", username, "error", err)
+			}
+		}()
+		
+		wg.Wait()
+		ch <- res
+	}()
+	
+	select {
+	case res := <-ch:
+		return &ActivityData{
+			PullRequests: res.prs,
+			Issues:       res.issues,
+			Comments:     res.comments,
+		}
+	case <-ctx.Done():
+		return &ActivityData{}
+	}
+}
+
+func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]PullRequest, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:pr&sort=created&order=desc&per_page=100", username)
+	
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	
 	if d.githubToken != "" {
 		req.Header.Set("Authorization", "token "+d.githubToken)
 	}
 	
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := d.retryableHTTPDo(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("fetching pull requests: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			d.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
 	
-	// Debug: log response status
-	d.logger.Debug("GitHub PR search response", "username", username, "status", resp.StatusCode, "url", url)
-	
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		d.logger.Debug("GitHub API error response", "username", username, "status", resp.StatusCode, "body", string(body))
-		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
 	}
 	
 	var result struct {
 		TotalCount int `json:"total_count"`
 		Items []struct {
 			Title     string    `json:"title"`
+			Body      string    `json:"body"`
 			CreatedAt time.Time `json:"created_at"`
 		} `json:"items"`
 	}
 	
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decoding response: %w", err)
 	}
 	
 	d.logger.Debug("GitHub PR search results", "username", username, "total_count", result.TotalCount, "returned_items", len(result.Items))
@@ -504,6 +688,7 @@ func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]Pu
 	for _, item := range result.Items {
 		prs = append(prs, PullRequest{
 			Title:     item.Title,
+			Body:      item.Body,
 			CreatedAt: item.CreatedAt,
 		})
 	}
@@ -511,35 +696,206 @@ func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]Pu
 	return prs, nil
 }
 
-// fetchOrganizations gets GitHub organizations for a user
-func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]Organization, error) {
-	url := fmt.Sprintf("https://api.github.com/users/%s/orgs", username)
+func (d *Detector) fetchIssues(ctx context.Context, username string) ([]Issue, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:issue&sort=created&order=desc&per_page=100", username)
 	
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	
 	if d.githubToken != "" {
 		req.Header.Set("Authorization", "token "+d.githubToken)
 	}
 	
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := d.retryableHTTPDo(ctx, req)
 	if err != nil {
+		return nil, fmt.Errorf("fetching issues: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			d.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
+	
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
+	}
+	
+	var result struct {
+		TotalCount int `json:"total_count"`
+		Items []struct {
+			Title     string    `json:"title"`
+			Body      string    `json:"body"`
+			CreatedAt time.Time `json:"created_at"`
+			HTMLURL   string    `json:"html_url"`
+		} `json:"items"`
+	}
+	
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	
+	d.logger.Debug("GitHub issue search results", "username", username, "total_count", result.TotalCount, "returned_items", len(result.Items))
+	
+	var issues []Issue
+	for _, item := range result.Items {
+		issues = append(issues, Issue{
+			Title:     item.Title,
+			Body:      item.Body,
+			CreatedAt: item.CreatedAt,
+			HTMLURL:   item.HTMLURL,
+		})
+	}
+	
+	return issues, nil
+}
+
+func (d *Detector) fetchUserComments(ctx context.Context, username string) ([]Comment, error) {
+	if d.githubToken == "" {
+		d.logger.Debug("GitHub token required for GraphQL API", "username", username)
+		return nil, fmt.Errorf("GitHub token required for GraphQL API")
+	}
+	
+	query := fmt.Sprintf(`{
+		user(login: "%s") {
+			issueComments(first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) {
+				nodes {
+					createdAt
+				}
+			}
+			commitComments(first: 100) {
+				nodes {
+					createdAt
+				}
+			}
+		}
+	}`, username)
+	
+	reqBody := map[string]string{
+		"query": query,
+	}
+	
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling GraphQL query: %w", err)
+	}
+	
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.github.com/graphql", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	
+	req.Header.Set("Authorization", "bearer "+d.githubToken)
+	req.Header.Set("Content-Type", "application/json")
+	
+	resp, err := d.retryableHTTPDo(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("fetching comments: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			d.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
+	
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GitHub GraphQL API returned status %d: %s", resp.StatusCode, string(body))
+	}
+	
+	// Parse the response
+	var result struct {
+		Data struct {
+			User struct {
+				IssueComments struct {
+					Nodes []struct {
+						CreatedAt time.Time `json:"createdAt"`
+					} `json:"nodes"`
+				} `json:"issueComments"`
+				CommitComments struct {
+					Nodes []struct {
+						CreatedAt time.Time `json:"createdAt"`
+					} `json:"nodes"`
+				} `json:"commitComments"`
+			} `json:"user"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	
+	if len(result.Errors) > 0 {
+		d.logger.Debug("GitHub GraphQL errors", "username", username, "errors", result.Errors)
+		return nil, fmt.Errorf("GraphQL errors: %v", result.Errors[0].Message)
+	}
+	
+	var comments []Comment
+	
+	// Add issue comments
+	for _, node := range result.Data.User.IssueComments.Nodes {
+		comments = append(comments, Comment{
+			CreatedAt: node.CreatedAt,
+			Type:      "issue",
+		})
+	}
+	
+	// Add commit comments
+	for _, node := range result.Data.User.CommitComments.Nodes {
+		comments = append(comments, Comment{
+			CreatedAt: node.CreatedAt,
+			Type:      "commit",
+		})
+	}
+	
+	d.logger.Debug("fetched user comments", "username", username, 
+		"issue_comments", len(result.Data.User.IssueComments.Nodes),
+		"commit_comments", len(result.Data.User.CommitComments.Nodes),
+		"total", len(comments))
+	
+	return comments, nil
+}
+
+func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]Organization, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/users/%s/orgs", username)
+	
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	
+	if d.githubToken != "" {
+		req.Header.Set("Authorization", "token "+d.githubToken)
+	}
+	
+	resp, err := d.retryableHTTPDo(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("fetching organizations: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			d.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
+	
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
+	}
 	
 	var orgs []Organization
 	if err := json.NewDecoder(resp.Body).Decode(&orgs); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decoding response: %w", err)
 	}
 	
 	return orgs, nil
 }
 
-// fetchUser gets basic GitHub user info
 func (d *Detector) fetchUser(ctx context.Context, username string) *GitHubUser {
 	url := fmt.Sprintf("https://api.github.com/users/%s", username)
 	
@@ -567,13 +923,11 @@ func (d *Detector) fetchUser(ctx context.Context, username string) *GitHubUser {
 	return &user
 }
 
-// geocodeLocation converts a location string to coordinates using Google Maps API
 func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Location, error) {
 	if d.mapsAPIKey == "" {
 		return nil, fmt.Errorf("Google Maps API key not configured")
 	}
 	
-	// Properly URL encode location
 	encodedLocation := url.QueryEscape(location)
 	url := fmt.Sprintf("https://maps.googleapis.com/maps/api/geocode/json?address=%s&key=%s", 
 		encodedLocation, d.mapsAPIKey)
@@ -610,7 +964,6 @@ func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Locat
 		return nil, err
 	}
 	
-	// Debug log the raw response for troubleshooting
 	d.logger.Debug("geocoding API raw response", "location", location, "status", resp.StatusCode, 
 		"content_type", resp.Header.Get("Content-Type"), "body_preview", string(body[:min(200, len(body))]))
 	
@@ -625,7 +978,6 @@ func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Locat
 	
 	firstResult := result.Results[0]
 	
-	// Check location precision - reject imprecise results that might lead to wrong timezones
 	locationType := firstResult.Geometry.LocationType
 	d.logger.Debug("geocoding result precision", "location", location, 
 		"location_type", locationType, "types", firstResult.Types, 
@@ -633,7 +985,6 @@ func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Locat
 	
 	// APPROXIMATE results are often geographic centers of large areas and unreliable for timezone detection
 	if locationType == "APPROXIMATE" {
-		// Check if it's a country-level or very broad result
 		hasCountryType := false
 		hasPreciseType := false
 		for _, t := range firstResult.Types {
@@ -660,13 +1011,11 @@ func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Locat
 	return coords, nil
 }
 
-// timezoneForCoordinates gets timezone for coordinates using Google Maps Timezone API  
 func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64) (string, error) {
 	if d.mapsAPIKey == "" {
 		return "", fmt.Errorf("Google Maps API key not configured")
 	}
 	
-	// Use current timestamp for timezone lookup
 	timestamp := time.Now().Unix()
 	url := fmt.Sprintf("https://maps.googleapis.com/maps/api/timezone/json?location=%.6f,%.6f&timestamp=%d&key=%s",
 		lat, lng, timestamp, d.mapsAPIKey)
@@ -699,11 +1048,9 @@ func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64)
 	return result.TimeZoneID, nil
 }
 
-// isLocationTooVague checks if a location string is too vague for reliable geocoding
 func (d *Detector) isLocationTooVague(location string) bool {
 	location = strings.ToLower(strings.TrimSpace(location))
 	
-	// Countries without specific cities are too vague
 	vagueLocations := []string{
 		"united states", "usa", "us", "america",
 		"canada", "uk", "united kingdom", "britain",
@@ -722,7 +1069,6 @@ func (d *Detector) isLocationTooVague(location string) bool {
 	return false
 }
 
-// findQuietHours finds consecutive hours with least activity
 func findQuietHours(hourCounts map[int]int) []int {
 	minSum := 999999
 	minStart := 0
@@ -748,14 +1094,11 @@ func findQuietHours(hourCounts map[int]int) []int {
 	return quietHours
 }
 
-// timezoneFromOffset converts UTC offset to timezone name with DST awareness
 func timezoneFromOffset(offsetHours int) string {
 	now := time.Now()
 	
-	// Get candidate timezones for this offset
 	candidates := getTimezoneCandidatesForOffset(float64(offsetHours))
 	
-	// Find the first candidate that currently matches the offset
 	for _, tzName := range candidates {
 		loc, err := time.LoadLocation(tzName)
 		if err != nil {
@@ -770,23 +1113,52 @@ func timezoneFromOffset(offsetHours int) string {
 		}
 	}
 	
-	// Fallback to simple mapping
+	// For US timezones, we need to be careful about DST
+	// The challenge is that during DST, the offset alone is ambiguous:
+	// UTC-4 could be Eastern (DST) or Atlantic (standard)
+	// UTC-5 could be Central (DST) or Eastern (standard)
+	// UTC-6 could be Mountain (DST) or Central (standard)
+	// UTC-7 could be Pacific (DST) or Mountain (standard)
+	
+	// We'll return the most populous/common timezone for each offset
+	// Gemini or other context can refine this further
 	switch offsetHours {
 	case -8:
-		return "America/Los_Angeles"
+		return "America/Los_Angeles" // Pacific Standard Time
 	case -7:
-		return "America/Denver"
+		return "America/Denver" // Mountain Standard Time (or Pacific DST)
 	case -6:
-		return "America/Chicago"
+		return "America/Chicago" // Central Standard Time (or Mountain DST)
 	case -5:
-		return "America/New_York"
+		return "America/New_York" // Eastern Standard Time (or Central DST) - prefer Eastern
+	case -4:
+		return "America/New_York" // Eastern Daylight Time - most populous
+	case -3:
+		return "America/Sao_Paulo"
 	case 0:
 		return "Europe/London"
 	case 1:
 		return "Europe/Paris"
 	case 2:
 		return "Europe/Berlin"
+	case 3:
+		return "Europe/Moscow"
+	case 4:
+		return "Asia/Dubai"
+	case 5:
+		return "Asia/Karachi"
+	case 6:
+		return "Asia/Dhaka"
+	case 7:
+		return "Asia/Bangkok"
+	case 8:
+		return "Asia/Shanghai"
+	case 9:
+		return "Asia/Tokyo"
+	case 10:
+		return "Australia/Sydney"
 	default:
+		// Fall back to Etc/GMT notation (note: inverted!)
 		if offsetHours < 0 {
 			return fmt.Sprintf("Etc/GMT+%d", -offsetHours)
 		}
@@ -794,39 +1166,52 @@ func timezoneFromOffset(offsetHours int) string {
 	}
 }
 
-// getTimezoneCandidatesForOffset returns candidate timezones for a UTC offset
 func getTimezoneCandidatesForOffset(offsetHours float64) []string {
 	switch offsetHours {
 	case -9:
-		return []string{"America/Anchorage", "America/Los_Angeles"} // Alaska or Pacific with unusual pattern
+		return []string{"America/Anchorage"}
 	case -8:
 		return []string{"America/Los_Angeles", "America/Vancouver", "America/Tijuana"}
 	case -7:
-		// During DST (Mar-Nov), Los Angeles is UTC-7; Phoenix is always UTC-7
-		// During standard time, Denver is UTC-7
-		return []string{"America/Los_Angeles", "America/Phoenix", "America/Denver"}
+		return []string{"America/Denver", "America/Phoenix", "America/Los_Angeles"} // Denver for MST, Phoenix for no DST, LA during DST
 	case -6:
-		// Prioritize Mountain Time (Denver) for UTC-6 during DST season
-		return []string{"America/Denver", "America/Chicago", "America/Mexico_City"}
+		return []string{"America/Chicago", "America/Denver", "America/Mexico_City"} // Chicago for CST, Denver during DST
 	case -5:
-		// Prioritize Central Time (Chicago) for UTC-5 during DST season
-		return []string{"America/Chicago", "America/New_York", "America/Bogota"}
+		return []string{"America/New_York", "America/Chicago", "America/Bogota", "America/Toronto"} // NY for EST, Chicago during DST
 	case -4:
-		return []string{"America/New_York", "America/Halifax", "America/Caracas"}
+		return []string{"America/Halifax", "America/New_York", "America/Caracas", "America/Santiago"} // Halifax for AST, NY during DST
+	case -3:
+		return []string{"America/Sao_Paulo", "America/Buenos_Aires", "America/Halifax"} // Brazil, Argentina, Halifax during DST
 	case 0:
-		return []string{"Europe/London", "Europe/Lisbon", "Africa/Casablanca"}
+		return []string{"Europe/London", "Europe/Lisbon", "Africa/Casablanca"} // Remove UTC to prefer actual locations
 	case 1:
-		return []string{"Europe/Paris", "Europe/Berlin", "Europe/Amsterdam", "Europe/Warsaw"}
+		return []string{"Europe/Paris", "Europe/Berlin", "Europe/Amsterdam", "Europe/Warsaw", "Europe/Madrid", "Europe/Rome"}
 	case 2:
-		return []string{"Europe/Berlin", "Europe/Warsaw", "Europe/Paris", "Europe/Rome"}
+		return []string{"Europe/Berlin", "Europe/Warsaw", "Europe/Paris", "Europe/Rome", "Europe/Athens", "Africa/Cairo"}
+	case 3:
+		return []string{"Europe/Moscow", "Africa/Nairobi", "Asia/Baghdad", "Europe/Istanbul"}
+	case 4:
+		return []string{"Asia/Dubai", "Europe/Moscow", "Asia/Baku", "Asia/Tbilisi"} // UAE, Russia (some parts), Azerbaijan, Georgia
+	case 5:
+		return []string{"Asia/Karachi", "Asia/Tashkent", "Asia/Yekaterinburg"}
+	case 5.5:
+		return []string{"Asia/Kolkata", "Asia/Colombo"} // India, Sri Lanka
+	case 6:
+		return []string{"Asia/Dhaka", "Asia/Almaty", "Asia/Omsk"}
+	case 7:
+		return []string{"Asia/Bangkok", "Asia/Jakarta", "Asia/Ho_Chi_Minh"}
+	case 8:
+		return []string{"Asia/Shanghai", "Asia/Singapore", "Asia/Hong_Kong", "Asia/Taipei", "Australia/Perth"}
+	case 9:
+		return []string{"Asia/Tokyo", "Asia/Seoul", "Asia/Yakutsk"}
+	case 10:
+		return []string{"Australia/Sydney", "Australia/Melbourne", "Asia/Vladivostok"}
 	default:
 		return []string{}
 	}
 }
 
-// queryUnifiedGeminiForTimezone asks Gemini to analyze all available data for timezone detection
 func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]interface{}, verbose bool) (string, string, float64, error) {
-	// Check if we have activity data to determine prompt type
 	activityTimezone := ""
 	hasActivityData := false
 	if tz, ok := contextData["activity_detected_timezone"].(string); ok && tz != "" {
@@ -836,7 +1221,6 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	
 	var prompt string
 	if hasActivityData {
-		// Activity refinement prompt
 		if verbose {
 			prompt = `You are a timezone detection expert. I have detected a timezone based on GitHub activity patterns, but I want you to validate or refine this detection using additional contextual clues.
 
@@ -850,10 +1234,12 @@ Your task is to either:
 Consider these additional clues to validate/refine:
 - Complete GitHub profile JSON (location, company, blog, bio, email, etc.)
 - GitHub organization memberships and their locations/descriptions
-- Pull request titles (may contain location/conference references)
+- Pull request titles and issue body text (may contain location/conference references, language patterns)
 - Website/blog content (may contain explicit location info, language, regional context)
 - Username patterns that might indicate nationality/region (e.g., "wojciechka" suggests Polish origin)
 - Company location vs user location (remote work is common)
+- Language patterns in PR/issue text (American vs British English spelling, local idioms)
+- Known tech company locations (e.g., Chainguard is US-based)
 
 Important guidelines:
 - TRUST the activity patterns - they are based on actual behavior
@@ -866,9 +1252,23 @@ Important guidelines:
 - When username suggests a specific nationality/region that uses the SAME timezone as detected, feel confident suggesting that location and potentially refining to the country-specific timezone
 - For example: if activity patterns suggest Europe/Berlin and username suggests Polish origin, Europe/Warsaw (Poland) is more accurate since both are UTC+1/+2
 
+SPECIAL CASES TO WATCH:
+- If location says "Canada" but activity suggests Europe, they likely moved to Europe or work European hours
+- Canada spans UTC-3.5 to UTC-8, so Europe/Berlin (UTC+1/+2) is incompatible - trust the activity
+- If someone at Google has "Canada" location but European activity, they're likely in Europe now
+- For Etc/GMT timezones, these are rarely real - consider if the person might have unusual hours in a standard timezone
+
+IMPORTANT: For Etc/GMT timezones (like Etc/GMT-4), these are generic offset-based zones. Please suggest the most likely specific city or region based on:
+- The user's name/username origin (e.g., Polish names often indicate Poland location)
+- Company locations that match this offset
+- Common tech hubs in this timezone
+- Any contextual clues from their activity
+
+Note: If timezone_candidates are provided in the context, these are the common timezones that match the detected UTC offset. Consider which is most likely based on the user's name, company, and other context.
+
 Respond with your reasoning followed by your conclusion on separate lines:
 "TIMEZONE:" followed by ONLY a valid IANA timezone identifier or "UNKNOWN"
-"LOCATION:" followed by a specific location name (city, region) or "UNKNOWN"
+"LOCATION:" followed by a specific location name (city, region) that best matches the timezone and context, or "UNKNOWN"
 
 Context data: %s`
 		} else {
@@ -884,10 +1284,12 @@ Your task is to either:
 Consider these additional clues to validate/refine:
 - Complete GitHub profile JSON (location, company, blog, bio, email, etc.)
 - GitHub organization memberships and their locations/descriptions
-- Pull request titles (may contain location/conference references)
+- Pull request titles and issue body text (may contain location/conference references, language patterns)
 - Website/blog content (may contain explicit location info, language, regional context)
 - Username patterns that might indicate nationality/region (e.g., "wojciechka" suggests Polish origin)
 - Company location vs user location (remote work is common)
+- Language patterns in PR/issue text (American vs British English spelling, local idioms)
+- Known tech company locations (e.g., Chainguard is US-based)
 
 Important guidelines:
 - TRUST the activity patterns - they are based on actual behavior
@@ -907,7 +1309,6 @@ Line 2: LOCATION: followed by a specific location name (city, region) or "UNKNOW
 Context data: %s`
 		}
 	} else {
-		// Pure contextual analysis prompt
 		if verbose {
 			prompt = `You are a timezone detection expert. Based on the complete GitHub user data and pull request history provided, determine the most likely timezone and specific location for this user.
 
@@ -941,9 +1342,17 @@ Important guidelines:
 - Only assume relocation if there's explicit evidence of recent moves or current location mentions
 - Company employment alone is NOT evidence of physical location
 
+IMPORTANT: For Etc/GMT timezones (like Etc/GMT-4), these are generic offset-based zones. Please suggest the most likely specific city or region based on:
+- The user's name/username origin (e.g., Polish names often indicate Poland location)
+- Company locations that match this offset
+- Common tech hubs in this timezone
+- Any contextual clues from their activity
+
+Note: If timezone_candidates are provided in the context, these are the common timezones that match the detected UTC offset. Consider which is most likely based on the user's name, company, and other context.
+
 Respond with your reasoning followed by your conclusion on separate lines:
 "TIMEZONE:" followed by ONLY a valid IANA timezone identifier or "UNKNOWN"
-"LOCATION:" followed by a specific location name (city, region) or "UNKNOWN"
+"LOCATION:" followed by a specific location name (city, region) that best matches the timezone and context, or "UNKNOWN"
 
 User data: %s`
 		} else {
@@ -1003,12 +1412,10 @@ User data: %s`
 			"context_size_bytes", len(contextJSON))
 	}
 	
-	// Log full prompt in verbose mode
 	if verbose {
 		d.logger.Debug("Gemini full prompt", "full_prompt", fullPrompt)
 	}
 	
-	// Call Gemini API
 	reqBody := map[string]interface{}{
 		"contents": []map[string]interface{}{
 			{
@@ -1018,10 +1425,10 @@ User data: %s`
 			},
 		},
 		"generationConfig": map[string]interface{}{
-			"temperature": 0.1, // Low temperature for consistent results
+			"temperature": 0.1,
 			"maxOutputTokens": func() int {
 				if verbose {
-					return 300 // Allow more tokens for reasoning in verbose mode
+					return 300
 				}
 				return 100
 			}(),
@@ -1074,13 +1481,10 @@ User data: %s`
 	
 	fullResponse := strings.TrimSpace(geminiResp.Candidates[0].Content.Parts[0].Text)
 	
-	// Log the full response for debugging (contains reasoning in verbose mode)
 	d.logger.Debug("Gemini full response", "full_response", fullResponse)
 	
-	// Parse response - extract timezone and location
 	var timezone, location string
 	if strings.Contains(fullResponse, "TIMEZONE:") {
-		// Extract both timezone and location from structured response
 		lines := strings.Split(fullResponse, "\n")
 		for _, line := range lines {
 			trimmedLine := strings.TrimSpace(line)
@@ -1091,7 +1495,6 @@ User data: %s`
 			}
 		}
 	} else {
-		// Legacy format - just timezone
 		timezone = fullResponse
 	}
 	
@@ -1100,32 +1503,27 @@ User data: %s`
 		d.logger.Debug("Gemini activity comparison", "original_activity_timezone", activityTimezone, "gemini_response", timezone, "gemini_location", location)
 	}
 	
-	// Log the full context sent to Gemini for debugging
 	d.logger.Debug("Gemini unified context", "context_json", string(contextJSON))
 	
 	if timezone == "UNKNOWN" || timezone == "" {
 		return "", "", 0, nil
 	}
 	
-	// Clean up location if it's "UNKNOWN" 
 	if location == "UNKNOWN" {
 		location = ""
 	}
 	
-	// Validate timezone format
 	if !strings.Contains(timezone, "/") {
 		d.logger.Debug("invalid timezone format from unified Gemini", "timezone", timezone)
 		return "", "", 0, nil
 	}
 	
-	// Test if timezone is valid
 	_, err = time.LoadLocation(timezone)
 	if err != nil {
 		d.logger.Debug("invalid timezone from unified Gemini", "timezone", timezone, "error", err)
 		return "", "", 0, nil
 	}
 	
-	// Determine confidence based on whether we had activity data
 	var confidence float64
 	if hasActivityData {
 		if timezone == activityTimezone {
@@ -1143,13 +1541,11 @@ User data: %s`
 }
 
 
-// fetchWebsiteContent fetches and extracts relevant content from a user's blog/website
 func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) string {
 	if blogURL == "" {
 		return ""
 	}
 	
-	// Clean up URL
 	if !strings.HasPrefix(blogURL, "http://") && !strings.HasPrefix(blogURL, "https://") {
 		blogURL = "https://" + blogURL
 	}
@@ -1175,17 +1571,14 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 		return ""
 	}
 	
-	// Read content (limit to 50KB to avoid excessive token usage)
 	body := make([]byte, 50*1024)
 	n, _ := io.ReadFull(resp.Body, body)
 	content := string(body[:n])
 	
-	// Basic HTML tag removal for cleaner text analysis
 	content = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(content, " ")
 	content = regexp.MustCompile(`\s+`).ReplaceAllString(content, " ")
 	content = strings.TrimSpace(content)
 	
-	// Limit content length for token efficiency (keep first 2000 chars)
 	if len(content) > 2000 {
 		content = content[:2000] + "..."
 	}
@@ -1194,12 +1587,9 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 	return content
 }
 
-// min returns the minimum of two integers
 func min(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
 }
-
-// Let Gemini handle name-based detection - no hardcoded rules needed

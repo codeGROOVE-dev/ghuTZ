@@ -92,8 +92,23 @@ type GitHubUser struct {
 // PullRequest represents a GitHub pull request
 type PullRequest struct {
 	Title     string    `json:"title"`
+	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
 	HTMLURL   string    `json:"html_url"`
+}
+
+// Issue represents a GitHub issue
+type Issue struct {
+	Title     string    `json:"title"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"created_at"`
+	HTMLURL   string    `json:"html_url"`
+}
+
+// Comment represents a GitHub comment
+type Comment struct {
+	CreatedAt time.Time `json:"created_at"`
+	Type      string    `json:"type"` // "issue" or "commit"
 }
 
 // Organization represents a GitHub organization
@@ -101,6 +116,13 @@ type Organization struct {
 	Login       string `json:"login"`
 	Description string `json:"description"`
 	Location    string `json:"location"`
+}
+
+// ActivityData holds all activity data for timezone detection
+type ActivityData struct {
+	PullRequests []PullRequest
+	Issues       []Issue
+	Comments     []Comment
 }
 
 // TimezoneCandidate represents a timezone detection result with evidence
