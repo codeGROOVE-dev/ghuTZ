@@ -48,19 +48,27 @@ func WithLogger(logger interface{}) Option {
 	}
 }
 
+func WithActivityAnalysis(enabled bool) Option {
+	return func(o *OptionHolder) {
+		o.forceActivity = enabled
+	}
+}
+
 // OptionHolder holds configuration options
 type OptionHolder struct {
-	githubToken  string
-	mapsAPIKey   string
-	geminiAPIKey string
-	geminiModel  string
-	gcpProject   string
+	githubToken   string
+	mapsAPIKey    string
+	geminiAPIKey  string
+	geminiModel   string
+	gcpProject    string
+	forceActivity bool
 }
 
 // Result represents timezone detection results
 type Result struct {
 	Username             string    `json:"username"`
 	Timezone             string    `json:"timezone"`
+	ActivityTimezone     string    `json:"activity_timezone,omitempty"` // Pure activity-based timezone
 	Location             *Location `json:"location,omitempty"`
 	LocationName         string    `json:"location_name,omitempty"`
 	GeminiSuggestedLocation string `json:"gemini_suggested_location,omitempty"`
@@ -69,6 +77,11 @@ type Result struct {
 	LocationConfidence   float64   `json:"location_confidence,omitempty"`
 	Method               string    `json:"method"`
 	DetectionTime        time.Time `json:"detection_time"`
+	QuietHoursUTC        []int     `json:"quiet_hours_utc,omitempty"` // Hours when user is typically inactive
+	ActiveHoursLocal     struct {
+		Start int `json:"start"` // Expected start hour in local time
+		End   int `json:"end"`   // Expected end hour in local time
+	} `json:"active_hours_local,omitempty"`
 }
 
 // Location represents geographic coordinates

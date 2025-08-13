@@ -27,6 +27,7 @@ var (
 	gcpProject   = flag.String("gcp-project", os.Getenv("GOOGLE_CLOUD_PROJECT"), "Google Cloud project ID")
 	verbose      = flag.Bool("verbose", false, "Enable verbose logging")
 	jsonOutput   = flag.Bool("json", false, "Output as JSON")
+	activity     = flag.Bool("activity", false, "Always show activity-based timezone analysis")
 )
 
 func main() {
@@ -52,6 +53,7 @@ func main() {
 		ghutz.WithGeminiAPIKey(*geminiAPIKey),
 		ghutz.WithGeminiModel(*geminiModel),
 		ghutz.WithGCPProject(*gcpProject),
+		ghutz.WithActivityAnalysis(*activity),
 	)
 
 	if *serve {
@@ -85,12 +87,12 @@ func main() {
 	}
 
 	fmt.Println()
-	fmt.Printf("╭─────────────────────────────────────────────────────╮\n")
-	fmt.Printf("│  GitHub User Timezone Detection                    │\n")
-	fmt.Printf("╰─────────────────────────────────────────────────────╯\n")
+	fmt.Printf("╭─────────────────────────────────────────────────────────╮\n")
+	fmt.Printf("│         GitHub User Timezone Detection                  │\n")
+	fmt.Printf("╰─────────────────────────────────────────────────────────╯\n")
 	fmt.Println()
 
-	fmt.Printf("  👤 User:       %s\n", result.Username)
+	fmt.Printf("  👤 User:          %s\n", result.Username)
 
 	tzConfidence := result.TimezoneConfidence
 	if tzConfidence == 0 {
@@ -102,25 +104,36 @@ func main() {
 		now := time.Now().In(loc)
 		localTimeStr = fmt.Sprintf(" (Local time: %s)", now.Format("3:04 PM MST"))
 	}
-	
-	fmt.Printf("  🕐 Timezone:   %s%s ", result.Timezone, localTimeStr)
+
+	fmt.Printf("  🕐 User TZ:       %s%s ", result.Timezone, localTimeStr)
 	printConfidenceBadge(tzConfidence)
 	fmt.Println()
+
+	// Show activity timezone if different or if --activity flag is set
+	if *activity || (result.ActivityTimezone != "" && result.ActivityTimezone != result.Timezone) {
+		fmt.Printf("  📊 Activity TZ:   %s (based on GitHub activity patterns)\n", result.ActivityTimezone)
+	}
+
+	// Show expected active hours if available
+	if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
+		activeHoursStr := formatActiveHours(result.Timezone, result.ActiveHoursLocal.Start, result.ActiveHoursLocal.End)
+		fmt.Printf("  ⏰ Active Hours:  %s\n", activeHoursStr)
+	}
 
 	var displayedLocation string
 	if result.GeminiSuggestedLocation != "" {
 		displayedLocation = result.GeminiSuggestedLocation
-		fmt.Printf("  📍 Location:   %s (AI-suggested)\n", displayedLocation)
+		fmt.Printf("  📍 Location:      %s (AI-suggested)\n", displayedLocation)
 	} else if result.LocationName != "" {
 		displayedLocation = result.LocationName
-		fmt.Printf("  📍 Location:   %s\n", displayedLocation)
+		fmt.Printf("  📍 Location:      %s\n", displayedLocation)
 	} else if result.Location != nil {
 		displayedLocation = getLocationNameForTimezone(result.Timezone)
-		fmt.Printf("  📍 Location:   %s (approximate)\n", displayedLocation)
+		fmt.Printf("  📍 Location:      %s (approximate)\n", displayedLocation)
 	} else {
 		displayedLocation = getIntelligentLocationGuess(result.Timezone, result.Method)
 		if displayedLocation != "" {
-			fmt.Printf("  📍 Location:   %s\n", displayedLocation)
+			fmt.Printf("  📍 Location:      %s\n", displayedLocation)
 		}
 	}
 
@@ -129,18 +142,18 @@ func main() {
 		if locConfidence == 0 {
 			locConfidence = result.Confidence * 0.8
 		}
-		fmt.Printf("  🗺  Coordinates: %.5f, %.5f ", result.Location.Latitude, result.Location.Longitude)
+		fmt.Printf("  🗺  Coordinates:   %.5f, %.5f ", result.Location.Latitude, result.Location.Longitude)
 		printConfidenceBadge(locConfidence)
 		fmt.Println()
-		fmt.Printf("  🔗 Map:        https://maps.google.com/?q=%.5f,%.5f\n",
+		fmt.Printf("  🔗 Map:           https://maps.google.com/?q=%.5f,%.5f\n",
 			result.Location.Latitude, result.Location.Longitude)
 	} else if displayedLocation != "" {
-		fmt.Printf("  🔗 Map:        https://maps.google.com/?q=%s\n",
+		fmt.Printf("  🔗 Map:           https://maps.google.com/?q=%s\n",
 			strings.ReplaceAll(displayedLocation, " ", "+"))
 	}
 
 	methodName := formatMethodName(result.Method)
-	fmt.Printf("  ⚙️  Method:     %s\n", methodName)
+	fmt.Printf("  ⚙️  Method:        %s\n", methodName)
 	fmt.Println()
 }
 
@@ -467,7 +480,7 @@ func getLocationNameForTimezone(timezone string) string {
 		}
 		return strings.Replace(timezone, "Etc/", "", 1)
 	}
-	
+
 	// Map timezones to their primary cities/regions
 	timezoneLocations := map[string]string{
 		"America/Los_Angeles":  "San Francisco Bay Area, CA", // More representative for tech workers
@@ -536,6 +549,62 @@ func getLocationNameForTimezone(timezone string) string {
 	}
 
 	return timezone
+}
+
+// formatActiveHours formats the active hours with relative times from now
+func formatActiveHours(timezone string, startHour, endHour int) string {
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		return fmt.Sprintf("%dam - %dpm", startHour, endHour)
+	}
+
+	now := time.Now().In(loc)
+	currentHour := now.Hour()
+
+	// Create times for start and end of active hours today
+	startTime := time.Date(now.Year(), now.Month(), now.Day(), startHour, 0, 0, 0, loc)
+	endTime := time.Date(now.Year(), now.Month(), now.Day(), endHour, 0, 0, 0, loc)
+
+	// Format the basic hours
+	startStr := startTime.Format("3pm")
+	if startHour < 12 {
+		startStr = startTime.Format("3am")
+	}
+	endStr := endTime.Format("3pm")
+	if endHour < 12 {
+		endStr = endTime.Format("3am")
+	}
+
+	result := fmt.Sprintf("%s - %s", startStr, endStr)
+
+	// Add relative time information
+	if currentHour < startHour {
+		// Before work hours
+		hoursUntil := startHour - currentHour
+		if hoursUntil == 1 {
+			result += " (starts in 1 hour)"
+		} else {
+			result += fmt.Sprintf(" (starts in %d hours)", hoursUntil)
+		}
+	} else if currentHour >= startHour && currentHour < endHour {
+		// During work hours
+		hoursLeft := endHour - currentHour
+		if hoursLeft == 1 {
+			result += " (1 hour left today)"
+		} else {
+			result += fmt.Sprintf(" (%d hours left today)", hoursLeft)
+		}
+	} else {
+		// After work hours
+		hoursUntilTomorrow := 24 - currentHour + startHour
+		if hoursUntilTomorrow == 1 {
+			result += " (starts again in 1 hour)"
+		} else {
+			result += fmt.Sprintf(" (starts again in %d hours)", hoursUntilTomorrow)
+		}
+	}
+
+	return result
 }
 
 // getIntelligentLocationGuess provides educated location guess based on timezone and detection method

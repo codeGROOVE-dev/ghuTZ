@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,11 +20,14 @@ import (
 )
 
 type Detector struct {
-	githubToken  string
-	mapsAPIKey   string
-	geminiAPIKey string
-	logger       *slog.Logger
-	httpClient   *http.Client
+	githubToken   string
+	mapsAPIKey    string
+	geminiAPIKey  string
+	geminiModel   string
+	gcpProject    string
+	logger        *slog.Logger
+	httpClient    *http.Client
+	forceActivity bool
 }
 
 // retryableHTTPDo performs an HTTP request with exponential backoff and jitter
@@ -91,11 +95,14 @@ func NewWithLogger(logger *slog.Logger, opts ...Option) *Detector {
 	}
 	
 	return &Detector{
-		githubToken:  optHolder.githubToken,
-		mapsAPIKey:   optHolder.mapsAPIKey,  
-		geminiAPIKey: optHolder.geminiAPIKey,
-		logger:       logger,
-		httpClient:   &http.Client{Timeout: 30 * time.Second},
+		githubToken:   optHolder.githubToken,
+		mapsAPIKey:    optHolder.mapsAPIKey,  
+		geminiAPIKey:  optHolder.geminiAPIKey,
+		geminiModel:   optHolder.geminiModel,
+		gcpProject:    optHolder.gcpProject,
+		logger:        logger,
+		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		forceActivity: optHolder.forceActivity,
 	}
 }
 
@@ -120,26 +127,53 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	
 	d.logger.Info("detecting timezone", "username", username)
 	
-	d.logger.Debug("trying profile HTML scraping", "username", username)
-	if result := d.tryProfileScraping(ctx, username); result != nil {
-		d.logger.Info("detected from profile HTML", "username", username, "timezone", result.Timezone)
-		return result, nil
+	// Always perform activity analysis if flag is set or if other methods fail
+	var activityResult *Result
+	if d.forceActivity {
+		d.logger.Debug("forcing activity pattern analysis", "username", username)
+		activityResult = d.tryActivityPatterns(ctx, username)
 	}
-	d.logger.Debug("profile HTML scraping failed", "username", username)
 	
-	d.logger.Debug("trying location field analysis", "username", username)
-	if result := d.tryLocationField(ctx, username); result != nil {
-		d.logger.Info("detected from location field", "username", username, "timezone", result.Timezone, "location", result.LocationName)
-		return result, nil
+	// Try quick detection methods first if not forcing activity
+	if !d.forceActivity {
+		d.logger.Debug("trying profile HTML scraping", "username", username)
+		if result := d.tryProfileScraping(ctx, username); result != nil {
+			d.logger.Info("detected from profile HTML", "username", username, "timezone", result.Timezone)
+			// Add activity data if we have it
+			if activityResult != nil {
+				result.ActivityTimezone = activityResult.ActivityTimezone
+				result.QuietHoursUTC = activityResult.QuietHoursUTC
+				result.ActiveHoursLocal = activityResult.ActiveHoursLocal
+			}
+			return result, nil
+		}
+		d.logger.Debug("profile HTML scraping failed", "username", username)
+		
+		d.logger.Debug("trying location field analysis", "username", username)
+		if result := d.tryLocationField(ctx, username); result != nil {
+			d.logger.Info("detected from location field", "username", username, "timezone", result.Timezone, "location", result.LocationName)
+			// Add activity data if we have it
+			if activityResult != nil {
+				result.ActivityTimezone = activityResult.ActivityTimezone
+				result.QuietHoursUTC = activityResult.QuietHoursUTC
+				result.ActiveHoursLocal = activityResult.ActiveHoursLocal
+			}
+			return result, nil
+		}
+		d.logger.Debug("location field analysis failed", "username", username)
+		
+		// Now try activity patterns if we haven't already
+		d.logger.Debug("trying activity pattern analysis", "username", username)
+		activityResult = d.tryActivityPatterns(ctx, username)
 	}
-	d.logger.Debug("location field analysis failed", "username", username)
-	
-	d.logger.Debug("trying activity pattern analysis", "username", username)
-	activityResult := d.tryActivityPatterns(ctx, username)
 	
 	d.logger.Debug("trying Gemini analysis with contextual data", "username", username, "has_activity_data", activityResult != nil)
 	if result := d.tryUnifiedGeminiAnalysis(ctx, username, activityResult); result != nil {
 		if activityResult != nil {
+			// Preserve activity data in the final result
+			result.ActivityTimezone = activityResult.ActivityTimezone
+			result.QuietHoursUTC = activityResult.QuietHoursUTC
+			result.ActiveHoursLocal = activityResult.ActiveHoursLocal
 			d.logger.Info("timezone detected with Gemini + activity", "username", username, 
 				"activity_timezone", activityResult.Timezone, "final_timezone", result.Timezone)
 		} else {
@@ -572,9 +606,22 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 		}
 	}
 	
+	// Calculate typical active hours in local time (excluding outliers)
+	// We need to convert from UTC to local time
+	activeStart, activeEnd := calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
+	
 	return &Result{
-		Username:   username,
-		Timezone:   timezone,
+		Username:         username,
+		Timezone:         timezone,
+		ActivityTimezone: timezone, // Pure activity-based result
+		QuietHoursUTC:    quietHours,
+		ActiveHoursLocal: struct {
+			Start int `json:"start"`
+			End   int `json:"end"`
+		}{
+			Start: activeStart,
+			End:   activeEnd,
+		},
 		Confidence: 0.8,
 		Method:     "activity_patterns",
 	}
@@ -1067,6 +1114,103 @@ func (d *Detector) isLocationTooVague(location string) bool {
 	}
 	
 	return false
+}
+
+// calculateTypicalActiveHours determines typical work hours based on activity patterns
+// It uses percentiles to exclude outliers (e.g., occasional early starts or late nights)
+func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOffset int) (start, end int) {
+	// Create a map for easy lookup of quiet hours
+	quietMap := make(map[int]bool)
+	for _, h := range quietHours {
+		quietMap[h] = true
+	}
+	
+	// Find hours with meaningful activity (>10% of max activity)
+	maxActivity := 0
+	for _, count := range hourCounts {
+		if count > maxActivity {
+			maxActivity = count
+		}
+	}
+	threshold := maxActivity / 10
+	
+	// Collect active hours (not in quiet period and above threshold)
+	var activeHours []int
+	for hour := 0; hour < 24; hour++ {
+		if !quietMap[hour] && hourCounts[hour] > threshold {
+			activeHours = append(activeHours, hour)
+		}
+	}
+	
+	if len(activeHours) == 0 {
+		// Default to 9am-5pm if no clear pattern
+		return 9, 17
+	}
+	
+	// Find the continuous block of active hours
+	// Handle wrap-around (e.g., activity from 22-02)
+	sort.Ints(activeHours)
+	
+	// Find the largest gap to determine where the active period starts/ends
+	maxGap := 0
+	gapStart := activeHours[len(activeHours)-1]
+	for i := 0; i < len(activeHours); i++ {
+		gap := activeHours[i] - gapStart
+		if gap < 0 {
+			gap += 24
+		}
+		if gap > maxGap {
+			maxGap = gap
+			start = activeHours[i]
+		}
+		gapStart = activeHours[i]
+	}
+	
+	// Find the end of the active period
+	end = start
+	for i := 0; i < len(activeHours); i++ {
+		hour := activeHours[i]
+		// Check if this hour is part of the continuous block
+		diff := hour - start
+		if diff < 0 {
+			diff += 24
+		}
+		if diff < 16 { // Maximum 16-hour workday
+			end = hour
+		}
+	}
+	
+	// Apply smart filtering: use 10th and 90th percentiles to exclude outliers
+	// This prevents occasional early/late activity from skewing the results
+	activityInRange := make([]int, 0)
+	for h := start; ; h = (h + 1) % 24 {
+		if hourCounts[h] > 0 {
+			// Add this hour's count multiple times to weight the calculation
+			for i := 0; i < hourCounts[h]; i++ {
+				activityInRange = append(activityInRange, h)
+			}
+		}
+		if h == end {
+			break
+		}
+	}
+	
+	if len(activityInRange) > 10 {
+		sort.Ints(activityInRange)
+		// Use 10th percentile for start (ignore occasional early starts)
+		percentile10 := len(activityInRange) / 10
+		// Use 90th percentile for end (ignore occasional late nights)
+		percentile90 := len(activityInRange) * 9 / 10
+		
+		start = activityInRange[percentile10]
+		end = activityInRange[percentile90]
+	}
+	
+	// Convert from UTC to local time
+	start = (start + utcOffset + 24) % 24
+	end = (end + utcOffset + 24) % 24
+	
+	return start, end
 }
 
 func findQuietHours(hourCounts map[int]int) []int {
