@@ -50,7 +50,7 @@ func main() {
 	}
 
 	// Create detector with proper logger
-	detector := ghutz.NewSimpleWithLogger(logger,
+	detector := ghutz.NewWithLogger(logger,
 		ghutz.WithGitHubToken(token),
 		ghutz.WithMapsAPIKey(*mapsAPIKey),
 		ghutz.WithGeminiAPIKey(*geminiAPIKey),
@@ -151,7 +151,7 @@ func main() {
 	fmt.Println()
 }
 
-func runServer(detector *ghutz.SimpleDetector) {
+func runServer(detector *ghutz.Detector) {
 	http.HandleFunc("/", handleHome)
 	http.HandleFunc("/detect", handleDetect(detector))
 	http.HandleFunc("/api/detect", handleAPIDetect(detector))
@@ -336,7 +336,7 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprint(w, tmpl)
 }
 
-func handleDetect(detector *ghutz.SimpleDetector) http.HandlerFunc {
+func handleDetect(detector *ghutz.Detector) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -375,7 +375,7 @@ func handleDetect(detector *ghutz.SimpleDetector) http.HandlerFunc {
 	}
 }
 
-func handleAPIDetect(detector *ghutz.SimpleDetector) http.HandlerFunc {
+func handleAPIDetect(detector *ghutz.Detector) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

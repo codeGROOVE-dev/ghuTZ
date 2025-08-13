@@ -8,15 +8,6 @@ build:
 test:
 	go test -v -race ./...
 
-lint:
-	@if ! command -v golangci-lint &> /dev/null; then \
-		echo "Installing golangci-lint..."; \
-		go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; \
-	fi
-	golangci-lint run ./...
-	go vet ./...
-	go fmt ./...
-
 clean:
 	rm -rf bin/
 

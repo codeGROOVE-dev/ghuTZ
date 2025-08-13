@@ -3,54 +3,53 @@ package ghutz
 import "time"
 
 // Option configures a Detector
-type Option func(*Detector)
+type Option func(*OptionHolder)
 
-// Options for DetectorV2 - reuse existing Option type for simplicity
+// Options for Detector
 func WithGitHubToken(token string) Option {
-	return func(d *Detector) {
-		// This will be applied to a temporary v1 detector and copied to v2
-		d.githubToken = token
+	return func(o *OptionHolder) {
+		o.githubToken = token
 	}
 }
 
 func WithMapsAPIKey(key string) Option {
-	return func(d *Detector) {
-		d.mapsAPIKey = key
+	return func(o *OptionHolder) {
+		o.mapsAPIKey = key
 	}
 }
 
 func WithGeminiAPIKey(key string) Option {
-	return func(d *Detector) {
-		d.geminiAPIKey = key
+	return func(o *OptionHolder) {
+		o.geminiAPIKey = key
 	}
 }
 
 func WithGeminiModel(model string) Option {
-	return func(d *Detector) {
-		d.geminiModel = model
+	return func(o *OptionHolder) {
+		o.geminiModel = model
 	}
 }
 
 func WithGCPProject(projectID string) Option {
-	return func(d *Detector) {
-		d.gcpProject = projectID
+	return func(o *OptionHolder) {
+		o.gcpProject = projectID
 	}
 }
 
 func WithHTTPClient(client interface{}) Option {
-	return func(d *Detector) {
-		// Not implemented for v2, keeping for compatibility
+	return func(o *OptionHolder) {
+		// Not implemented, keeping for compatibility
 	}
 }
 
 func WithLogger(logger interface{}) Option {
-	return func(d *Detector) {
-		// Logger is handled differently in v2
+	return func(o *OptionHolder) {
+		// Logger is handled differently
 	}
 }
 
-// Temporary v1 detector for option processing
-type Detector struct {
+// OptionHolder holds configuration options
+type OptionHolder struct {
 	githubToken  string
 	mapsAPIKey   string
 	geminiAPIKey string

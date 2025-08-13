@@ -14,37 +14,37 @@ import (
 	"time"
 )
 
-// SimpleDetector is Rob Pike's simplified version - no unnecessary abstractions
-type SimpleDetector struct {
+// Detector is Rob Pike's simplified version - no unnecessary abstractions
+type Detector struct {
 	githubToken  string
 	mapsAPIKey   string
 	geminiAPIKey string
 	logger       *slog.Logger
 }
 
-// NewSimple creates a simple, reliable detector
-func NewSimple(opts ...Option) *SimpleDetector {
-	return NewSimpleWithLogger(slog.Default(), opts...)
+// New creates a simple, reliable detector
+func New(opts ...Option) *Detector {
+	return NewWithLogger(slog.Default(), opts...)
 }
 
-// NewSimpleWithLogger creates a simple detector with a specific logger
-func NewSimpleWithLogger(logger *slog.Logger, opts ...Option) *SimpleDetector {
-	// Apply options using temporary v1 detector
-	v1 := &Detector{}
+// NewWithLogger creates a detector with a specific logger
+func NewWithLogger(logger *slog.Logger, opts ...Option) *Detector {
+	// Apply options using temporary option holder
+	optHolder := &OptionHolder{}
 	for _, opt := range opts {
-		opt(v1)
+		opt(optHolder)
 	}
 	
-	return &SimpleDetector{
-		githubToken:  v1.githubToken,
-		mapsAPIKey:   v1.mapsAPIKey,  
-		geminiAPIKey: v1.geminiAPIKey,
+	return &Detector{
+		githubToken:  optHolder.githubToken,
+		mapsAPIKey:   optHolder.mapsAPIKey,  
+		geminiAPIKey: optHolder.geminiAPIKey,
 		logger:       logger,
 	}
 }
 
 // Detect finds timezone using the simplest reliable methods
-func (d *SimpleDetector) Detect(ctx context.Context, username string) (*Result, error) {
+func (d *Detector) Detect(ctx context.Context, username string) (*Result, error) {
 	if username == "" {
 		return nil, fmt.Errorf("username cannot be empty")
 	}
@@ -94,7 +94,7 @@ func (d *SimpleDetector) Detect(ctx context.Context, username string) (*Result, 
 }
 
 // tryProfileScraping attempts to extract timezone from GitHub profile HTML
-func (d *SimpleDetector) tryProfileScraping(ctx context.Context, username string) *Result {
+func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Result {
 	url := fmt.Sprintf("https://github.com/%s", username)
 	
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -155,7 +155,7 @@ func extractTimezoneFromHTML(html string) string {
 }
 
 // tryLocationField attempts to detect timezone from GitHub profile location field using APIs
-func (d *SimpleDetector) tryLocationField(ctx context.Context, username string) *Result {
+func (d *Detector) tryLocationField(ctx context.Context, username string) *Result {
 	user := d.fetchUser(ctx, username)
 	if user == nil || user.Location == "" {
 		d.logger.Debug("no location field found", "username", username)
@@ -202,7 +202,7 @@ func (d *SimpleDetector) tryLocationField(ctx context.Context, username string) 
 }
 
 // tryGeminiAnalysis uses Gemini to analyze contextual clues for timezone detection
-func (d *SimpleDetector) tryGeminiAnalysis(ctx context.Context, username string) *Result {
+func (d *Detector) tryGeminiAnalysis(ctx context.Context, username string) *Result {
 	if d.geminiAPIKey == "" {
 		d.logger.Debug("Gemini API key not configured", "username", username)
 		return nil
@@ -280,7 +280,7 @@ func (d *SimpleDetector) tryGeminiAnalysis(ctx context.Context, username string)
 }
 
 // tryUnifiedGeminiAnalysis uses Gemini with all available data (activity + context) in a single call
-func (d *SimpleDetector) tryUnifiedGeminiAnalysis(ctx context.Context, username string, activityResult *Result) *Result {
+func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string, activityResult *Result) *Result {
 	if d.geminiAPIKey == "" {
 		d.logger.Debug("Gemini API key not configured", "username", username)
 		return nil
@@ -360,7 +360,7 @@ func (d *SimpleDetector) tryUnifiedGeminiAnalysis(ctx context.Context, username 
 }
 
 // tryActivityPatterns analyzes GitHub activity to infer timezone
-func (d *SimpleDetector) tryActivityPatterns(ctx context.Context, username string) *Result {
+func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Result {
 	prs, err := d.fetchPullRequests(ctx, username)
 	if err != nil {
 		d.logger.Debug("failed to fetch pull requests", "username", username, "error", err)
@@ -458,7 +458,7 @@ func (d *SimpleDetector) tryActivityPatterns(ctx context.Context, username strin
 }
 
 // fetchPullRequests gets recent pull requests for activity analysis
-func (d *SimpleDetector) fetchPullRequests(ctx context.Context, username string) ([]PullRequest, error) {
+func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]PullRequest, error) {
 	url := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:pr&sort=created&order=desc&per_page=100", username)
 	
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -512,7 +512,7 @@ func (d *SimpleDetector) fetchPullRequests(ctx context.Context, username string)
 }
 
 // fetchOrganizations gets GitHub organizations for a user
-func (d *SimpleDetector) fetchOrganizations(ctx context.Context, username string) ([]Organization, error) {
+func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]Organization, error) {
 	url := fmt.Sprintf("https://api.github.com/users/%s/orgs", username)
 	
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -540,7 +540,7 @@ func (d *SimpleDetector) fetchOrganizations(ctx context.Context, username string
 }
 
 // fetchUser gets basic GitHub user info
-func (d *SimpleDetector) fetchUser(ctx context.Context, username string) *GitHubUser {
+func (d *Detector) fetchUser(ctx context.Context, username string) *GitHubUser {
 	url := fmt.Sprintf("https://api.github.com/users/%s", username)
 	
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -568,7 +568,7 @@ func (d *SimpleDetector) fetchUser(ctx context.Context, username string) *GitHub
 }
 
 // geocodeLocation converts a location string to coordinates using Google Maps API
-func (d *SimpleDetector) geocodeLocation(ctx context.Context, location string) (*Location, error) {
+func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Location, error) {
 	if d.mapsAPIKey == "" {
 		return nil, fmt.Errorf("Google Maps API key not configured")
 	}
@@ -661,7 +661,7 @@ func (d *SimpleDetector) geocodeLocation(ctx context.Context, location string) (
 }
 
 // timezoneForCoordinates gets timezone for coordinates using Google Maps Timezone API  
-func (d *SimpleDetector) timezoneForCoordinates(ctx context.Context, lat, lng float64) (string, error) {
+func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64) (string, error) {
 	if d.mapsAPIKey == "" {
 		return "", fmt.Errorf("Google Maps API key not configured")
 	}
@@ -700,7 +700,7 @@ func (d *SimpleDetector) timezoneForCoordinates(ctx context.Context, lat, lng fl
 }
 
 // isLocationTooVague checks if a location string is too vague for reliable geocoding
-func (d *SimpleDetector) isLocationTooVague(location string) bool {
+func (d *Detector) isLocationTooVague(location string) bool {
 	location = strings.ToLower(strings.TrimSpace(location))
 	
 	// Countries without specific cities are too vague
@@ -825,7 +825,7 @@ func getTimezoneCandidatesForOffset(offsetHours float64) []string {
 }
 
 // queryUnifiedGeminiForTimezone asks Gemini to analyze all available data for timezone detection
-func (d *SimpleDetector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]interface{}, verbose bool) (string, string, float64, error) {
+func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]interface{}, verbose bool) (string, string, float64, error) {
 	// Check if we have activity data to determine prompt type
 	activityTimezone := ""
 	hasActivityData := false
@@ -1144,7 +1144,7 @@ User data: %s`
 
 
 // fetchWebsiteContent fetches and extracts relevant content from a user's blog/website
-func (d *SimpleDetector) fetchWebsiteContent(ctx context.Context, blogURL string) string {
+func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) string {
 	if blogURL == "" {
 		return ""
 	}
