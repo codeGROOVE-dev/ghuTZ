@@ -28,7 +28,6 @@ var (
 	gcpProject   = flag.String("gcp-project", os.Getenv("GOOGLE_CLOUD_PROJECT"), "Google Cloud project ID")
 	verbose      = flag.Bool("verbose", false, "Enable verbose logging")
 	jsonOutput   = flag.Bool("json", false, "Output as JSON")
-	activity     = flag.Bool("activity-only", false, "Force activity-only timezone detection (skip geocoding/Gemini)")
 )
 
 func main() {
@@ -54,7 +53,6 @@ func main() {
 		ghutz.WithGeminiAPIKey(*geminiAPIKey),
 		ghutz.WithGeminiModel(*geminiModel),
 		ghutz.WithGCPProject(*gcpProject),
-		ghutz.WithActivityAnalysis(*activity),
 	)
 
 	if *serve {
@@ -127,8 +125,8 @@ func main() {
 	printConfidenceBadge(tzConfidence)
 	fmt.Println()
 
-	// Show activity timezone if different or if --activity flag is set
-	if *activity || (result.ActivityTimezone != "" && result.ActivityTimezone != result.Timezone) {
+	// Always show activity timezone if available
+	if result.ActivityTimezone != "" {
 		fmt.Printf("  📊 Activity TZ:   %s (based on GitHub activity patterns)\n", result.ActivityTimezone)
 	}
 
@@ -136,6 +134,13 @@ func main() {
 	if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
 		activeHoursStr := formatActiveHours(result.Timezone, result.ActiveHoursLocal.Start, result.ActiveHoursLocal.End)
 		fmt.Printf("  ⏰ Active Hours:  %s\n", activeHoursStr)
+	}
+	
+	// Show lunch hours (always present now with confidence)
+	if result.LunchHoursLocal.Confidence > 0 {
+		lunchStr := formatLunchHours(result.Timezone, result.LunchHoursLocal.Start, result.LunchHoursLocal.End)
+		confidenceStr := fmt.Sprintf("%.0f%%", result.LunchHoursLocal.Confidence*100)
+		fmt.Printf("  🍽️  Lunch Break:   %s (%s confidence)\n", lunchStr, confidenceStr)
 	}
 
 	var displayedLocation string
@@ -570,7 +575,54 @@ func getLocationNameForTimezone(timezone string) string {
 }
 
 // formatActiveHours formats the active hours with relative times from now
-func formatActiveHours(timezone string, startHour, endHour int) string {
+func formatLunchHours(timezone string, startHour, endHour float64) string {
+	var loc *time.Location
+	var err error
+	var offsetStr string
+	
+	// Handle UTC offset format
+	if strings.HasPrefix(timezone, "UTC") {
+		offsetStr = timezone
+		utcOffsetStr := strings.TrimPrefix(timezone, "UTC")
+		if offset, parseErr := strconv.Atoi(utcOffsetStr); parseErr == nil {
+			loc = time.FixedZone(timezone, offset*3600)
+		} else {
+			return fmt.Sprintf("%.1fam - %.1fpm", startHour, endHour)
+		}
+	} else {
+		loc, err = time.LoadLocation(timezone)
+		if err != nil {
+			return fmt.Sprintf("%.1fam - %.1fpm", startHour, endHour)
+		}
+		// Get the UTC offset for display
+		_, offset := time.Now().In(loc).Zone()
+		offsetHours := offset / 3600
+		if offsetHours >= 0 {
+			offsetStr = fmt.Sprintf("UTC+%d", offsetHours)
+		} else {
+			offsetStr = fmt.Sprintf("UTC%d", offsetHours)
+		}
+	}
+
+	now := time.Now().In(loc)
+	
+	// Create times for lunch hours (handle 30-minute increments)
+	startTimeHour := int(startHour)
+	startTimeMinute := int((startHour - float64(startTimeHour)) * 60)
+	endTimeHour := int(endHour)
+	endTimeMinute := int((endHour - float64(endTimeHour)) * 60)
+	
+	startTime := time.Date(now.Year(), now.Month(), now.Day(), startTimeHour, startTimeMinute, 0, 0, loc)
+	endTime := time.Date(now.Year(), now.Month(), now.Day(), endTimeHour, endTimeMinute, 0, 0, loc)
+	
+	// Format times
+	startStr := startTime.Format("3:04pm")
+	endStr := endTime.Format("3:04pm")
+	
+	return fmt.Sprintf("%s - %s %s", startStr, endStr, offsetStr)
+}
+
+func formatActiveHours(timezone string, startHour, endHour float64) string {
 	var loc *time.Location
 	var err error
 	var offsetStr string
@@ -582,12 +634,12 @@ func formatActiveHours(timezone string, startHour, endHour int) string {
 		if offset, parseErr := strconv.Atoi(utcOffsetStr); parseErr == nil {
 			loc = time.FixedZone(timezone, offset*3600)
 		} else {
-			return fmt.Sprintf("%dam - %dpm %s", startHour, endHour, timezone)
+			return fmt.Sprintf("%.1fam - %.1fpm %s", startHour, endHour, timezone)
 		}
 	} else {
 		loc, err = time.LoadLocation(timezone)
 		if err != nil {
-			return fmt.Sprintf("%dam - %dpm", startHour, endHour)
+			return fmt.Sprintf("%.1fam - %.1fpm", startHour, endHour)
 		}
 		// Get the UTC offset for display
 		_, offset := time.Now().In(loc).Zone()
@@ -602,24 +654,32 @@ func formatActiveHours(timezone string, startHour, endHour int) string {
 	now := time.Now().In(loc)
 	currentHour := now.Hour()
 	currentMinute := now.Minute()
+	
+	// Current time as float64 for calculations
+	currentTimeFloat := float64(currentHour) + float64(currentMinute)/60.0
 
-	// Create times for start and end of active hours today
-	startTime := time.Date(now.Year(), now.Month(), now.Day(), startHour, 0, 0, 0, loc)
-	endTime := time.Date(now.Year(), now.Month(), now.Day(), endHour, 0, 0, 0, loc)
+	// Create times for start and end of active hours today (handle 30-minute increments)
+	startTimeHour := int(startHour)
+	startTimeMinute := int((startHour - float64(startTimeHour)) * 60)
+	endTimeHour := int(endHour)
+	endTimeMinute := int((endHour - float64(endTimeHour)) * 60)
+	
+	startTime := time.Date(now.Year(), now.Month(), now.Day(), startTimeHour, startTimeMinute, 0, 0, loc)
+	endTime := time.Date(now.Year(), now.Month(), now.Day(), endTimeHour, endTimeMinute, 0, 0, loc)
 
 	// Format the basic hours
-	startStr := startTime.Format("3pm")
-	if startHour < 12 {
-		startStr = startTime.Format("3am")
+	startStr := startTime.Format("3:04pm")
+	if startTimeHour < 12 {
+		startStr = startTime.Format("3:04am")
 	}
-	endStr := endTime.Format("3pm")
-	if endHour < 12 {
-		endStr = endTime.Format("3am")
+	endStr := endTime.Format("3:04pm")
+	if endTimeHour < 12 {
+		endStr = endTime.Format("3:04am")
 	}
 
 	// Calculate hours and minutes until/since start
-	startDiff := float64(startHour - currentHour) - float64(currentMinute)/60.0
-	endDiff := float64(endHour - currentHour) - float64(currentMinute)/60.0
+	startDiff := startHour - currentTimeFloat
+	endDiff := endHour - currentTimeFloat
 	
 	startRelative := ""
 	if startDiff > 0 {
@@ -671,7 +731,7 @@ func formatActiveHours(timezone string, startHour, endHour int) string {
 	result := fmt.Sprintf("%s (%s) - %s (%s) %s", startStr, startRelative, endStr, endRelative, offsetStr)
 
 	// If currently in work hours, add that info
-	if currentHour >= startHour && currentHour < endHour {
+	if currentTimeFloat >= startHour && currentTimeFloat < endHour {
 		hoursLeft := int(endDiff)
 		if hoursLeft == 1 {
 			result += " [active now, 1 hour left]"

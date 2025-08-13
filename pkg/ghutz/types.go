@@ -79,9 +79,14 @@ type Result struct {
 	DetectionTime        time.Time `json:"detection_time"`
 	QuietHoursUTC        []int     `json:"quiet_hours_utc,omitempty"` // Hours when user is typically inactive
 	ActiveHoursLocal     struct {
-		Start int `json:"start"` // Expected start hour in local time
-		End   int `json:"end"`   // Expected end hour in local time
+		Start float64 `json:"start"` // Expected start time in local time (supports 30-min increments)
+		End   float64 `json:"end"`   // Expected end time in local time (supports 30-min increments)
 	} `json:"active_hours_local,omitempty"`
+	LunchHoursLocal      struct {
+		Start      float64 `json:"start"`      // Detected lunch break start time (supports 30-min increments)
+		End        float64 `json:"end"`        // Detected lunch break end time (supports 30-min increments)
+		Confidence float64 `json:"confidence"` // Confidence level of lunch detection (0.0-1.0)
+	} `json:"lunch_hours_local,omitempty"`
 }
 
 // Location represents geographic coordinates
