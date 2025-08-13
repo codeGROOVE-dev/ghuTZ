@@ -3,6 +3,7 @@ package ghutz
 import (
 	"context"
 	"log/slog"
+	"math"
 	"os"
 	"testing"
 	"time"
@@ -23,28 +24,28 @@ func TestEasternTimeDetection(t *testing.T) {
 			name:           "Miami user (Eastern Time, DST)",
 			quietHours:     []int{4, 5, 6, 7, 8, 9}, // Quiet 12am-5am EDT = 4-9 UTC
 			expectedOffset: -4,
-			expectedTZ:     "America/New_York",
+			expectedTZ:     "UTC-4",
 			description:    "User in Miami should be detected as Eastern Time during DST",
 		},
 		{
 			name:           "Toronto user (Eastern Time, DST)",
 			quietHours:     []int{4, 5, 6, 7, 8, 9}, // Quiet 12am-5am EDT = 4-9 UTC
 			expectedOffset: -4,
-			expectedTZ:     "America/New_York",
+			expectedTZ:     "UTC-4",
 			description:    "User in Toronto should be detected as Eastern Time during DST",
 		},
 		{
 			name:           "Chicago user (Central Time, DST)",
 			quietHours:     []int{5, 6, 7, 8, 9, 10}, // Quiet 12am-5am CDT = 5-10 UTC
 			expectedOffset: -5,
-			expectedTZ:     "America/Chicago", // UTC-5 during DST maps to Chicago
+			expectedTZ:     "UTC-5", // Central Time during DST
 			description:    "User in Chicago has different quiet hours pattern",
 		},
 		{
 			name:           "Ambiguous Eastern/Central pattern",
 			quietHours:     []int{4, 5, 6, 7, 8, 9, 10}, // Could be either
 			expectedOffset: -4, // Should lean toward Eastern (more populous)
-			expectedTZ:     "America/New_York",
+			expectedTZ:     "UTC-4",
 			description:    "Ambiguous patterns should prefer Eastern Time",
 		},
 	}
@@ -155,7 +156,7 @@ func TestActivityPatternAnalysis(t *testing.T) {
 		{
 			username:     "andrewsykim", 
 			expectedCity: "Toronto",
-			expectedTZ:   []string{"America/Toronto", "America/New_York"},
+			expectedTZ:   []string{"UTC-4"}, // Eastern Time during DST
 		},
 	}
 	
@@ -211,7 +212,7 @@ func TestWorkScheduleCorrection(t *testing.T) {
 			lunchStart:       13.0, // 1pm lunch (late)
 			lunchEnd:         14.0, // 2pm
 			expectedOffset:   -7,   // Corrected to UTC-7 (Pacific)
-			expectedTZ:       "America/Los_Angeles",
+			expectedTZ:       "UTC-7", // Pacific Time
 			correctionReason: "work_start",
 			description:      "Late work start (10am) and late lunch (1pm) suggests timezone is 1 hour off",
 		},
@@ -224,7 +225,7 @@ func TestWorkScheduleCorrection(t *testing.T) {
 			lunchStart:       12.0, // 12pm lunch (normal)
 			lunchEnd:         13.0, // 1pm
 			expectedOffset:   -5,   // No correction needed
-			expectedTZ:       "America/Chicago",
+			expectedTZ:       "UTC-5", // Central Time
 			correctionReason: "",
 			description:      "Normal work schedule should not trigger correction",
 		},
@@ -237,7 +238,7 @@ func TestWorkScheduleCorrection(t *testing.T) {
 			lunchStart:       11.0, // 11am lunch (too early)
 			lunchEnd:         12.0, // 12pm
 			expectedOffset:   -6,   // Corrected to UTC-6 (Mountain)
-			expectedTZ:       "America/Denver",
+			expectedTZ:       "UTC-6", // Mountain Time
 			correctionReason: "work_start",
 			description:      "Early work start (7am) and early lunch (11am) suggests timezone is 1 hour off eastward",
 		},
@@ -330,7 +331,7 @@ func TestWorkScheduleCorrection(t *testing.T) {
 					lunchCorrection := int(expectedLunchMid - actualLunchMid)
 					
 					// Use lunch correction if we don't have work start correction, or lunch is larger
-					if offsetCorrection == 0 || (lunchCorrection != 0 && abs(lunchCorrection) > abs(offsetCorrection)) {
+					if offsetCorrection == 0 || (lunchCorrection != 0 && int(math.Abs(float64(lunchCorrection))) > int(math.Abs(float64(offsetCorrection)))) {
 						offsetCorrection = lunchCorrection
 						correctionReason = "lunch_timing"
 					}
@@ -380,25 +381,25 @@ func TestQuietHoursToTimezone(t *testing.T) {
 			name:       "Eastern Time pattern",
 			quietStart: 4,
 			quietEnd:   9,
-			expectedTZ: []string{"America/New_York"},
+			expectedTZ: []string{"UTC-4"},
 		},
 		{
 			name:       "Central Time pattern",
 			quietStart: 5,
 			quietEnd:   10,
-			expectedTZ: []string{"America/Chicago", "America/New_York"}, // Could be either during DST
+			expectedTZ: []string{"UTC-5", "UTC-4"}, // Could be either during DST
 		},
 		{
 			name:       "Mountain Time pattern",
 			quietStart: 6,
 			quietEnd:   11,
-			expectedTZ: []string{"America/Denver", "America/Chicago"},
+			expectedTZ: []string{"UTC-6", "UTC-5"},
 		},
 		{
 			name:       "Pacific Time pattern",
 			quietStart: 7,
 			quietEnd:   12,
-			expectedTZ: []string{"America/Los_Angeles", "America/Denver", "America/Phoenix"}, // Phoenix doesn't observe DST
+			expectedTZ: []string{"UTC-7", "UTC-6"}, // MST/PDT
 		},
 	}
 	

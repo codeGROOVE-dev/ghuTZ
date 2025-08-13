@@ -122,32 +122,27 @@ func TestTimezoneFromOffset(t *testing.T) {
 	// - Chicago is UTC-5 instead of UTC-6
 	// - New York is UTC-4 instead of UTC-5
 	
-	// We'll test for the actual behavior: the function should return
-	// a timezone that currently has the requested offset
+	// Test that the function returns generic UTC offsets
+	// since we can't determine the specific location without more context
 	tests := []struct {
 		offset   int
-		possible []string // Multiple valid answers depending on DST
+		expected string
 	}{
-		{-8, []string{"America/Los_Angeles", "America/Vancouver"}}, // PST or places currently at -8
-		{-7, []string{"America/Denver", "America/Phoenix", "America/Los_Angeles"}}, // MST or PDT
-		{-6, []string{"America/Chicago", "America/Denver"}}, // CST or MDT
-		{-5, []string{"America/New_York", "America/Chicago"}}, // EST or CDT
-		{0, []string{"Europe/London", "Europe/Lisbon"}},
-		{1, []string{"Europe/Paris", "Europe/Berlin", "Europe/London"}}, // CET or BST
-		{2, []string{"Europe/Berlin", "Europe/Paris"}}, // EET or CEST
+		{-8, "UTC-8"},
+		{-7, "UTC-7"},
+		{-6, "UTC-6"},
+		{-5, "UTC-5"},
+		{-4, "UTC-4"},
+		{0, "UTC+0"},
+		{1, "UTC+1"},
+		{2, "UTC+2"},
+		{8, "UTC+8"},
 	}
 	
 	for _, tt := range tests {
 		result := timezoneFromOffset(tt.offset)
-		found := false
-		for _, expected := range tt.possible {
-			if result == expected {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("timezoneFromOffset(%d) = %v, want one of %v", tt.offset, result, tt.possible)
+		if result != tt.expected {
+			t.Errorf("timezoneFromOffset(%d) = %v, want %v", tt.offset, result, tt.expected)
 		}
 	}
 }

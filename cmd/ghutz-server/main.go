@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ghutz/ghutz/pkg/ghutz"
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/ghutz"
 )
 
 //go:embed templates/home.html
@@ -108,7 +108,7 @@ func (rl *rateLimiter) cleanupOldEntries(cutoff time.Time) {
 	}
 }
 
-var apiLimiter = newRateLimiter(10, time.Minute) // 10 requests per minute per IP
+var apiLimiter = newRateLimiter(5, time.Minute) // 5 requests per minute per IP - defense against abuse
 
 // SECURITY: Username validation regex - GitHub usernames can only contain alphanumeric characters and hyphens
 var validUsernameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]{0,38}$`)
@@ -140,12 +140,13 @@ func securityHeadersMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Content Security Policy - prevents XSS attacks
 		w.Header().Set("Content-Security-Policy", 
 			"default-src 'self'; "+
-			"script-src 'self' 'unsafe-inline'; "+
-			"style-src 'self' 'unsafe-inline'; "+
+			"script-src 'self'; "+
+			"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
+			"style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
 			"img-src 'self' data:; "+
-			"font-src 'self'; "+
+			"font-src 'self' https://fonts.gstatic.com; "+
 			"connect-src 'self'; "+
-			"frame-src 'none'; "+
+			"frame-src https://www.openstreetmap.org; "+
 			"object-src 'none'; "+
 			"base-uri 'self'; "+
 			"form-action 'self'")
@@ -167,8 +168,11 @@ func securityHeadersMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		
 		// Cache control for sensitive responses
 		if strings.HasPrefix(r.URL.Path, "/api/") {
-			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, private")
 			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
+			// Prevent response sniffing
+			w.Header().Set("X-Content-Type-Options", "nosniff")
 		}
 		
 		next.ServeHTTP(w, r)
@@ -178,6 +182,10 @@ func securityHeadersMiddleware(next http.HandlerFunc) http.HandlerFunc {
 // panicRecoveryMiddleware prevents crashes from panics - critical for nation-state attack resilience
 func panicRecoveryMiddleware(logger *slog.Logger, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Generate request ID for tracing
+		requestID := fmt.Sprintf("%d-%d", time.Now().Unix(), time.Now().Nanosecond())
+		w.Header().Set("X-Request-ID", requestID)
+		
 		defer func() {
 			if err := recover(); err != nil {
 				logger.Error("SECURITY ALERT: Panic recovered", 
@@ -185,7 +193,8 @@ func panicRecoveryMiddleware(logger *slog.Logger, next http.HandlerFunc) http.Ha
 					"path", r.URL.Path, 
 					"method", r.Method,
 					"remote_addr", r.RemoteAddr,
-					"user_agent", r.Header.Get("User-Agent"))
+					"user_agent", r.Header.Get("User-Agent"),
+					"request_id", requestID)
 				
 				// Don't leak internal details to potential attackers
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -258,6 +267,15 @@ func runServer(detector *ghutz.Detector, logger *slog.Logger) {
 	
 	// Register handlers with security middleware
 	mux.HandleFunc("POST /api/v1/detect", panicRecoveryMiddleware(logger, securityHeadersMiddleware(rateLimitMiddleware(handleAPIDetect(detector, logger)))))
+	// Static file server with path traversal protection
+	staticDir := "./cmd/ghutz-server/static"
+	fileServer := http.FileServer(http.Dir(staticDir))
+	staticHandler := http.StripPrefix("/static/", fileServer)
+	mux.Handle("/static/", panicRecoveryMiddleware(logger, securityHeadersMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		// Additional security for static files
+		w.Header().Set("Cache-Control", "public, max-age=3600, immutable")
+		staticHandler.ServeHTTP(w, r)
+	})))
 	mux.HandleFunc("/", panicRecoveryMiddleware(logger, securityHeadersMiddleware(handleHomeOrUser)))
 
 	// Configure CSRF protection using Go 1.25's CrossOriginProtection
@@ -423,7 +441,11 @@ func handleAPIDetect(detector *ghutz.Detector, logger *slog.Logger) http.Handler
 
 		req.Username = strings.TrimSpace(req.Username)
 		if req.Username == "" || len(req.Username) > 100 {
-			logger.Warn("Invalid username", "username", req.Username, "remote_addr", r.RemoteAddr)
+			// SECURITY: Log potential attack attempts
+			logger.Warn("SECURITY: Invalid username attempt", 
+				"username_length", len(req.Username),
+				"remote_addr", r.RemoteAddr,
+				"user_agent", r.Header.Get("User-Agent"))
 			http.Error(w, "Invalid username", http.StatusBadRequest)
 			return
 		}
@@ -444,21 +466,8 @@ func handleAPIDetect(detector *ghutz.Detector, logger *slog.Logger) http.Handler
 
 		w.Header().Set("Content-Type", "application/json")
 		
-		// SECURITY: Restrictive CORS - only allow same origin in production
-		// For development/demo purposes, we allow all origins, but this should be restricted
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			// Same-origin requests don't have Origin header - allow them
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-		} else {
-			// SECURITY TODO: In production, whitelist specific trusted origins
-			// For now, allowing all origins for demo purposes
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-		}
-		
-		w.Header().Set("Access-Control-Allow-Methods", "POST")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Max-Age", "86400") // 24 hour cache
+		// SECURITY: Restrictive CORS - only allow same origin by default
+		// No CORS headers = same-origin only (most secure default)
 
 		if err := json.NewEncoder(w).Encode(result); err != nil {
 		logger.Error("failed to encode JSON response", "error", err)

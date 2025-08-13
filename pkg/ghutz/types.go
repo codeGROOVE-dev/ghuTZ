@@ -74,6 +74,7 @@ type OptionHolder struct {
 // Result represents timezone detection results
 type Result struct {
 	Username             string    `json:"username"`
+	Name                 string    `json:"name,omitempty"`
 	Timezone             string    `json:"timezone"`
 	ActivityTimezone     string    `json:"activity_timezone,omitempty"` // Pure activity-based timezone
 	Location             *Location `json:"location,omitempty"`

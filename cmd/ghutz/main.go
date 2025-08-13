@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/ghutz/ghutz/pkg/ghutz"
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/ghutz"
 )
 
 var (
@@ -108,13 +108,13 @@ func printResult(result *ghutz.Result) {
 	}
 
 	if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
-		fmt.Printf("Active Hours: %.0f:00 - %.0f:00 %s\n", 
-			result.ActiveHoursLocal.Start, result.ActiveHoursLocal.End, result.Timezone)
+		fmt.Printf("Active Hours: %s - %s %s\n", 
+			formatHour(result.ActiveHoursLocal.Start), formatHour(result.ActiveHoursLocal.End), result.Timezone)
 	}
 
 	if result.LunchHoursLocal.Confidence > 0 {
-		fmt.Printf("Lunch Break: %.1f:00 - %.1f:00 %s (%.0f%% confidence)\n",
-			result.LunchHoursLocal.Start, result.LunchHoursLocal.End, 
+		fmt.Printf("Lunch Break: %s - %s %s (%.0f%% confidence)\n",
+			formatHour(result.LunchHoursLocal.Start), formatHour(result.LunchHoursLocal.End), 
 			result.Timezone, result.LunchHoursLocal.Confidence*100)
 	}
 
@@ -128,6 +128,12 @@ func printResult(result *ghutz.Result) {
 
 	fmt.Printf("Method: %s\n", formatMethodName(result.Method))
 	fmt.Printf("Confidence: %.2f\n", result.Confidence)
+}
+
+func formatHour(decimalHour float64) string {
+	hour := int(decimalHour)
+	minutes := int((decimalHour - float64(hour)) * 60)
+	return fmt.Sprintf("%d:%02d", hour, minutes)
 }
 
 func formatMethodName(method string) string {

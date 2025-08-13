@@ -31,6 +31,16 @@ var (
 	githubAppTokenRegex = regexp.MustCompile(`^ghs_[a-zA-Z0-9]{36}$`)
 	// GitHub Fine-grained PAT - github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.
 	githubFineGrainedRegex = regexp.MustCompile(`^github_pat_[a-zA-Z0-9_]{82}$`)
+	// GitHub username validation regex
+	validUsernameRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$`)
+	// HTML tag removal regex
+	htmlTagRegex = regexp.MustCompile(`<[^>]*>`)
+	// Whitespace normalization regex
+	whitespaceRegex = regexp.MustCompile(`\s+`)
+	// Timezone extraction patterns
+	timezoneDataAttrRegex = regexp.MustCompile(`data-timezone="([^"]+)"`)
+	timezoneJSONRegex = regexp.MustCompile(`"timezone":"([^"]+)"`)
+	timezoneFieldRegex = regexp.MustCompile(`timezone:([^,}]+)`)
 )
 
 type Detector struct {
@@ -86,7 +96,7 @@ func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*htt
 		retry.Attempts(5),
 		retry.Delay(time.Second),
 		retry.MaxDelay(2*time.Minute),
-		retry.DelayType(retry.BackOffDelay),
+		retry.DelayType(retry.FullJitterBackoffDelay),
 		retry.OnRetry(func(n uint, err error) {
 			d.logger.Debug("retrying HTTP request", 
 				"attempt", n+1,
@@ -143,13 +153,11 @@ func NewWithLogger(logger *slog.Logger, opts ...Option) *Detector {
 	
 	if cacheDir != "" {
 		var err error
-		cache, err = NewOtterCache(cacheDir, 7*24*time.Hour, logger)
+		cache, err = NewOtterCache(cacheDir, 20*24*time.Hour, logger)
 		if err != nil {
-			logger.Debug("cache initialization failed", "error", err, "cache_dir", cacheDir)
+			logger.Warn("cache initialization failed", "error", err, "cache_dir", cacheDir)
 			// Cache is optional, continue without it
 			cache = nil
-		} else {
-			logger.Debug("cache initialized", "cache_dir", cacheDir)
 		}
 	}
 	
@@ -188,12 +196,18 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		return nil, fmt.Errorf("username too long (max 39 characters)")
 	}
 	
-	validUsername := regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$`)
-	if !validUsername.MatchString(username) {
+	if !validUsernameRegex.MatchString(username) {
 		return nil, fmt.Errorf("invalid username format")
 	}
 	
 	d.logger.Info("detecting timezone", "username", username)
+	
+	// Fetch user profile to get the full name
+	var fullName string
+	if user := d.fetchUser(ctx, username); user != nil && user.Name != "" {
+		fullName = user.Name
+		d.logger.Debug("fetched user full name", "username", username, "name", fullName)
+	}
 	
 	// Always perform activity analysis for fun and comparison
 	d.logger.Debug("performing activity pattern analysis", "username", username)
@@ -203,6 +217,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	d.logger.Debug("trying profile HTML scraping", "username", username)
 	if result := d.tryProfileScraping(ctx, username); result != nil {
 		d.logger.Info("detected from profile HTML", "username", username, "timezone", result.Timezone)
+		result.Name = fullName
 		// Add activity data if we have it
 		if activityResult != nil {
 			result.ActivityTimezone = activityResult.ActivityTimezone
@@ -217,6 +232,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	d.logger.Debug("trying location field analysis", "username", username)
 	if result := d.tryLocationField(ctx, username); result != nil {
 		d.logger.Info("detected from location field", "username", username, "timezone", result.Timezone, "location", result.LocationName)
+		result.Name = fullName
 		// Add activity data if we have it
 		if activityResult != nil {
 			result.ActivityTimezone = activityResult.ActivityTimezone
@@ -231,6 +247,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	
 	d.logger.Debug("trying Gemini analysis with contextual data", "username", username, "has_activity_data", activityResult != nil)
 	if result := d.tryUnifiedGeminiAnalysis(ctx, username, activityResult); result != nil {
+		result.Name = fullName
 		if activityResult != nil {
 			// Preserve activity data in the final result
 			result.ActivityTimezone = activityResult.ActivityTimezone
@@ -248,6 +265,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	
 	if activityResult != nil {
 		d.logger.Info("using activity-only result as fallback", "username", username, "timezone", activityResult.Timezone)
+		activityResult.Name = fullName
 		return activityResult, nil
 	}
 	
@@ -296,14 +314,14 @@ func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Res
 }
 
 func extractTimezoneFromHTML(html string) string {
-	patterns := []string{
-		`data-timezone="([^"]+)"`,
-		`timezone:([^,}]+)`,
-		`"timezone":"([^"]+)"`,
+	// Try each pre-compiled regex pattern
+	patterns := []*regexp.Regexp{
+		timezoneDataAttrRegex,
+		timezoneFieldRegex,
+		timezoneJSONRegex,
 	}
 	
-	for _, pattern := range patterns {
-		re := regexp.MustCompile(pattern)
+	for _, re := range patterns {
 		if matches := re.FindStringSubmatch(html); len(matches) > 1 {
 			tz := strings.TrimSpace(matches[1])
 			if tz != "" && tz != "UTC" {
@@ -324,9 +342,22 @@ func (d *Detector) tryLocationField(ctx context.Context, username string) *Resul
 	
 	d.logger.Debug("analyzing location field", "username", username, "location", user.Location)
 	
-	if d.isLocationTooVague(user.Location) {
-		d.logger.Debug("location too vague for geocoding", "username", username, "location", user.Location)
-		return nil
+	// Check if location is too vague for geocoding
+	location := strings.ToLower(strings.TrimSpace(user.Location))
+	vagueLocations := []string{
+		"united states", "usa", "us", "america",
+		"canada", "uk", "united kingdom", "britain",
+		"germany", "france", "italy", "spain",
+		"australia", "japan", "china", "india",
+		"brazil", "russia", "mexico",
+		"earth", "world", "planet earth",
+	}
+	
+	for _, vague := range vagueLocations {
+		if location == vague {
+			d.logger.Debug("location too vague for geocoding", "username", username, "location", user.Location)
+			return nil
+		}
 	}
 	
 	coords, err := d.geocodeLocation(ctx, user.Location)
@@ -362,7 +393,7 @@ func (d *Detector) tryLocationField(ctx context.Context, username string) *Resul
 // tryUnifiedGeminiAnalysis uses Gemini with all available data (activity + context) in a single call.
 func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string, activityResult *Result) *Result {
 	if d.geminiAPIKey == "" {
-		d.logger.Warn("Gemini API key not configured - skipping AI analysis", "username", username)
+		d.logger.Warn("Gemini API key not configured - skipping AI analysis. Set GEMINI_API_KEY environment variable", "username", username)
 		return nil
 	}
 	
@@ -722,7 +753,7 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 			lunchCorrection := int(expectedLunchMid - actualLunchMid)
 			
 			// If we don't have a work start correction, or lunch correction is larger, use lunch correction
-			if offsetCorrection == 0 || (lunchCorrection != 0 && abs(lunchCorrection) > abs(offsetCorrection)) {
+			if offsetCorrection == 0 || (lunchCorrection != 0 && int(math.Abs(float64(lunchCorrection))) > int(math.Abs(float64(offsetCorrection)))) {
 				offsetCorrection = lunchCorrection
 				correctionReason = "lunch_timing"
 			}
@@ -739,7 +770,7 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 		endCorrection := int(expectedWorkEnd - float64(activeEnd))
 		if endCorrection != 0 && endCorrection >= -8 && endCorrection <= 8 {
 			// If we don't have other corrections, or this correction is more significant, use it
-			if offsetCorrection == 0 || (abs(endCorrection) > abs(offsetCorrection)) {
+			if offsetCorrection == 0 || (int(math.Abs(float64(endCorrection))) > int(math.Abs(float64(offsetCorrection)))) {
 				offsetCorrection = endCorrection
 				correctionReason = "work_end"
 				d.logger.Debug("work end timing suggests timezone correction", "username", username,
@@ -1290,26 +1321,6 @@ func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64)
 	return result.TimeZoneID, nil
 }
 
-func (d *Detector) isLocationTooVague(location string) bool {
-	location = strings.ToLower(strings.TrimSpace(location))
-	
-	vagueLocations := []string{
-		"united states", "usa", "us", "america",
-		"canada", "uk", "united kingdom", "britain",
-		"germany", "france", "italy", "spain",
-		"australia", "japan", "china", "india",
-		"brazil", "russia", "mexico",
-		"earth", "world", "planet earth",
-	}
-	
-	for _, vague := range vagueLocations {
-		if location == vague {
-			return true
-		}
-	}
-	
-	return false
-}
 
 // calculateTypicalActiveHours determines typical work hours based on activity patterns
 // It uses percentiles to exclude outliers (e.g., occasional early starts or late nights)
@@ -1509,8 +1520,8 @@ func findQuietHours(hourCounts map[int]int) []int {
 }
 
 func timezoneFromOffset(offsetHours int) string {
-	// Return a simple UTC offset format for activity-only detection
-	// This avoids making assumptions about specific locations
+	// Return generic UTC offset format since we don't know the country at this stage
+	// This is used for activity-only detection where location is unknown
 	if offsetHours >= 0 {
 		return fmt.Sprintf("UTC+%d", offsetHours)
 	}
@@ -1886,12 +1897,12 @@ User data: %s`
 			return "", "", 0, err
 		}
 		
-		// Cache the response for 7 days
+		// Cache the response for 20 days
 		if d.cache != nil {
 			if err := d.cache.SetAPICall(url, jsonBody, responseBody); err != nil {
 				d.logger.Error("Failed to cache Gemini response", "error", err)
 			} else {
-				d.logger.Info("Gemini response cached for 7 days", "url", url)
+				d.logger.Info("Gemini response cached for 20 days", "url", url)
 			}
 		}
 	}
@@ -2020,8 +2031,8 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 	}
 	content := string(body[:n])
 	
-	content = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(content, " ")
-	content = regexp.MustCompile(`\s+`).ReplaceAllString(content, " ")
+	content = htmlTagRegex.ReplaceAllString(content, " ")
+	content = whitespaceRegex.ReplaceAllString(content, " ")
 	content = strings.TrimSpace(content)
 	
 	if len(content) > 2000 {
@@ -2235,16 +2246,3 @@ func detectLunchBreak(hourCounts map[int]int, utcOffset int, workStart, workEnd 
 	return bestCandidate.start, bestCandidate.end, bestCandidate.confidence
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
-}

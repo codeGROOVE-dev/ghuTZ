@@ -1,4 +1,4 @@
-module github.com/ghutz/ghutz
+module github.com/codeGROOVE-dev/ghuTZ
 
 go 1.25
 

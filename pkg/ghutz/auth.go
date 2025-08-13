@@ -26,16 +26,3 @@ func getGitHubToken() string {
 	return ""
 }
 
-func getGeminiAPIKey() string {
-	return os.Getenv("GEMINI_API_KEY")
-}
-
-func getGoogleCloudProject() string {
-	if project := os.Getenv("GOOGLE_CLOUD_PROJECT"); project != "" {
-		return project
-	}
-	if project := os.Getenv("GCP_PROJECT"); project != "" {
-		return project
-	}
-	return ""
-}

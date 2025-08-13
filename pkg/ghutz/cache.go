@@ -57,9 +57,9 @@ func NewOtterCache(dir string, ttl time.Duration, logger *slog.Logger) (*OtterCa
 	// Load existing cache from disk
 	if err := c.loadFromDisk(); err != nil {
 		logger.Warn("failed to load cache from disk", "error", err)
-	} else {
-		logger.Info("cache loaded from disk", "entries", c.cache.EstimatedSize())
 	}
+	// Log final cache state after loading
+	logger.Info("cache initialized", "dir", dir, "entries_loaded", c.cache.EstimatedSize())
 
 	// Start periodic save goroutine
 	c.startPeriodicSave()
@@ -78,10 +78,6 @@ func (c *OtterCache) getCacheKeyForAPICall(url string, requestBody []byte) strin
 	h.Write([]byte(url))
 	h.Write(requestBody)
 	return hex.EncodeToString(h.Sum(nil))
-}
-
-func (c *OtterCache) getCachePath() string {
-	return filepath.Join(c.dir, "otter-cache.gob")
 }
 
 func (c *OtterCache) Get(url string) ([]byte, string, bool) {
@@ -151,11 +147,12 @@ func (c *OtterCache) GetAPICall(url string, requestBody []byte) ([]byte, bool) {
 }
 
 func (c *OtterCache) loadFromDisk() error {
-	cachePath := c.getCachePath()
+	cachePath := filepath.Join(c.dir, "otter-cache.gob")
 	
 	file, err := os.Open(cachePath)
 	if err != nil {
 		if os.IsNotExist(err) {
+			c.logger.Info("no existing cache file found", "path", cachePath)
 			return nil // No existing cache file
 		}
 		return fmt.Errorf("opening cache file: %w", err)
@@ -179,7 +176,8 @@ func (c *OtterCache) loadFromDisk() error {
 		}
 	}
 
-	c.logger.Info("loaded cache from disk", 
+	c.logger.Info("successfully loaded cache from disk", 
+		"path", cachePath,
 		"total_entries", len(entries), 
 		"valid_entries", validEntries,
 		"expired_entries", len(entries)-validEntries)
@@ -191,7 +189,7 @@ func (c *OtterCache) saveToDisk() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	cachePath := c.getCachePath()
+	cachePath := filepath.Join(c.dir, "otter-cache.gob")
 	
 	// Create temporary file
 	tempPath := cachePath + ".tmp"

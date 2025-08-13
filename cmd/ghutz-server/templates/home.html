@@ -106,6 +106,22 @@
             text-transform: uppercase;
         }
 
+        .github-link {
+            color: var(--color-secondary);
+            text-decoration: none;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            padding: 4px;
+            border: 2px solid transparent;
+        }
+
+        .github-link:hover {
+            border: 2px solid var(--color-secondary);
+            background: var(--color-white);
+            transform: rotate(-5deg) scale(1.1);
+        }
+
         /* Main content - Craigslist-style minimal layout */
         .main-content {
             display: grid;
@@ -278,9 +294,9 @@
         }
 
         .result-box {
-            background: var(--color-primary-soft);
+            background: var(--color-white);
             border: 3px solid var(--color-secondary);
-            padding: 20px;
+            padding: 24px;
             margin-bottom: 20px;
             box-shadow: var(--shadow-brutal);
             position: relative;
@@ -294,9 +310,10 @@
 
         .result-grid {
             display: grid;
-            grid-template-columns: 100px 1fr;
-            gap: 12px;
-            font-size: 13px;
+            grid-template-columns: 140px 1fr;
+            gap: 16px;
+            font-size: 14px;
+            align-items: center;
         }
 
         .result-label {
@@ -311,11 +328,21 @@
         }
 
         .result-value {
-            font-weight: 500;
-            background: var(--color-white);
-            padding: 4px 8px;
+            font-weight: 600;
+            background: var(--color-primary-soft);
+            padding: 8px 12px;
             border: 2px solid var(--color-secondary);
-            font-family: 'Courier New', monospace;
+            font-family: var(--font-primary);
+            font-size: 15px;
+            color: var(--color-secondary);
+            letter-spacing: -0.2px;
+            box-shadow: 2px 2px 0 rgba(0,0,0,0.1);
+        }
+
+        .result-value.high-contrast {
+            background: var(--color-secondary);
+            color: var(--color-primary);
+            font-weight: 700;
         }
 
         .confidence-badge {
@@ -453,6 +480,11 @@
                 <span>ghuTZ</span>
             </div>
             <div class="tagline">GitHub Timezone Detective</div>
+            <a href="https://github.com/codeGROOVE-dev/ghuTZ" target="_blank" class="github-link" title="View on GitHub">
+                <svg height="24" width="24" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                </svg>
+            </a>
         </div>
         
         <div class="main-content">
@@ -511,13 +543,18 @@
                             <div class="result-label">👤 User</div>
                             <div class="result-value" id="displayUsername">-</div>
                             
+                            <div id="nameRow" style="display: none;">
+                                <div class="result-label">📛 Name</div>
+                                <div class="result-value" id="displayName">-</div>
+                            </div>
+                            
                             <div class="result-label">🌍 Zone</div>
-                            <div class="result-value" id="timezone">-</div>
+                            <div class="result-value high-contrast" id="timezone">-</div>
                             
                             <div class="result-label">📈 Confidence</div>
                             <div class="result-value"><span id="confidence" class="confidence-badge">-</span></div>
                             
-                            <div class="result-label" id="activityLabel" style="display: none;">📊 Activity</div>
+                            <div class="result-label" id="activityLabel" style="display: none;">📊 Activity Offset</div>
                             <div class="result-value" id="activityTz" style="display: none;">-</div>
                             
                             <div class="result-label" id="hoursLabel" style="display: none;">⏰ Hours</div>
@@ -552,184 +589,6 @@
         </div>
     </div>
 
-    <script>
-        let currentUsername = '';
-
-        window.addEventListener('load', function() {
-            // Check if username is already filled (from server-side template)
-            const inputElement = document.getElementById('username');
-            const existingUsername = inputElement.value.trim();
-            
-            if (existingUsername) {
-                // Auto-detect if username is pre-filled from URL
-                // Small delay to ensure page is fully loaded
-                setTimeout(() => {
-                    detectUser(existingUsername);
-                }, 100);
-            }
-        });
-
-        function updateURL(username) {
-            currentUsername = username;
-            // Use clean URL structure: /username
-            // Handle empty username (go to homepage)
-            const newURL = username ? '/' + username : '/';
-            window.history.replaceState({}, '', newURL);
-        }
-
-        async function detectUser(username) {
-            const submitBtn = document.getElementById('submitBtn');
-            const errorDiv = document.getElementById('error');
-            const resultDiv = document.getElementById('result');
-
-            if (!username) return;
-
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = 'DETECTING...';
-            errorDiv.classList.remove('show');
-            resultDiv.classList.remove('show');
-
-            try {
-                const response = await fetch('/api/v1/detect', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({username})
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(errorText || 'Detection failed');
-                }
-
-                const data = await response.json();
-                updateURL(username);
-                displayResults(data);
-
-            } catch (error) {
-                errorDiv.textContent = '❌ ' + error.message;
-                errorDiv.classList.add('show');
-            } finally {
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = 'DETECT';
-            }
-        }
-
-        document.getElementById('detectForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const username = document.getElementById('username').value.trim();
-            await detectUser(username);
-        });
-
-        function displayResults(data) {
-            document.getElementById('displayUsername').textContent = data.username;
-            document.getElementById('timezone').textContent = data.timezone;
-
-            const confidenceSpan = document.getElementById('confidence');
-            const confidencePct = Math.round((data.timezone_confidence || data.confidence || 0) * 100);
-            let badgeClass;
-            
-            if (confidencePct >= 80) {
-                badgeClass = 'confidence-high';
-            } else if (confidencePct >= 50) {
-                badgeClass = 'confidence-medium';
-            } else {
-                badgeClass = 'confidence-low';
-            }
-
-            confidenceSpan.textContent = confidencePct + '%';
-            confidenceSpan.className = 'confidence-badge ' + badgeClass;
-
-            if (data.activity_timezone) {
-                document.getElementById('activityTz').textContent = data.activity_timezone;
-                document.getElementById('activityLabel').style.display = 'flex';
-                document.getElementById('activityTz').style.display = 'block';
-            }
-
-            if (data.active_hours_local && (data.active_hours_local.start || data.active_hours_local.end)) {
-                const activeHoursText = formatActiveHours(data.active_hours_local.start, data.active_hours_local.end);
-                document.getElementById('activeHours').textContent = activeHoursText;
-                document.getElementById('hoursLabel').style.display = 'flex';
-                document.getElementById('activeHours').style.display = 'block';
-            }
-
-            if (data.lunch_hours_local && data.lunch_hours_local.confidence > 0) {
-                const lunchText = formatLunchHours(data.lunch_hours_local.start, data.lunch_hours_local.end);
-                document.getElementById('lunchHours').textContent = lunchText + ' (' + Math.round(data.lunch_hours_local.confidence * 100) + '%)';
-                document.getElementById('lunchLabel').style.display = 'flex';
-                document.getElementById('lunchHours').style.display = 'block';
-            }
-
-            let locationText = '';
-            if (data.gemini_suggested_location) {
-                locationText = data.gemini_suggested_location;
-            } else if (data.location_name) {
-                locationText = data.location_name;
-            } else if (data.location) {
-                locationText = data.location.latitude.toFixed(2) + ', ' + data.location.longitude.toFixed(2);
-            }
-            
-            if (locationText) {
-                document.getElementById('location').textContent = locationText;
-                document.getElementById('locationLabel').style.display = 'flex';
-                document.getElementById('location').style.display = 'block';
-            }
-
-            const methodName = formatMethodName(data.method);
-            document.getElementById('method').textContent = methodName;
-
-            if (data.location) {
-                initMap(data.location.latitude, data.location.longitude, data.username);
-            }
-
-            document.getElementById('result').classList.add('show');
-        }
-
-        function formatMethodName(method) {
-            const methodNames = {
-                'github_profile': 'Profile',
-                'location_geocoding': 'Geocoding', 
-                'activity_patterns': 'Activity',
-                'gemini_refined_activity': 'AI+Activity',
-                'company_heuristic': 'Company',
-                'email_heuristic': 'Email',
-                'blog_heuristic': 'Blog',
-                'website_gemini_analysis': 'Website+AI',
-                'gemini_analysis': 'AI'
-            };
-            return methodNames[method] || method;
-        }
-
-        function formatActiveHours(start, end) {
-            return formatHour(start) + '-' + formatHour(end);
-        }
-
-        function formatLunchHours(start, end) {
-            return formatHour(start) + '-' + formatHour(end);
-        }
-
-        function formatHour(decimalHour) {
-            const hour = Math.floor(decimalHour);
-            const minutes = Math.round((decimalHour - hour) * 60);
-            const period = hour < 12 ? 'am' : 'pm';
-            const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-            const minuteStr = minutes === 0 ? '00' : minutes.toString().padStart(2, '0');
-            return displayHour + ':' + minuteStr + period;
-        }
-
-        function initMap(lat, lng, username) {
-            const mapDiv = document.getElementById('map');
-            mapDiv.style.display = 'block';
-            mapDiv.innerHTML = '<iframe width="100%" height="100%" frameborder="0" style="border:0" ' +
-                'src="https://www.openstreetmap.org/export/embed.html?bbox=' +
-                (lng - 0.1) + ',' + (lat - 0.1) + ',' + (lng + 0.1) + ',' + (lat + 0.1) +
-                '&layer=mapnik&marker=' + lat + ',' + lng + '" allowfullscreen></iframe>';
-        }
-
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && e.ctrlKey) {
-                document.getElementById('detectForm').dispatchEvent(new Event('submit'));
-            }
-        });
-    </script>
+    <script src="/static/app.js"></script>
 </body>
 </html>

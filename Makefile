@@ -3,19 +3,19 @@
 all: lint test build
 
 build:
-	go build -o bin/ghutz ./cmd/ghutz
+	go build -o out/ghutz ./cmd/ghutz
 
 test:
 	go test -v -race ./...
 
 clean:
-	rm -rf bin/
+	rm -rf out/
 
 run: build
-	./bin/ghutz $(ARGS)
+	./out/ghutz $(ARGS)
 
 serve: build
-	./bin/ghutz --serve
+	./out/ghutz --serve
 
 deps:
 	go mod tidy
