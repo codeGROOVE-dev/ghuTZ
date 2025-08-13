@@ -219,8 +219,7 @@ func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Res
 		req.Header.Set("Authorization", "token "+d.githubToken)
 	}
 	
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := d.cachedHTTPDo(ctx, req)
 	if err != nil {
 		return nil
 	}
@@ -408,15 +407,13 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 			contextData["sleep_hours_utc"] = activityResult.QuietHoursUTC
 		}
 		
-		// Add timezone candidates based on the detected offset
+		// Add GMT offset info instead of specific timezone candidates
 		if strings.HasPrefix(activityResult.Timezone, "UTC") {
 			// Extract offset from UTC format (e.g., "UTC+5", "UTC-8")
 			offsetStr := strings.TrimPrefix(activityResult.Timezone, "UTC")
 			if offset, err := strconv.Atoi(offsetStr); err == nil {
-				candidates := getTimezoneCandidatesForOffset(float64(offset))
-				if len(candidates) > 0 {
-					contextData["timezone_candidates"] = candidates
-				}
+				contextData["detected_gmt_offset"] = fmt.Sprintf("GMT%+d", offset)
+				contextData["detected_gmt_offset_note"] = fmt.Sprintf("Activity patterns suggest GMT%+d timezone. Consider major cities and tech hubs in this offset.", offset)
 			}
 		}
 		
@@ -646,32 +643,72 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 		"lunch_start", lunchStart, "lunch_end", lunchEnd, "confidence", lunchConfidence,
 		"work_start", activeStart, "work_end", activeEnd, "utc_offset", offsetInt)
 		
-	// Use lunch break as validation for timezone detection
+	// Use work schedule validation for timezone detection
+	// Most people start work between 8:00am-9:30am and have lunch 11:30am-1:00pm
+	var offsetCorrection int
+	var correctionReason string
+	
+	// Check work start time (should be 8:00am-9:30am) - be more strict
+	if float64(activeStart) < 7.5 || float64(activeStart) > 9.5 {
+		expectedWorkStart := 8.5  // 8:30am average
+		workCorrection := int(expectedWorkStart - float64(activeStart))
+		if workCorrection != 0 && workCorrection >= -8 && workCorrection <= 8 {
+			offsetCorrection = workCorrection
+			correctionReason = "work_start"
+			d.logger.Debug("work start timing suggests timezone correction", "username", username,
+				"work_start_local", activeStart, "expected_range", "7:30-9:30", 
+				"suggested_correction", workCorrection)
+		}
+	}
+	
+	// Check lunch timing (should be 11:30am-12:30pm, much stricter)
 	if lunchStart != -1 && lunchEnd != -1 {
-		// Validate that lunch falls within reasonable hours (11:30am - 1:30pm local)
-		if lunchStart < 10.5 || lunchStart > 14.0 || lunchEnd < 12.0 || lunchEnd > 15.0 {
-			d.logger.Debug("lunch timing suggests incorrect timezone", "username", username,
-				"lunch_start_local", lunchStart, "lunch_end_local", lunchEnd, 
-				"expected_range", "11:30-13:30", "current_offset", offsetInt)
-			
-			// Try to correct the timezone based on lunch timing
-			// If lunch is detected at 9am, but should be around 12pm, we're off by ~3 hours
-			expectedLunchMid := 12.5  // 12:30pm
+		// Very strict validation: lunch should start between 11:30am-12:30pm
+		if lunchStart < 11.5 || lunchStart > 12.5 || lunchEnd < 12.5 || lunchEnd > 13.5 {
+			expectedLunchMid := 12.0  // 12:00pm
 			actualLunchMid := (lunchStart + lunchEnd) / 2
-			offsetCorrection := int(expectedLunchMid - actualLunchMid)
+			lunchCorrection := int(expectedLunchMid - actualLunchMid)
 			
-			if offsetCorrection != 0 && offsetCorrection >= -6 && offsetCorrection <= 6 {
-				correctedOffset := offsetInt + offsetCorrection
-				d.logger.Debug("correcting timezone based on lunch", "username", username,
-					"original_offset", offsetInt, "lunch_correction", offsetCorrection, 
-					"corrected_offset", correctedOffset)
-				offsetInt = correctedOffset
-				timezone = timezoneFromOffset(offsetInt)
-				
-				// Recalculate active hours with corrected offset
-				activeStart, activeEnd = calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
+			// If we don't have a work start correction, or lunch correction is larger, use lunch correction
+			if offsetCorrection == 0 || (lunchCorrection != 0 && abs(lunchCorrection) > abs(offsetCorrection)) {
+				offsetCorrection = lunchCorrection
+				correctionReason = "lunch_timing"
+			}
+			
+			d.logger.Debug("lunch timing suggests timezone correction", "username", username,
+				"lunch_start_local", lunchStart, "lunch_end_local", lunchEnd, 
+				"expected_range", "11:30-12:30 start, 12:30-13:30 end", "suggested_correction", lunchCorrection)
+		}
+	}
+	
+	// Check evening wind-down time (should be 5:00pm-7:00pm)
+	if float64(activeEnd) < 16.0 || float64(activeEnd) > 19.0 {
+		expectedWorkEnd := 17.0  // 5:00pm average
+		endCorrection := int(expectedWorkEnd - float64(activeEnd))
+		if endCorrection != 0 && endCorrection >= -8 && endCorrection <= 8 {
+			// If we don't have other corrections, or this correction is more significant, use it
+			if offsetCorrection == 0 || (abs(endCorrection) > abs(offsetCorrection)) {
+				offsetCorrection = endCorrection
+				correctionReason = "work_end"
+				d.logger.Debug("work end timing suggests timezone correction", "username", username,
+					"work_end_local", activeEnd, "expected_range", "16:00-19:00", 
+					"suggested_correction", endCorrection)
 			}
 		}
+	}
+	
+	// Apply timezone correction if we found one
+	if offsetCorrection != 0 && offsetCorrection >= -8 && offsetCorrection <= 8 {
+		correctedOffset := offsetInt + offsetCorrection
+		d.logger.Debug("correcting timezone based on work schedule", "username", username,
+			"original_offset", offsetInt, "correction", offsetCorrection, 
+			"corrected_offset", correctedOffset, "reason", correctionReason)
+		offsetInt = correctedOffset
+		timezone = timezoneFromOffset(offsetInt)
+		
+		// Recalculate active hours and lunch with corrected offset
+		activeStart, activeEnd = calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
+		lunchStart, lunchEnd, lunchConfidence = detectLunchBreak(hourCounts, offsetInt, activeStart, activeEnd)
 	}
 	
 	result := &Result{
@@ -1062,8 +1099,7 @@ func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Locat
 		return nil, err
 	}
 	
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := d.cachedHTTPDo(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1150,8 +1186,7 @@ func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64)
 		return "", err
 	}
 	
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := d.cachedHTTPDo(ctx, req)
 	if err != nil {
 		return "", err
 	}
@@ -1481,6 +1516,12 @@ Consider these additional clues to validate/refine:
 - Known tech company locations (e.g., Chainguard is US-based)
 - Work schedule patterns: Does the detected work schedule (start/end times, lunch timing) match typical patterns for the suspected region?
 
+IMPORTANT: DO NOT use cloud infrastructure regions as location hints:
+- AWS regions (us-east-1, eu-west-1, ap-southeast-2, etc.) in PRs/issues indicate deployment targets, not user location
+- GCP zones (us-central1-a, europe-west1-b, asia-southeast1-c, etc.) in PRs/issues indicate deployment targets, not user location
+- Azure regions mentioned in technical work are deployment targets, not user location
+- Docker registry regions, CDN endpoints, and other infrastructure references are technical choices, not location indicators
+
 Important guidelines:
 - TRUST the activity patterns - they are based on actual behavior
 - The work schedule data provides additional validation - unusual work hours might indicate remote work across timezones
@@ -1505,11 +1546,12 @@ IMPORTANT: For Etc/GMT timezones (like Etc/GMT-4), these are generic offset-base
 - Common tech hubs in this timezone
 - Any contextual clues from their activity
 
-Note: If timezone_candidates are provided in the context, these are the common timezones that match the detected UTC offset. Consider which is most likely based on the user's name, company, and other context.
+Note: If detected_gmt_offset is provided in the context, this is the GMT offset suggested by activity patterns. Consider which specific timezone (e.g., America/Los_Angeles for GMT-8, Europe/London for GMT+0) is most likely based on the user's name, company, and other contextual clues.
 
-Respond with your reasoning followed by your conclusion on separate lines:
-"TIMEZONE:" followed by ONLY a valid IANA timezone identifier or "UNKNOWN"
-"LOCATION:" followed by a specific location name (city, region) that best matches the timezone and context, or "UNKNOWN"
+Respond with a JSON object containing:
+- "timezone": IANA timezone identifier or "UNKNOWN"
+- "location": specific location name (city, region) or "UNKNOWN" 
+- "reasoning": brief explanation of your decision
 
 Context data: %s`
 		} else {
@@ -1538,6 +1580,10 @@ Consider these additional clues to validate/refine:
 - Known tech company locations (e.g., Chainguard is US-based)
 - Work schedule patterns: Does the detected work schedule match typical patterns for the suspected region?
 
+IMPORTANT: DO NOT use cloud infrastructure regions as location hints:
+- AWS/GCP/Azure regions in PRs/issues indicate deployment targets, not user location
+- Docker registry regions and infrastructure references are technical choices, not location indicators
+
 Important guidelines:
 - TRUST the activity patterns - they are based on actual behavior
 - The work schedule data provides additional validation - unusual work hours might indicate remote work across timezones
@@ -1550,9 +1596,10 @@ Important guidelines:
 - When username suggests a specific nationality/region that uses the SAME timezone as detected, feel confident suggesting that location and potentially refining to the country-specific timezone
 - For example: if activity patterns suggest Europe/Berlin and username suggests Polish origin, Europe/Warsaw (Poland) is more accurate since both are UTC+1/+2
 
-Respond with two lines:
-Line 1: TIMEZONE: followed by ONLY a valid IANA timezone identifier or "UNKNOWN"
-Line 2: LOCATION: followed by a specific location name (city, region) or "UNKNOWN"
+Respond with a JSON object containing:
+- "timezone": IANA timezone identifier or "UNKNOWN"
+- "location": specific location name (city, region) or "UNKNOWN"
+- "reasoning": brief explanation of your decision
 
 Context data: %s`
 		}
@@ -1596,11 +1643,12 @@ IMPORTANT: For Etc/GMT timezones (like Etc/GMT-4), these are generic offset-base
 - Common tech hubs in this timezone
 - Any contextual clues from their activity
 
-Note: If timezone_candidates are provided in the context, these are the common timezones that match the detected UTC offset. Consider which is most likely based on the user's name, company, and other context.
+Note: If detected_gmt_offset is provided in the context, this is the GMT offset suggested by activity patterns. Consider which specific timezone (e.g., America/Los_Angeles for GMT-8, Europe/London for GMT+0) is most likely based on the user's name, company, and other contextual clues.
 
-Respond with your reasoning followed by your conclusion on separate lines:
-"TIMEZONE:" followed by ONLY a valid IANA timezone identifier or "UNKNOWN"
-"LOCATION:" followed by a specific location name (city, region) that best matches the timezone and context, or "UNKNOWN"
+Respond with a JSON object containing:
+- "timezone": IANA timezone identifier or "UNKNOWN"
+- "location": specific location name (city, region) or "UNKNOWN" 
+- "reasoning": brief explanation of your decision
 
 User data: %s`
 		} else {
@@ -1674,6 +1722,25 @@ User data: %s`
 		},
 		"generationConfig": map[string]interface{}{
 			"temperature": 0.1,
+			"responseMimeType": "application/json",
+			"responseSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"timezone": map[string]string{
+						"type": "string",
+						"description": "IANA timezone identifier or UNKNOWN",
+					},
+					"location": map[string]string{
+						"type": "string", 
+						"description": "Specific location name (city, region) or UNKNOWN",
+					},
+					"reasoning": map[string]string{
+						"type": "string",
+						"description": "Brief explanation of the decision",
+					},
+				},
+				"required": []string{"timezone", "location"},
+			},
 			"maxOutputTokens": func() int {
 				if verbose {
 					return 300
@@ -1690,23 +1757,50 @@ User data: %s`
 	
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=%s", d.geminiAPIKey)
 	
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return "", "", 0, err
+	// Check cache first for Gemini API calls
+	var responseBody []byte
+	if d.cache != nil {
+		if cachedData, found := d.cache.GetAPICall(url, jsonBody); found {
+			responseBody = cachedData
+		} else {
+			d.logger.Warn("GEMINI CACHE MISS - making API call", "url", url)
+		}
 	}
 	
-	req.Header.Set("Content-Type", "application/json")
-	
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", "", 0, err
-	}
-	defer resp.Body.Close()
-	
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return "", "", 0, fmt.Errorf("Gemini API error: %d %s", resp.StatusCode, string(body))
+	if responseBody == nil {
+		// Make actual API call if not cached
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+		if err != nil {
+			return "", "", 0, err
+		}
+		
+		req.Header.Set("Content-Type", "application/json")
+		
+		client := &http.Client{Timeout: 15 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", "", 0, err
+		}
+		defer resp.Body.Close()
+		
+		if resp.StatusCode != 200 {
+			body, _ := io.ReadAll(resp.Body)
+			return "", "", 0, fmt.Errorf("Gemini API error: %d %s", resp.StatusCode, string(body))
+		}
+		
+		responseBody, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return "", "", 0, err
+		}
+		
+		// Cache the response for 7 days
+		if d.cache != nil {
+			if err := d.cache.SetAPICall(url, jsonBody, responseBody); err != nil {
+				d.logger.Error("Failed to cache Gemini response", "error", err)
+			} else {
+				d.logger.Info("Gemini response cached for 7 days", "url", url)
+			}
+		}
 	}
 	
 	var geminiResp struct {
@@ -1719,7 +1813,7 @@ User data: %s`
 		} `json:"candidates"`
 	}
 	
-	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
+	if err := json.Unmarshal(responseBody, &geminiResp); err != nil {
 		return "", "", 0, err
 	}
 	
@@ -1732,18 +1826,21 @@ User data: %s`
 	d.logger.Debug("Gemini full response", "full_response", fullResponse)
 	
 	var timezone, location string
-	if strings.Contains(fullResponse, "TIMEZONE:") {
-		lines := strings.Split(fullResponse, "\n")
-		for _, line := range lines {
-			trimmedLine := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmedLine, "TIMEZONE:") {
-				timezone = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "TIMEZONE:"))
-			} else if strings.HasPrefix(trimmedLine, "LOCATION:") {
-				location = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "LOCATION:"))
-			}
-		}
-	} else {
-		timezone = fullResponse
+	
+	var jsonResponse map[string]interface{}
+	if err := json.Unmarshal([]byte(fullResponse), &jsonResponse); err != nil {
+		d.logger.Debug("failed to parse Gemini JSON response", "error", err, "response", fullResponse)
+		return "", "", 0, fmt.Errorf("invalid JSON response from Gemini: %w", err)
+	}
+	
+	if tz, ok := jsonResponse["timezone"].(string); ok {
+		timezone = tz
+	}
+	if loc, ok := jsonResponse["location"].(string); ok {
+		location = loc
+	}
+	if reasoning, ok := jsonResponse["reasoning"].(string); ok {
+		d.logger.Debug("Gemini reasoning", "reasoning", reasoning)
 	}
 	
 	d.logger.Debug("Gemini unified response", "extracted_timezone", timezone, "extracted_location", location, "had_activity_data", hasActivityData, "verbose_mode", verbose)
@@ -1806,8 +1903,7 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 	
 	req.Header.Set("User-Agent", "GitHub-Timezone-Detector/1.0")
 	
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := d.cachedHTTPDo(ctx, req)
 	if err != nil {
 		d.logger.Debug("failed to fetch website", "url", blogURL, "error", err)
 		return ""
@@ -2043,4 +2139,11 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
