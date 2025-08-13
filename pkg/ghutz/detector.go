@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -22,6 +23,16 @@ import (
 	"github.com/codeGROOVE-dev/retry"
 )
 
+// SECURITY: GitHub token patterns for validation.
+var (
+	// GitHub Personal Access Token (classic) - ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.
+	githubPATRegex = regexp.MustCompile(`^ghp_[a-zA-Z0-9]{36}$`)
+	// GitHub App Installation Token - ghs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.
+	githubAppTokenRegex = regexp.MustCompile(`^ghs_[a-zA-Z0-9]{36}$`)
+	// GitHub Fine-grained PAT - github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.
+	githubFineGrainedRegex = regexp.MustCompile(`^github_pat_[a-zA-Z0-9_]{82}$`)
+)
+
 type Detector struct {
 	githubToken   string
 	mapsAPIKey    string
@@ -31,10 +42,11 @@ type Detector struct {
 	logger        *slog.Logger
 	httpClient    *http.Client
 	forceActivity bool
-	cache         *DiskCache
+	cache         *OtterCache
 }
 
-// retryableHTTPDo performs an HTTP request with exponential backoff and jitter
+// retryableHTTPDo performs an HTTP request with exponential backoff and jitter.
+// The returned response body must be closed by the caller.
 func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*http.Response, error) {
 	var resp *http.Response
 	var lastErr error
@@ -42,7 +54,7 @@ func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*htt
 	err := retry.Do(
 		func() error {
 			var err error
-			resp, err = d.httpClient.Do(req.WithContext(ctx))
+			resp, err = d.httpClient.Do(req.WithContext(ctx)) //nolint:bodyclose // Body closed on error, returned open on success for caller
 			if err != nil {
 				// Network errors are retryable
 				lastErr = err
@@ -51,8 +63,14 @@ func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*htt
 			
 			// Check for rate limiting or server errors
 			if resp.StatusCode == 429 || resp.StatusCode == 403 || resp.StatusCode >= 500 {
-				body, _ := io.ReadAll(resp.Body)
-				_ = resp.Body.Close()
+				body, readErr := io.ReadAll(resp.Body)
+				closeErr := resp.Body.Close()
+				if readErr != nil {
+					d.logger.Debug("failed to read error response body", "error", readErr)
+				}
+				if closeErr != nil {
+					d.logger.Debug("failed to close error response body", "error", closeErr)
+				}
 				lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 				d.logger.Debug("retryable HTTP error", 
 					"status", resp.StatusCode, 
@@ -61,7 +79,7 @@ func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*htt
 				return lastErr
 			}
 			
-			// Success or non-retryable error
+			// Success - response body will be handled by caller
 			return nil
 		},
 		retry.Context(ctx),
@@ -88,6 +106,17 @@ func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*htt
 	return resp, nil
 }
 
+// isValidGitHubToken validates GitHub token format for security.
+func (d *Detector) isValidGitHubToken(token string) bool {
+	// SECURITY: Validate token format to prevent injection attacks
+	token = strings.TrimSpace(token)
+	
+	// Check against known GitHub token patterns
+	return githubPATRegex.MatchString(token) || 
+		   githubAppTokenRegex.MatchString(token) || 
+		   githubFineGrainedRegex.MatchString(token)
+}
+
 func New(opts ...Option) *Detector {
 	return NewWithLogger(slog.Default(), opts...)
 }
@@ -99,17 +128,29 @@ func NewWithLogger(logger *slog.Logger, opts ...Option) *Detector {
 	}
 	
 	// Initialize cache
-	var cache *DiskCache
-	if userCacheDir, err := os.UserCacheDir(); err == nil {
-		cacheDir := filepath.Join(userCacheDir, "ghutz")
-		cache, err = NewDiskCache(cacheDir, 7*24*time.Hour, logger)
-		if err != nil {
-			logger.Debug("cache initialization failed", "error", err)
-			// Cache is optional, continue without it
-			cache = nil
-		}
+	var cache *OtterCache
+	var cacheDir string
+	
+	if optHolder.cacheDir != "" {
+		// Use custom cache directory
+		cacheDir = optHolder.cacheDir
+	} else if userCacheDir, err := os.UserCacheDir(); err == nil {
+		// Use default user cache directory
+		cacheDir = filepath.Join(userCacheDir, "ghutz")
 	} else {
 		logger.Debug("could not determine user cache directory", "error", err)
+	}
+	
+	if cacheDir != "" {
+		var err error
+		cache, err = NewOtterCache(cacheDir, 7*24*time.Hour, logger)
+		if err != nil {
+			logger.Debug("cache initialization failed", "error", err, "cache_dir", cacheDir)
+			// Cache is optional, continue without it
+			cache = nil
+		} else {
+			logger.Debug("cache initialized", "cache_dir", cacheDir)
+		}
 	}
 	
 	return &Detector{
@@ -123,6 +164,14 @@ func NewWithLogger(logger *slog.Logger, opts ...Option) *Detector {
 		forceActivity: optHolder.forceActivity,
 		cache:         cache,
 	}
+}
+
+// Close properly shuts down the detector, including saving the cache to disk
+func (d *Detector) Close() error {
+	if d.cache != nil {
+		return d.cache.Close()
+	}
+	return nil
 }
 
 func (d *Detector) Detect(ctx context.Context, username string) (*Result, error) {
@@ -151,35 +200,33 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	activityResult := d.tryActivityPatterns(ctx, username)
 	
 	// Try quick detection methods first
-	{
-		d.logger.Debug("trying profile HTML scraping", "username", username)
-		if result := d.tryProfileScraping(ctx, username); result != nil {
-			d.logger.Info("detected from profile HTML", "username", username, "timezone", result.Timezone)
-			// Add activity data if we have it
-			if activityResult != nil {
-				result.ActivityTimezone = activityResult.ActivityTimezone
-				result.QuietHoursUTC = activityResult.QuietHoursUTC
-				result.ActiveHoursLocal = activityResult.ActiveHoursLocal
-				result.LunchHoursLocal = activityResult.LunchHoursLocal
-			}
-			return result, nil
+	d.logger.Debug("trying profile HTML scraping", "username", username)
+	if result := d.tryProfileScraping(ctx, username); result != nil {
+		d.logger.Info("detected from profile HTML", "username", username, "timezone", result.Timezone)
+		// Add activity data if we have it
+		if activityResult != nil {
+			result.ActivityTimezone = activityResult.ActivityTimezone
+			result.QuietHoursUTC = activityResult.QuietHoursUTC
+			result.ActiveHoursLocal = activityResult.ActiveHoursLocal
+			result.LunchHoursLocal = activityResult.LunchHoursLocal
 		}
-		d.logger.Debug("profile HTML scraping failed", "username", username)
-		
-		d.logger.Debug("trying location field analysis", "username", username)
-		if result := d.tryLocationField(ctx, username); result != nil {
-			d.logger.Info("detected from location field", "username", username, "timezone", result.Timezone, "location", result.LocationName)
-			// Add activity data if we have it
-			if activityResult != nil {
-				result.ActivityTimezone = activityResult.ActivityTimezone
-				result.QuietHoursUTC = activityResult.QuietHoursUTC
-				result.ActiveHoursLocal = activityResult.ActiveHoursLocal
-				result.LunchHoursLocal = activityResult.LunchHoursLocal
-			}
-			return result, nil
-		}
-		d.logger.Debug("location field analysis failed", "username", username)
+		return result, nil
 	}
+	d.logger.Debug("profile HTML scraping failed", "username", username)
+	
+	d.logger.Debug("trying location field analysis", "username", username)
+	if result := d.tryLocationField(ctx, username); result != nil {
+		d.logger.Info("detected from location field", "username", username, "timezone", result.Timezone, "location", result.LocationName)
+		// Add activity data if we have it
+		if activityResult != nil {
+			result.ActivityTimezone = activityResult.ActivityTimezone
+			result.QuietHoursUTC = activityResult.QuietHoursUTC
+			result.ActiveHoursLocal = activityResult.ActiveHoursLocal
+			result.LunchHoursLocal = activityResult.LunchHoursLocal
+		}
+		return result, nil
+	}
+	d.logger.Debug("location field analysis failed", "username", username)
 	
 	
 	d.logger.Debug("trying Gemini analysis with contextual data", "username", username, "has_activity_data", activityResult != nil)
@@ -210,12 +257,13 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Result {
 	url := fmt.Sprintf("https://github.com/%s", username)
 	
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return nil
 	}
 	
-	if d.githubToken != "" {
+	// SECURITY: Validate and sanitize GitHub token before use
+	if d.githubToken != "" && d.isValidGitHubToken(d.githubToken) {
 		req.Header.Set("Authorization", "token "+d.githubToken)
 	}
 	
@@ -223,7 +271,11 @@ func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Res
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			d.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
 	
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -279,7 +331,7 @@ func (d *Detector) tryLocationField(ctx context.Context, username string) *Resul
 	
 	coords, err := d.geocodeLocation(ctx, user.Location)
 	if err != nil {
-		d.logger.Debug("geocoding failed", "username", username, "location", user.Location, "error", err)
+		d.logger.Warn("geocoding failed - continuing without location data", "username", username, "location", user.Location, "error", err)
 		return nil
 	}
 	
@@ -288,7 +340,7 @@ func (d *Detector) tryLocationField(ctx context.Context, username string) *Resul
 	
 	timezone, err := d.timezoneForCoordinates(ctx, coords.Latitude, coords.Longitude)
 	if err != nil {
-		d.logger.Debug("timezone lookup failed", "username", username, "coordinates", 
+		d.logger.Warn("timezone lookup failed - continuing without timezone data", "username", username, "coordinates", 
 			fmt.Sprintf("%.4f,%.4f", coords.Latitude, coords.Longitude), "error", err)
 		return nil
 	}
@@ -307,10 +359,10 @@ func (d *Detector) tryLocationField(ctx context.Context, username string) *Resul
 }
 
 
-// tryUnifiedGeminiAnalysis uses Gemini with all available data (activity + context) in a single call
+// tryUnifiedGeminiAnalysis uses Gemini with all available data (activity + context) in a single call.
 func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string, activityResult *Result) *Result {
 	if d.geminiAPIKey == "" {
-		d.logger.Debug("Gemini API key not configured", "username", username)
+		d.logger.Warn("Gemini API key not configured - skipping AI analysis", "username", username)
 		return nil
 	}
 	
@@ -808,12 +860,13 @@ func (d *Detector) fetchAllActivity(ctx context.Context, username string) *Activ
 func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]PullRequest, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:pr&sort=created&order=desc&per_page=100", username)
 	
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	
-	if d.githubToken != "" {
+	// SECURITY: Validate and sanitize GitHub token before use
+	if d.githubToken != "" && d.isValidGitHubToken(d.githubToken) {
 		req.Header.Set("Authorization", "token "+d.githubToken)
 	}
 	
@@ -828,7 +881,10 @@ func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]Pu
 	}()
 	
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("GitHub API returned status %d (failed to read response)", resp.StatusCode)
+		}
 		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
 	}
 	
@@ -862,12 +918,13 @@ func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]Pu
 func (d *Detector) fetchIssues(ctx context.Context, username string) ([]Issue, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:issue&sort=created&order=desc&per_page=100", username)
 	
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	
-	if d.githubToken != "" {
+	// SECURITY: Validate and sanitize GitHub token before use
+	if d.githubToken != "" && d.isValidGitHubToken(d.githubToken) {
 		req.Header.Set("Authorization", "token "+d.githubToken)
 	}
 	
@@ -882,7 +939,10 @@ func (d *Detector) fetchIssues(ctx context.Context, username string) ([]Issue, e
 	}()
 	
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("GitHub API returned status %d (failed to read response)", resp.StatusCode)
+		}
 		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
 	}
 	
@@ -964,7 +1024,10 @@ func (d *Detector) fetchUserComments(ctx context.Context, username string) ([]Co
 	}()
 	
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("GitHub GraphQL API returned status %d (failed to read response)", resp.StatusCode)
+		}
 		return nil, fmt.Errorf("GitHub GraphQL API returned status %d: %s", resp.StatusCode, string(body))
 	}
 	
@@ -1027,12 +1090,13 @@ func (d *Detector) fetchUserComments(ctx context.Context, username string) ([]Co
 func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]Organization, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/users/%s/orgs", username)
 	
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	
-	if d.githubToken != "" {
+	// SECURITY: Validate and sanitize GitHub token before use
+	if d.githubToken != "" && d.isValidGitHubToken(d.githubToken) {
 		req.Header.Set("Authorization", "token "+d.githubToken)
 	}
 	
@@ -1047,7 +1111,10 @@ func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]O
 	}()
 	
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("GitHub API returned status %d (failed to read response)", resp.StatusCode)
+		}
 		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
 	}
 	
@@ -1062,12 +1129,13 @@ func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]O
 func (d *Detector) fetchUser(ctx context.Context, username string) *GitHubUser {
 	url := fmt.Sprintf("https://api.github.com/users/%s", username)
 	
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return nil
 	}
 	
-	if d.githubToken != "" {
+	// SECURITY: Validate and sanitize GitHub token before use
+	if d.githubToken != "" && d.isValidGitHubToken(d.githubToken) {
 		req.Header.Set("Authorization", "token "+d.githubToken)
 	}
 	
@@ -1075,7 +1143,11 @@ func (d *Detector) fetchUser(ctx context.Context, username string) *GitHubUser {
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			d.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
 	
 	var user GitHubUser
 	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
@@ -1087,6 +1159,7 @@ func (d *Detector) fetchUser(ctx context.Context, username string) *GitHubUser {
 
 func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Location, error) {
 	if d.mapsAPIKey == "" {
+		d.logger.Warn("Google Maps API key not configured - skipping geocoding", "location", location)
 		return nil, fmt.Errorf("Google Maps API key not configured")
 	}
 	
@@ -1094,7 +1167,7 @@ func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Locat
 	url := fmt.Sprintf("https://maps.googleapis.com/maps/api/geocode/json?address=%s&key=%s", 
 		encodedLocation, d.mapsAPIKey)
 	
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -1103,7 +1176,11 @@ func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Locat
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			d.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
 	
 	var result struct {
 		Results []struct {
@@ -1130,7 +1207,7 @@ func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Locat
 	
 	if err := json.Unmarshal(body, &result); err != nil {
 		d.logger.Debug("geocoding JSON parse error", "location", location, "error", err, "full_body", string(body))
-		return nil, fmt.Errorf("failed to parse geocoding response: %v", err)
+		return nil, fmt.Errorf("failed to parse geocoding response: %w", err)
 	}
 	
 	if result.Status != "OK" || len(result.Results) == 0 {
@@ -1174,6 +1251,7 @@ func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Locat
 
 func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64) (string, error) {
 	if d.mapsAPIKey == "" {
+		d.logger.Warn("Google Maps API key not configured - skipping timezone lookup", "lat", lat, "lng", lng)
 		return "", fmt.Errorf("Google Maps API key not configured")
 	}
 	
@@ -1181,7 +1259,7 @@ func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64)
 	url := fmt.Sprintf("https://maps.googleapis.com/maps/api/timezone/json?location=%.6f,%.6f&timestamp=%d&key=%s",
 		lat, lng, timestamp, d.mapsAPIKey)
 	
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return "", err
 	}
@@ -1190,7 +1268,11 @@ func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64)
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			d.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
 	
 	var result struct {
 		TimeZoneID string `json:"timeZoneId"`
@@ -1755,7 +1837,11 @@ User data: %s`
 		return "", "", 0, err
 	}
 	
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=%s", d.geminiAPIKey)
+	model := d.geminiModel
+	if model == "" {
+		model = "gemini-2.5-flash-lite"
+	}
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, d.geminiAPIKey)
 	
 	// Check cache first for Gemini API calls
 	var responseBody []byte
@@ -1781,10 +1867,17 @@ User data: %s`
 		if err != nil {
 			return "", "", 0, err
 		}
-		defer resp.Body.Close()
+		defer func() {
+		if err := resp.Body.Close(); err != nil {
+			d.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
 		
 		if resp.StatusCode != 200 {
-			body, _ := io.ReadAll(resp.Body)
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return "", "", 0, fmt.Errorf("Gemini API error: %d (failed to read response)", resp.StatusCode)
+			}
 			return "", "", 0, fmt.Errorf("Gemini API error: %d %s", resp.StatusCode, string(body))
 		}
 		
@@ -1895,7 +1988,7 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 		blogURL = "https://" + blogURL
 	}
 	
-	req, err := http.NewRequestWithContext(ctx, "GET", blogURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", blogURL, http.NoBody)
 	if err != nil {
 		d.logger.Debug("failed to create website request", "url", blogURL, "error", err)
 		return ""
@@ -1908,7 +2001,11 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 		d.logger.Debug("failed to fetch website", "url", blogURL, "error", err)
 		return ""
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			d.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
 	
 	if resp.StatusCode != 200 {
 		d.logger.Debug("website returned non-200 status", "url", blogURL, "status", resp.StatusCode)
@@ -1916,7 +2013,11 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 	}
 	
 	body := make([]byte, 50*1024)
-	n, _ := io.ReadFull(resp.Body, body)
+	n, err := io.ReadFull(resp.Body, body)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		d.logger.Debug("failed to read blog content", "error", err)
+		return ""
+	}
 	content := string(body[:n])
 	
 	content = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(content, " ")

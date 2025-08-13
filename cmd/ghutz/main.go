@@ -15,8 +15,10 @@ import (
 var (
 	githubToken   = flag.String("github-token", "", "GitHub token for API access (or set GITHUB_TOKEN)")
 	geminiAPIKey  = flag.String("gemini-key", "", "Gemini API key (or set GEMINI_API_KEY)")
+	geminiModel   = flag.String("gemini-model", "gemini-2.5-flash-lite", "Gemini model to use (or set GEMINI_MODEL)")
 	mapsAPIKey    = flag.String("maps-key", "", "Google Maps API key (or set GOOGLE_MAPS_API_KEY)")
 	gcpProject    = flag.String("gcp-project", "", "GCP project ID (or set GCP_PROJECT)")
+	cacheDir      = flag.String("cache-dir", "", "Cache directory (or set CACHE_DIR)")
 	verbose       = flag.Bool("verbose", false, "Enable verbose logging")
 	activity      = flag.Bool("activity", false, "Force activity analysis")
 	version       = flag.Bool("version", false, "Show version")
@@ -56,22 +58,34 @@ func main() {
 	if *geminiAPIKey == "" {
 		*geminiAPIKey = os.Getenv("GEMINI_API_KEY")
 	}
+	if *geminiModel == "gemini-2.5-flash-lite" && os.Getenv("GEMINI_MODEL") != "" {
+		*geminiModel = os.Getenv("GEMINI_MODEL")
+	}
 	if *mapsAPIKey == "" {
 		*mapsAPIKey = os.Getenv("GOOGLE_MAPS_API_KEY")
 	}
 	if *gcpProject == "" {
 		*gcpProject = os.Getenv("GCP_PROJECT")
 	}
+	if *cacheDir == "" {
+		*cacheDir = os.Getenv("CACHE_DIR")
+	}
 
 	// Create detector with options
-	detector := ghutz.NewWithLogger(
-		logger,
+	detectorOpts := []ghutz.Option{
 		ghutz.WithGitHubToken(*githubToken),
 		ghutz.WithGeminiAPIKey(*geminiAPIKey),
+		ghutz.WithGeminiModel(*geminiModel),
 		ghutz.WithMapsAPIKey(*mapsAPIKey),
 		ghutz.WithGCPProject(*gcpProject),
 		ghutz.WithActivityAnalysis(*activity),
-	)
+	}
+	
+	if *cacheDir != "" {
+		detectorOpts = append(detectorOpts, ghutz.WithCacheDir(*cacheDir))
+	}
+	
+	detector := ghutz.NewWithLogger(logger, detectorOpts...)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

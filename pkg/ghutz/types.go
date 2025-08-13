@@ -54,6 +54,12 @@ func WithActivityAnalysis(enabled bool) Option {
 	}
 }
 
+func WithCacheDir(dir string) Option {
+	return func(o *OptionHolder) {
+		o.cacheDir = dir
+	}
+}
+
 // OptionHolder holds configuration options
 type OptionHolder struct {
 	githubToken   string
@@ -61,6 +67,7 @@ type OptionHolder struct {
 	geminiAPIKey  string
 	geminiModel   string
 	gcpProject    string
+	cacheDir      string
 	forceActivity bool
 }
 

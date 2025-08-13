@@ -4,16 +4,18 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/gob"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
+	"sync"
 	"time"
+
+	"github.com/maypok86/otter/v2"
 )
 
 type CacheEntry struct {
@@ -22,165 +24,281 @@ type CacheEntry struct {
 	ETag      string    `json:"etag,omitempty"`
 }
 
-type DiskCache struct {
-	dir    string
-	ttl    time.Duration
-	logger *slog.Logger
+type OtterCache struct {
+	cache      otter.Cache[string, CacheEntry]
+	dir        string
+	ttl        time.Duration
+	logger     *slog.Logger
+	mu         sync.RWMutex
+	saveCancel context.CancelFunc
+	saveWg     sync.WaitGroup
 }
 
-func NewDiskCache(dir string, ttl time.Duration, logger *slog.Logger) (*DiskCache, error) {
+func NewOtterCache(dir string, ttl time.Duration, logger *slog.Logger) (*OtterCache, error) {
 	// Create cache directory if it doesn't exist
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		return nil, fmt.Errorf("creating cache directory: %w", err)
 	}
-	
-	return &DiskCache{
+
+	// Create otter cache with 100k capacity using v2 API
+	cache := otter.Must(&otter.Options[string, CacheEntry]{
+		MaximumSize:     100_000,
+		InitialCapacity: 10_000,
+		ExpiryCalculator: otter.ExpiryWriting[string, CacheEntry](ttl),
+	})
+
+	c := &OtterCache{
+		cache:  *cache, // Dereference the pointer
 		dir:    dir,
 		ttl:    ttl,
 		logger: logger,
-	}, nil
+	}
+
+	// Load existing cache from disk
+	if err := c.loadFromDisk(); err != nil {
+		logger.Warn("failed to load cache from disk", "error", err)
+	} else {
+		logger.Info("cache loaded from disk", "entries", c.cache.EstimatedSize())
+	}
+
+	// Start periodic save goroutine
+	c.startPeriodicSave()
+
+	return c, nil
 }
 
-func (c *DiskCache) getCacheKey(url string) string {
+func (c *OtterCache) getCacheKey(url string) string {
 	h := sha256.New()
 	h.Write([]byte(url))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// getCacheKeyForAPICall generates a cache key for API calls including request body
-func (c *DiskCache) getCacheKeyForAPICall(url string, requestBody []byte) string {
+func (c *OtterCache) getCacheKeyForAPICall(url string, requestBody []byte) string {
 	h := sha256.New()
 	h.Write([]byte(url))
 	h.Write(requestBody)
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func (c *DiskCache) getCachePath(key string) string {
-	// Use subdirectories to avoid too many files in one directory
-	return filepath.Join(c.dir, key[:2], key[2:4], key+".json")
+func (c *OtterCache) getCachePath() string {
+	return filepath.Join(c.dir, "otter-cache.gob")
 }
 
-func (c *DiskCache) Get(url string) ([]byte, string, bool) {
+func (c *OtterCache) Get(url string) ([]byte, string, bool) {
 	key := c.getCacheKey(url)
-	path := c.getCachePath(key)
 	
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			c.logger.Warn("CACHE MISS - file not found", "url", url)
-		} else {
-			c.logger.Error("CACHE MISS - read error", "url", url, "error", err)
-		}
+	entry, found := c.cache.GetIfPresent(key)
+	if !found {
+		c.logger.Debug("CACHE MISS - not found", "url", url)
 		return nil, "", false
 	}
-	
-	var entry CacheEntry
-	if err := json.Unmarshal(data, &entry); err != nil {
-		c.logger.Error("CACHE MISS - unmarshal error", "url", url, "error", err)
-		return nil, "", false
-	}
-	
-	// Check if expired
+
+	// Check if expired (otter should handle this, but double-check for safety)
 	if time.Now().After(entry.ExpiresAt) {
-		c.logger.Warn("CACHE MISS - expired", "url", url, "expired_at", entry.ExpiresAt)
+		c.logger.Debug("CACHE MISS - expired", "url", url, "expired_at", entry.ExpiresAt)
+		c.cache.Invalidate(key)
 		return nil, "", false
 	}
-	
-	// No log for cache hit to reduce noise
+
 	return entry.Data, entry.ETag, true
 }
 
-func (c *DiskCache) Set(url string, data []byte, etag string) error {
+func (c *OtterCache) Set(url string, data []byte, etag string) error {
 	key := c.getCacheKey(url)
-	path := c.getCachePath(key)
-	
-	// Create parent directories
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating cache directory: %w", err)
-	}
 	
 	entry := CacheEntry{
 		Data:      data,
 		ExpiresAt: time.Now().Add(c.ttl),
 		ETag:      etag,
 	}
-	
-	jsonData, err := json.Marshal(entry)
-	if err != nil {
-		return fmt.Errorf("marshaling cache entry: %w", err)
-	}
-	
-	if err := os.WriteFile(path, jsonData, 0644); err != nil {
-		return fmt.Errorf("writing cache file: %w", err)
-	}
-	
-	c.logger.Debug("cache set", "url", url, "expires_at", entry.ExpiresAt)
+
+	c.cache.Set(key, entry)
+	c.logger.Debug("cache set", "url", url, "expires_at", entry.ExpiresAt, "size", len(data))
 	return nil
 }
 
-// SetAPICall caches an API call response with request body considered in the key
-func (c *DiskCache) SetAPICall(url string, requestBody []byte, data []byte) error {
+func (c *OtterCache) SetAPICall(url string, requestBody []byte, data []byte) error {
 	key := c.getCacheKeyForAPICall(url, requestBody)
-	path := c.getCachePath(key)
-	
-	// Create parent directories
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating cache directory: %w", err)
-	}
 	
 	entry := CacheEntry{
 		Data:      data,
 		ExpiresAt: time.Now().Add(c.ttl),
 		ETag:      "", // API calls don't typically use ETags
 	}
-	
-	jsonData, err := json.Marshal(entry)
-	if err != nil {
-		return fmt.Errorf("marshaling cache entry: %w", err)
-	}
-	
-	if err := os.WriteFile(path, jsonData, 0644); err != nil {
-		return fmt.Errorf("writing cache file: %w", err)
-	}
-	
-	c.logger.Debug("API cache set", "url", url, "expires_at", entry.ExpiresAt)
+
+	c.cache.Set(key, entry)
+	c.logger.Debug("API cache set", "url", url, "expires_at", entry.ExpiresAt, "size", len(data))
 	return nil
 }
 
-// GetAPICall retrieves a cached API call response
-func (c *DiskCache) GetAPICall(url string, requestBody []byte) ([]byte, bool) {
+func (c *OtterCache) GetAPICall(url string, requestBody []byte) ([]byte, bool) {
 	key := c.getCacheKeyForAPICall(url, requestBody)
-	path := c.getCachePath(key)
 	
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			c.logger.Warn("API CACHE MISS - file not found", "url", url)
-		} else {
-			c.logger.Error("API CACHE MISS - read error", "url", url, "error", err)
-		}
+	entry, found := c.cache.GetIfPresent(key)
+	if !found {
+		c.logger.Debug("API CACHE MISS - not found", "url", url)
 		return nil, false
 	}
-	
-	var entry CacheEntry
-	if err := json.Unmarshal(data, &entry); err != nil {
-		c.logger.Error("API CACHE MISS - unmarshal error", "url", url, "error", err)
-		return nil, false
-	}
-	
-	// Check if expired
+
+	// Check if expired (otter should handle this, but double-check for safety)
 	if time.Now().After(entry.ExpiresAt) {
-		c.logger.Warn("API CACHE MISS - expired", "url", url, "expired_at", entry.ExpiresAt)
+		c.logger.Debug("API CACHE MISS - expired", "url", url, "expired_at", entry.ExpiresAt)
+		c.cache.Invalidate(key)
 		return nil, false
 	}
-	
-	// No log for API cache hit to reduce noise
+
 	return entry.Data, true
 }
 
-// CachedHTTPDo performs an HTTP request with caching support
+func (c *OtterCache) loadFromDisk() error {
+	cachePath := c.getCachePath()
+	
+	file, err := os.Open(cachePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // No existing cache file
+		}
+		return fmt.Errorf("opening cache file: %w", err)
+	}
+	defer file.Close()
+
+	decoder := gob.NewDecoder(file)
+	
+	var entries map[string]CacheEntry
+	if err := decoder.Decode(&entries); err != nil {
+		return fmt.Errorf("decoding cache file: %w", err)
+	}
+
+	// Load entries into cache, filtering out expired ones
+	now := time.Now()
+	validEntries := 0
+	for key, entry := range entries {
+		if now.Before(entry.ExpiresAt) {
+			c.cache.Set(key, entry)
+			validEntries++
+		}
+	}
+
+	c.logger.Info("loaded cache from disk", 
+		"total_entries", len(entries), 
+		"valid_entries", validEntries,
+		"expired_entries", len(entries)-validEntries)
+
+	return nil
+}
+
+func (c *OtterCache) saveToDisk() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	cachePath := c.getCachePath()
+	
+	// Create temporary file
+	tempPath := cachePath + ".tmp"
+	file, err := os.Create(tempPath)
+	if err != nil {
+		return fmt.Errorf("creating temp cache file: %w", err)
+	}
+	defer func() {
+		file.Close()
+		os.Remove(tempPath) // Clean up temp file if we fail
+	}()
+
+	// Collect all cache entries
+	entries := make(map[string]CacheEntry)
+	now := time.Now()
+	
+	// Use iterator to iterate over all entries in otter v2
+	c.cache.All()(func(key string, entry CacheEntry) bool {
+		// Only save non-expired entries
+		if now.Before(entry.ExpiresAt) {
+			entries[key] = entry
+		}
+		return true // Continue iteration
+	})
+
+	// Encode to gob format
+	encoder := gob.NewEncoder(file)
+	if err := encoder.Encode(entries); err != nil {
+		return fmt.Errorf("encoding cache to file: %w", err)
+	}
+
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("syncing cache file: %w", err)
+	}
+
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("closing cache file: %w", err)
+	}
+
+	// Atomically replace the old cache file
+	if err := os.Rename(tempPath, cachePath); err != nil {
+		return fmt.Errorf("replacing cache file: %w", err)
+	}
+
+	c.logger.Info("cache saved to disk", "entries", len(entries), "path", cachePath)
+	return nil
+}
+
+func (c *OtterCache) startPeriodicSave() {
+	ctx, cancel := context.WithCancel(context.Background())
+	c.saveCancel = cancel
+
+	c.saveWg.Add(1)
+	go func() {
+		defer c.saveWg.Done()
+		
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := c.saveToDisk(); err != nil {
+					c.logger.Error("periodic cache save failed", "error", err)
+				}
+			}
+		}
+	}()
+}
+
+func (c *OtterCache) Close() error {
+	// Stop periodic saving
+	if c.saveCancel != nil {
+		c.saveCancel()
+	}
+	c.saveWg.Wait()
+
+	// Final save before closing
+	if err := c.saveToDisk(); err != nil {
+		c.logger.Error("final cache save failed", "error", err)
+		return err
+	}
+
+	// Otter v2 doesn't require explicit closing
+	
+	c.logger.Info("cache closed and saved to disk")
+	return nil
+}
+
+func (c *OtterCache) Stats() map[string]interface{} {
+	// Return basic stats since otter v2 doesn't expose detailed stats in the same way
+	return map[string]interface{}{
+		"size": c.cache.EstimatedSize(),
+	}
+}
+
+// Clean is kept for backward compatibility but is now a no-op since otter handles TTL automatically
+func (c *OtterCache) Clean() error {
+	// Otter automatically removes expired entries, so this is a no-op
+	stats := c.Stats()
+	c.logger.Debug("cache stats", "stats", stats)
+	return nil
+}
+
+// CachedHTTPDo performs an HTTP request with caching support.
 func (d *Detector) cachedHTTPDo(ctx context.Context, req *http.Request) (*http.Response, error) {
 	// Only cache GET requests
 	if req.Method != "GET" {
@@ -221,7 +339,9 @@ func (d *Detector) cachedHTTPDo(ctx context.Context, req *http.Request) (*http.R
 	if resp.StatusCode == http.StatusOK {
 		// Read the response body
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			d.logger.Debug("failed to close response body", "error", closeErr)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -237,36 +357,4 @@ func (d *Detector) cachedHTTPDo(ctx context.Context, req *http.Request) (*http.R
 	}
 	
 	return resp, nil
-}
-
-// Clean removes expired cache entries
-func (c *DiskCache) Clean() error {
-	return filepath.Walk(c.dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		
-		if info.IsDir() || !strings.HasSuffix(path, ".json") {
-			return nil
-		}
-		
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil // Skip files we can't read
-		}
-		
-		var entry CacheEntry
-		if err := json.Unmarshal(data, &entry); err != nil {
-			// Remove invalid cache files
-			os.Remove(path)
-			return nil
-		}
-		
-		if time.Now().After(entry.ExpiresAt) {
-			c.logger.Debug("cleaning expired cache", "path", path)
-			os.Remove(path)
-		}
-		
-		return nil
-	})
 }

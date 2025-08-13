@@ -95,7 +95,7 @@ func TestFetchGitHubUser(t *testing.T) {
 		
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
+		if _, err := w.Write([]byte(`{
 			"login": "testuser",
 			"name": "Test User",
 			"location": "San Francisco, CA",
@@ -103,7 +103,9 @@ func TestFetchGitHubUser(t *testing.T) {
 			"bio": "Software developer",
 			"blog": "https://example.com",
 			"company": "@github"
-		}`))
+		}`)); err != nil {
+			http.Error(w, "Write failed", http.StatusInternalServerError)
+		}
 	}))
 	defer server.Close()
 	

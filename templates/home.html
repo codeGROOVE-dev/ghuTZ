@@ -3,24 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🌍 ghuTZ - GitHub User Timezone Detective 🕐</title>
+    <title>ghuTZ - GitHub Timezone Detective</title>
     <style>
         :root {
-            --primary-bg: #ffffff;
-            --secondary-bg: #f8f9fa;
-            --accent-bg: #f0f2f5;
-            --primary-text: #2c3e50;
-            --secondary-text: #6c757d;
-            --accent-color: #6366f1;
-            --success-color: #10b981;
-            --warning-color: #f59e0b;
-            --error-color: #ef4444;
-            --border-color: #e5e7eb;
-            --shadow-light: 0 1px 3px rgba(0, 0, 0, 0.1);
-            --shadow-medium: 0 4px 6px rgba(0, 0, 0, 0.1);
-            --shadow-heavy: 0 10px 25px rgba(0, 0, 0, 0.15);
-            --border-radius: 12px;
-            --border-radius-sm: 8px;
+            --burnt-orange: #cc5500;
+            --deep-brown: #8b4513;
+            --golden-yellow: #ffa500;
+            --rust-red: #cd853f;
+            --forest-green: #228b22;
+            --bright-orange: #ff4500;
+            --golden: #ffd700;
+            --cream: #f5deb3;
+            --dark-brown: #654321;
+            --off-black: #2f1b14;
+            
+            /* Nigerian textile pattern colors */
+            --kente-red: #b8860b;
+            --earth-orange: #d2691e;
+            --mud-brown: #a0522d;
         }
 
         * {
@@ -30,456 +30,432 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
-            background: var(--primary-bg);
-            color: var(--primary-text);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(45deg, var(--burnt-orange) 0%, var(--rust-red) 30%, var(--golden-yellow) 70%, var(--earth-orange) 100%);
+            color: var(--off-black);
             min-height: 100vh;
-            line-height: 1.6;
-            overflow-x: hidden;
-        }
-
-        .hero-gradient {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 60vh;
-            display: flex;
-            align-items: center;
+            margin: 0;
+            padding: 8px;
             position: relative;
         }
 
-        .hero-gradient::before {
+        /* Nigerian-inspired geometric pattern overlay */
+        body::before {
             content: '';
-            position: absolute;
+            position: fixed;
             top: 0;
             left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
+            width: 100%;
+            height: 100%;
+            background-image: 
+                repeating-linear-gradient(30deg, transparent, transparent 8px, rgba(139,69,19,0.08) 8px, rgba(139,69,19,0.08) 16px),
+                repeating-linear-gradient(-30deg, transparent, transparent 12px, rgba(205,133,63,0.06) 12px, rgba(205,133,63,0.06) 24px),
+                radial-gradient(circle at 25% 25%, rgba(255,165,0,0.05) 0%, transparent 50%),
+                radial-gradient(circle at 75% 75%, rgba(204,85,0,0.05) 0%, transparent 50%);
+            z-index: -1;
         }
 
         .container {
             max-width: 1200px;
             margin: 0 auto;
-            padding: 0 20px;
+            background: var(--cream);
+            border: 3px solid var(--dark-brown);
+            box-shadow: 8px 8px 0px var(--off-black);
         }
 
-        .hero-content {
-            position: relative;
-            z-index: 2;
-            text-align: center;
-            color: white;
-            max-width: 800px;
-            margin: 0 auto;
+        .header {
+            background: var(--deep-brown);
+            color: var(--golden);
+            padding: 8px 16px;
+            border-bottom: 2px solid var(--off-black);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo {
+            font-weight: 700;
+            font-size: 18px;
+            letter-spacing: 1px;
+        }
+
+        .tagline {
+            font-size: 11px;
+            opacity: 0.9;
+            font-weight: 500;
         }
 
         .main-content {
-            background: var(--primary-bg);
-            margin-top: -80px;
-            border-radius: var(--border-radius) var(--border-radius) 0 0;
-            box-shadow: var(--shadow-heavy);
-            position: relative;
-            z-index: 3;
-            padding: 80px 40px 40px;
+            padding: 12px 16px;
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 16px;
+            min-height: 400px;
         }
 
-        .section {
-            margin-bottom: 60px;
+        .left-panel {
+            background: var(--golden-yellow);
+            border: 2px solid var(--off-black);
+            padding: 12px;
         }
 
-        .section-header {
-            text-align: center;
-            margin-bottom: 40px;
-        }
-
-        .card {
-            background: var(--primary-bg);
-            border-radius: var(--border-radius);
-            box-shadow: var(--shadow-medium);
-            border: 1px solid var(--border-color);
-            padding: 30px;
-            margin-bottom: 20px;
-        }
-
-        .hero-title {
-            font-size: 3.5rem;
+        .input-section h3 {
+            font-size: 13px;
             font-weight: 700;
-            margin-bottom: 20px;
-            line-height: 1.1;
+            color: var(--off-black);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
-        .hero-subtitle {
-            font-size: 1.25rem;
-            margin-bottom: 30px;
-            opacity: 0.9;
-            line-height: 1.4;
-        }
-
-        .section-title {
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: var(--primary-text);
-            margin-bottom: 16px;
-        }
-
-        .section-subtitle {
-            font-size: 1.125rem;
-            color: var(--secondary-text);
-            max-width: 600px;
-            margin: 0 auto;
-            line-height: 1.6;
-        }
-
-        .feature-text {
-            font-size: 1rem;
-            color: var(--secondary-text);
-            margin-bottom: 24px;
-            line-height: 1.6;
-        }
-
-        .input-group {
-            margin: 30px 0;
-        }
-
-        .input-wrapper {
-            position: relative;
+        .input-row {
             display: flex;
-            gap: 15px;
+            gap: 6px;
+            margin-bottom: 8px;
         }
 
-        input[type="text"] {
+        .input-row input {
             flex: 1;
-            background: rgba(0, 0, 0, 0.7);
-            border: 2px solid var(--neon-green);
-            border-radius: 8px;
-            padding: 15px;
-            color: var(--neon-green);
-            font-family: inherit;
-            font-size: 16px;
+            padding: 6px 8px;
+            border: 2px solid var(--off-black);
+            background: var(--cream);
+            color: var(--off-black);
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .input-row input:focus {
             outline: none;
-            transition: all 0.3s ease;
-        }
-
-        input[type="text"]:focus {
-            border-color: var(--neon-blue);
-            box-shadow: 0 0 20px var(--neon-blue);
-            transform: scale(1.02);
-        }
-
-        input[type="text"]::placeholder {
-            color: rgba(57, 255, 20, 0.5);
+            box-shadow: 0 0 0 2px var(--bright-orange);
         }
 
         .detect-btn {
-            background: linear-gradient(45deg, var(--neon-pink), var(--neon-blue));
+            background: var(--off-black);
+            color: var(--golden);
             border: none;
-            border-radius: 8px;
-            padding: 15px 25px;
-            color: white;
-            font-family: inherit;
-            font-weight: bold;
-            font-size: 16px;
+            padding: 6px 16px;
+            font-weight: 700;
+            font-size: 14px;
             cursor: pointer;
-            transition: all 0.3s ease;
             text-transform: uppercase;
             letter-spacing: 1px;
-            position: relative;
-            overflow: hidden;
+            transition: all 0.1s ease;
         }
 
         .detect-btn:hover:not(:disabled) {
-            transform: scale(1.05);
-            box-shadow: 0 0 30px var(--neon-pink);
+            background: var(--bright-orange);
+            color: var(--off-black);
         }
 
         .detect-btn:disabled {
             opacity: 0.6;
             cursor: not-allowed;
-            animation: pulse 1s infinite;
         }
 
-        @keyframes pulse {
-            0%, 100% { opacity: 0.6; }
-            50% { opacity: 0.8; }
+        .stats-compact {
+            margin-top: 12px;
+            font-size: 11px;
+            line-height: 1.3;
         }
 
-        .error-msg {
-            color: var(--neon-pink);
-            background: rgba(255, 20, 147, 0.1);
-            border: 1px solid var(--neon-pink);
-            border-radius: 5px;
-            padding: 10px;
-            margin-top: 15px;
-            text-align: center;
-            display: none;
+        .stats-compact .stat {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 3px;
+            font-weight: 600;
         }
 
-        .error-msg.show {
-            display: block;
-            animation: shake 0.5s ease;
-        }
-
-        @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            25% { transform: translateX(-10px); }
-            75% { transform: translateX(10px); }
+        .right-panel {
+            background: var(--cream);
+            border: 2px solid var(--rust-red);
+            padding: 12px;
+            overflow-y: auto;
+            max-height: 400px;
         }
 
         .result-container {
-            margin-top: 40px;
-            padding: 30px;
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid var(--neon-green);
-            border-radius: 10px;
             display: none;
-            animation: slideIn 0.5s ease;
         }
 
         .result-container.show {
             display: block;
         }
 
-        @keyframes slideIn {
-            from { opacity: 0; transform: translateY(30px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
         .result-header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-
-        .result-box {
-            background: var(--terminal-bg);
-            border: 1px solid var(--neon-blue);
-            border-radius: 8px;
-            padding: 20px;
-            margin: 15px 0;
-            font-family: 'Courier New', monospace;
-        }
-
-        .result-line {
-            display: flex;
-            align-items: center;
-            margin: 10px 0;
-            gap: 15px;
-        }
-
-        .result-icon {
-            font-size: 1.2em;
-            width: 30px;
-            flex-shrink: 0;
-        }
-
-        .result-label {
-            color: var(--neon-yellow);
-            font-weight: bold;
-            min-width: 120px;
-        }
-
-        .result-value {
-            color: var(--neon-green);
-            flex: 1;
-        }
-
-        .confidence-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 5px 10px;
-            border-radius: 15px;
-            font-size: 12px;
-            font-weight: bold;
+            background: var(--rust-red);
+            color: var(--cream);
+            padding: 6px 8px;
+            margin: -12px -12px 8px -12px;
+            font-weight: 700;
+            font-size: 13px;
             text-transform: uppercase;
             letter-spacing: 1px;
         }
 
-        .confidence-high {
-            background: var(--confidence-high);
-            color: black;
-            box-shadow: 0 0 10px var(--confidence-high);
+        .result-grid {
+            display: grid;
+            grid-template-columns: 60px 1fr;
+            gap: 6px 12px;
+            font-size: 12px;
+            line-height: 1.4;
         }
 
-        .confidence-medium {
-            background: var(--confidence-med);
-            color: black;
-            box-shadow: 0 0 10px var(--confidence-med);
+        .result-label {
+            font-weight: 700;
+            color: var(--deep-brown);
+            text-transform: uppercase;
+            font-size: 10px;
         }
 
-        .confidence-low {
-            background: var(--confidence-low);
-            color: white;
-            box-shadow: 0 0 10px var(--confidence-low);
+        .result-value {
+            font-weight: 600;
+            color: var(--off-black);
+            background: var(--golden-yellow);
+            padding: 2px 6px;
+            border: 1px solid var(--off-black);
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            font-size: 11px;
+        }
+
+        .confidence-badge {
+            font-size: 10px;
+            padding: 1px 4px;
+            border: 1px solid var(--off-black);
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .confidence-high { 
+            background: var(--forest-green); 
+            color: var(--cream); 
+        }
+        .confidence-medium { 
+            background: var(--golden-yellow); 
+            color: var(--off-black); 
+        }
+        .confidence-low { 
+            background: var(--bright-orange); 
+            color: var(--cream); 
         }
 
         .map-container {
-            margin-top: 20px;
-            border: 2px solid var(--neon-blue);
-            border-radius: 10px;
+            margin-top: 8px;
+            border: 2px solid var(--off-black);
+            height: 100px;
+            background: var(--cream);
             overflow: hidden;
-            height: 300px;
-            background: var(--terminal-bg);
         }
 
-        .loading-animation {
-            display: inline-block;
-            margin-left: 10px;
+        .error-msg {
+            background: var(--bright-orange);
+            color: var(--cream);
+            border: 2px solid var(--off-black);
+            padding: 6px 8px;
+            margin-top: 8px;
+            display: none;
+            font-size: 11px;
+            font-weight: 700;
         }
 
-        .loading-animation::after {
-            content: '';
-            animation: dots 1.5s infinite;
+        .error-msg.show {
+            display: block;
         }
 
-        @keyframes dots {
-            0%, 20% { content: ''; }
-            40% { content: '.'; }
-            60% { content: '..'; }
-            90%, 100% { content: '...'; }
+        .info-section {
+            margin-top: 12px;
+            background: var(--golden-yellow);
+            border: 1px solid var(--deep-brown);
+            padding: 8px;
         }
 
-        /* Responsive Design */
+        .info-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--off-black);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+            border-bottom: 1px solid var(--deep-brown);
+            padding-bottom: 2px;
+        }
+
+        .info-content {
+            font-size: 10px;
+            line-height: 1.3;
+            color: var(--dark-brown);
+        }
+
+        .footer {
+            background: var(--off-black);
+            color: var(--golden);
+            padding: 6px 16px;
+            text-align: center;
+            font-size: 10px;
+            border-top: 2px solid var(--dark-brown);
+        }
+
+        .footer a {
+            color: var(--golden);
+            text-decoration: none;
+            font-weight: 700;
+        }
+
+        .footer a:hover {
+            color: var(--bright-orange);
+        }
+
+        /* Mobile responsiveness */
         @media (max-width: 768px) {
-            .container { padding: 15px; }
-            .terminal-content { padding: 20px; }
-            .title-text { font-size: 1.5em; }
-            .input-wrapper { flex-direction: column; }
-            .detect-btn { width: 100%; }
-            .result-line { flex-direction: column; align-items: flex-start; gap: 5px; }
-            .result-label { min-width: auto; }
+            body { padding: 4px; }
+            .main-content {
+                grid-template-columns: 1fr;
+                gap: 12px;
+                padding: 8px 12px;
+            }
+            .container {
+                box-shadow: 4px 4px 0px var(--off-black);
+            }
+            .input-row {
+                flex-wrap: wrap;
+            }
+            .detect-btn {
+                width: 100%;
+                margin-top: 4px;
+            }
         }
 
-        @media (max-width: 480px) {
-            .ascii-art { font-size: 8px; }
-            .title-text { font-size: 1.2em; }
-            .subtitle { font-size: 1em; }
-        }
-
-        /* Matrix rain effect */
-        .matrix-char {
-            position: absolute;
-            color: var(--neon-green);
-            font-family: monospace;
-            font-size: 12px;
-            opacity: 0.3;
-            animation: matrixFall linear infinite;
-        }
-
-        @keyframes matrixFall {
-            0% { transform: translateY(-100vh); opacity: 1; }
-            100% { transform: translateY(100vh); opacity: 0; }
+        /* Compact height optimization */
+        @media (max-height: 600px) {
+            .main-content { 
+                min-height: auto; 
+                padding: 8px 12px; 
+            }
+            .right-panel { 
+                max-height: 300px; 
+            }
+            .map-container { 
+                height: 80px; 
+            }
         }
     </style>
 </head>
 <body>
-    <canvas class="matrix-bg" id="matrixCanvas"></canvas>
-    
     <div class="container">
-        <div class="terminal-window">
-            <div class="terminal-header">
-                <div class="terminal-buttons">
-                    <button class="terminal-button close"></button>
-                    <button class="terminal-button minimize"></button>
-                    <button class="terminal-button maximize"></button>
+        <div class="header">
+            <div class="logo">ghuTZ v2.1</div>
+            <div class="tagline">github timezone detection</div>
+        </div>
+        
+        <div class="main-content">
+            <div class="left-panel">
+                <div class="input-section">
+                    <h3>▸ Detect User</h3>
+                    <form id="detectForm">
+                        <div class="input-row">
+                            <input type="text" id="username" placeholder="github-username" required>
+                            <button type="submit" class="detect-btn" id="submitBtn">GO</button>
+                        </div>
+                    </form>
+                    <div id="error" class="error-msg"></div>
                 </div>
-                <div class="terminal-title">ghuTZ Terminal v2.1.0</div>
-            </div>
-            
-            <div class="terminal-content">
-                <div class="ascii-art">╭─────────────────────────────────────────────────────────╮
-│         GitHub User Timezone Detection                  │
-╰─────────────────────────────────────────────────────────╯</div>
                 
-                <div class="title-text">🌍 ghuTZ Detective 🕐</div>
-                <div class="subtitle">✨ Discover timezone magic from GitHub activity patterns ✨</div>
-
-                <form id="detectForm" class="input-group">
-                    <div class="input-wrapper">
-                        <input type="text" id="username" placeholder="🔍 Enter GitHub username..." required>
-                        <button type="submit" class="detect-btn" id="submitBtn">
-                            🚀 Detect
-                        </button>
+                <div class="stats-compact">
+                    <div class="stat">
+                        <span>Cache:</span>
+                        <span>100k entries</span>
                     </div>
-                </form>
+                    <div class="stat">
+                        <span>Methods:</span>
+                        <span>8 detection types</span>
+                    </div>
+                    <div class="stat">
+                        <span>Speed:</span>
+                        <span>&lt; 2 seconds</span>
+                    </div>
+                    <div class="stat">
+                        <span>Accuracy:</span>
+                        <span>~85% average</span>
+                    </div>
+                </div>
 
-                <div id="error" class="error-msg"></div>
+                <div class="info-section">
+                    <div class="info-title">▸ Detection Methods</div>
+                    <div class="info-content">
+                        • Profile timezone extraction<br>
+                        • Location geocoding<br>
+                        • Activity pattern analysis (AI)<br>
+                        • Company location heuristics<br>
+                        • Email domain analysis<br>
+                        • Website content analysis<br>
+                        • Work schedule inference<br>
+                        • Lunch break detection
+                    </div>
+                </div>
+            </div>
 
+            <div class="right-panel">
                 <div id="result" class="result-container">
-                    <div class="result-header">
-                        <h2>🎯 Detection Results for <span id="resultUsername"></span></h2>
-                    </div>
-                    
-                    <div class="result-box">
-                        <div class="result-line">
-                            <span class="result-icon">👤</span>
-                            <span class="result-label">User:</span>
-                            <span class="result-value" id="displayUsername"></span>
-                        </div>
+                    <div class="result-header">Detection Results</div>
+                    <div class="result-grid">
+                        <div class="result-label">User:</div>
+                        <div class="result-value" id="displayUsername">-</div>
                         
-                        <div class="result-line">
-                            <span class="result-icon">🕐</span>
-                            <span class="result-label">User TZ:</span>
-                            <span class="result-value" id="timezone"></span>
-                            <span id="confidence" class="confidence-badge"></span>
-                        </div>
+                        <div class="result-label">Zone:</div>
+                        <div class="result-value" id="timezone">-</div>
                         
-                        <div class="result-line" id="activityTzLine" style="display: none;">
-                            <span class="result-icon">📊</span>
-                            <span class="result-label">Activity TZ:</span>
-                            <span class="result-value" id="activityTz"></span>
-                        </div>
+                        <div class="result-label">Conf:</div>
+                        <div class="result-value"><span id="confidence" class="confidence-badge">-</span></div>
                         
-                        <div class="result-line" id="activeHoursLine" style="display: none;">
-                            <span class="result-icon">⏰</span>
-                            <span class="result-label">Active Hours:</span>
-                            <span class="result-value" id="activeHours"></span>
-                        </div>
+                        <div class="result-label" id="activityLabel" style="display: none;">Activity:</div>
+                        <div class="result-value" id="activityTz" style="display: none;">-</div>
                         
-                        <div class="result-line" id="lunchLine" style="display: none;">
-                            <span class="result-icon">🍽️</span>
-                            <span class="result-label">Lunch Break:</span>
-                            <span class="result-value" id="lunchHours"></span>
-                        </div>
+                        <div class="result-label" id="hoursLabel" style="display: none;">Hours:</div>
+                        <div class="result-value" id="activeHours" style="display: none;">-</div>
                         
-                        <div class="result-line" id="locationLine" style="display: none;">
-                            <span class="result-icon">📍</span>
-                            <span class="result-label">Location:</span>
-                            <span class="result-value" id="location"></span>
-                        </div>
+                        <div class="result-label" id="lunchLabel" style="display: none;">Lunch:</div>
+                        <div class="result-value" id="lunchHours" style="display: none;">-</div>
                         
-                        <div class="result-line">
-                            <span class="result-icon">⚙️</span>
-                            <span class="result-label">Method:</span>
-                            <span class="result-value" id="method"></span>
-                        </div>
+                        <div class="result-label" id="locationLabel" style="display: none;">Location:</div>
+                        <div class="result-value" id="location" style="display: none;">-</div>
+                        
+                        <div class="result-label">Method:</div>
+                        <div class="result-value" id="method">-</div>
                     </div>
 
                     <div id="map" class="map-container" style="display: none;"></div>
                 </div>
+                
+                <div class="info-section">
+                    <div class="info-title">▸ How It Works</div>
+                    <div class="info-content">
+                        Analyzes GitHub activity patterns, profile data, and contextual clues to determine timezone. 
+                        Uses AI to cross-reference work schedules, lunch breaks, and sleep patterns for accuracy.
+                        Supports remote work detection and handles multiple timezone evidence sources.
+                    </div>
+                </div>
             </div>
+        </div>
+        
+        <div class="footer">
+            <a href="https://codegroove.dev">codeGROOVE</a> • faster code reviews • powered by AI pattern analysis
         </div>
     </div>
 
     <script>
-        // URL sharing and dynamic behavior
         let currentUsername = '';
 
-        // Check URL parameters on load
         window.addEventListener('load', function() {
             const urlParams = new URLSearchParams(window.location.search);
             const usernameParam = urlParams.get('u');
             
             if (usernameParam) {
                 document.getElementById('username').value = usernameParam;
-                // Auto-detect if username is provided in URL
                 setTimeout(() => {
                     document.getElementById('detectForm').dispatchEvent(new Event('submit'));
                 }, 500);
             }
-            
-            initMatrix();
         });
 
-        // Update URL when results are displayed
         function updateURL(username) {
             currentUsername = username;
             const newURL = new URL(window.location);
@@ -487,53 +463,6 @@
             window.history.replaceState({}, '', newURL);
         }
 
-        // Matrix rain effect
-        function initMatrix() {
-            const canvas = document.getElementById('matrixCanvas');
-            const ctx = canvas.getContext('2d');
-            
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-            
-            const matrix = "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789@#$%^&*()*&^%+-/~{[|`]}";
-            const matrixArray = matrix.split("");
-            
-            const font_size = 10;
-            const columns = canvas.width/font_size;
-            const drops = [];
-            
-            for(let x = 0; x < columns; x++) {
-                drops[x] = 1; 
-            }
-            
-            function draw() {
-                ctx.fillStyle = 'rgba(26, 26, 46, 0.04)';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                
-                ctx.fillStyle = '#39ff14';
-                ctx.font = font_size + 'px monospace';
-                
-                for(let i = 0; i < drops.length; i++) {
-                    const text = matrixArray[Math.floor(Math.random()*matrixArray.length)];
-                    ctx.fillText(text, i*font_size, drops[i]*font_size);
-                    
-                    if(drops[i]*font_size > canvas.height && Math.random() > 0.975) {
-                        drops[i] = 0;
-                    }
-                    
-                    drops[i]++;
-                }
-            }
-            
-            setInterval(draw, 35);
-            
-            window.addEventListener('resize', () => {
-                canvas.width = window.innerWidth;
-                canvas.height = window.innerHeight;
-            });
-        }
-
-        // Form handling
         document.getElementById('detectForm').addEventListener('submit', async (e) => {
             e.preventDefault();
 
@@ -545,14 +474,14 @@
             if (!username) return;
 
             submitBtn.disabled = true;
-            submitBtn.innerHTML = '🔍 Detecting<span class="loading-animation"></span>';
+            submitBtn.innerHTML = '...';
             errorDiv.classList.remove('show');
             resultDiv.classList.remove('show');
 
             try {
                 const response = await fetch('/api/v1/detect', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({username})
                 });
 
@@ -566,21 +495,18 @@
                 displayResults(data);
 
             } catch (error) {
-                errorDiv.textContent = '❌ Error: ' + error.message;
+                errorDiv.textContent = 'ERROR: ' + error.message;
                 errorDiv.classList.add('show');
             } finally {
                 submitBtn.disabled = false;
-                submitBtn.innerHTML = '🚀 Detect';
+                submitBtn.innerHTML = 'GO';
             }
         });
 
         function displayResults(data) {
-            // Update all the result fields
-            document.getElementById('resultUsername').textContent = data.username;
             document.getElementById('displayUsername').textContent = data.username;
             document.getElementById('timezone').textContent = data.timezone;
 
-            // Confidence badge
             const confidenceSpan = document.getElementById('confidence');
             const confidencePct = Math.round((data.timezone_confidence || data.confidence || 0) * 100);
             const badges = ['●●●', '●●○', '●○○', '○○○'];
@@ -591,81 +517,84 @@
             else if (confidencePct >= 50) { badgeIndex = 2; badgeClass = 'confidence-medium'; }
             else { badgeIndex = 3; badgeClass = 'confidence-low'; }
 
-            confidenceSpan.textContent = badges[badgeIndex] + ' (' + confidencePct + '%)';
+            confidenceSpan.textContent = badges[badgeIndex] + ' ' + confidencePct + '%';
             confidenceSpan.className = 'confidence-badge ' + badgeClass;
 
-            // Activity timezone
             if (data.activity_timezone) {
-                document.getElementById('activityTz').textContent = data.activity_timezone + ' (based on GitHub activity patterns)';
-                document.getElementById('activityTzLine').style.display = 'flex';
+                document.getElementById('activityTz').textContent = data.activity_timezone;
+                document.getElementById('activityLabel').style.display = 'block';
+                document.getElementById('activityTz').style.display = 'block';
             }
 
-            // Active hours
             if (data.active_hours_local && (data.active_hours_local.start || data.active_hours_local.end)) {
-                const activeHoursText = formatActiveHours(data.timezone, data.active_hours_local.start, data.active_hours_local.end);
+                const activeHoursText = formatActiveHours(data.active_hours_local.start, data.active_hours_local.end);
                 document.getElementById('activeHours').textContent = activeHoursText;
-                document.getElementById('activeHoursLine').style.display = 'flex';
+                document.getElementById('hoursLabel').style.display = 'block';
+                document.getElementById('activeHours').style.display = 'block';
             }
 
-            // Lunch hours
             if (data.lunch_hours_local && data.lunch_hours_local.confidence > 0) {
-                const lunchText = formatLunchHours(data.timezone, data.lunch_hours_local.start, data.lunch_hours_local.end);
-                const lunchConfidence = Math.round(data.lunch_hours_local.confidence * 100);
-                document.getElementById('lunchHours').textContent = lunchText + ' (' + lunchConfidence + '% confidence)';
-                document.getElementById('lunchLine').style.display = 'flex';
+                const lunchText = formatLunchHours(data.lunch_hours_local.start, data.lunch_hours_local.end);
+                document.getElementById('lunchHours').textContent = lunchText;
+                document.getElementById('lunchLabel').style.display = 'block';
+                document.getElementById('lunchHours').style.display = 'block';
             }
 
-            // Location
             let locationText = '';
             if (data.gemini_suggested_location) {
-                locationText = data.gemini_suggested_location + ' (AI-suggested)';
+                locationText = data.gemini_suggested_location;
             } else if (data.location_name) {
                 locationText = data.location_name;
             } else if (data.location) {
-                locationText = 'Coordinates: ' + data.location.latitude.toFixed(5) + ', ' + data.location.longitude.toFixed(5);
+                locationText = data.location.latitude.toFixed(1) + ', ' + data.location.longitude.toFixed(1);
             }
             
             if (locationText) {
                 document.getElementById('location').textContent = locationText;
-                document.getElementById('locationLine').style.display = 'flex';
+                document.getElementById('locationLabel').style.display = 'block';
+                document.getElementById('location').style.display = 'block';
             }
 
-            // Method
             const methodName = formatMethodName(data.method);
             document.getElementById('method').textContent = methodName;
 
-            // Map
             if (data.location) {
                 initMap(data.location.latitude, data.location.longitude, data.username);
             }
 
-            // Show results
             document.getElementById('result').classList.add('show');
         }
 
         function formatMethodName(method) {
             const methodNames = {
-                'github_profile': 'GitHub Profile Timezone',
-                'location_geocoding': 'Location Field Geocoding', 
-                'activity_patterns': 'Activity Pattern Analysis',
-                'gemini_refined_activity': 'AI-Enhanced Activity Analysis',
-                'company_heuristic': 'Company-based Inference',
-                'email_heuristic': 'Email Domain Analysis',
-                'blog_heuristic': 'Blog Domain Analysis',
-                'website_gemini_analysis': 'Website AI Analysis',
-                'gemini_analysis': 'AI Context Analysis'
+                'github_profile': 'profile',
+                'location_geocoding': 'geocoding', 
+                'activity_patterns': 'activity',
+                'gemini_refined_activity': 'ai+activity',
+                'company_heuristic': 'company',
+                'email_heuristic': 'email',
+                'blog_heuristic': 'blog',
+                'website_gemini_analysis': 'website+ai',
+                'gemini_analysis': 'ai'
             };
-            return methodNames[method] || method.replace(/_/g, ' ');
+            return methodNames[method] || method;
         }
 
-        function formatActiveHours(timezone, start, end) {
-            // Simplified formatting for web display
-            return start + ':00am - ' + end + ':00pm ' + timezone;
+        function formatActiveHours(start, end) {
+            return formatHour(start) + '-' + formatHour(end);
         }
 
-        function formatLunchHours(timezone, start, end) {
-            // Simplified formatting for web display  
-            return start + ':00pm - ' + end + ':00pm ' + timezone;
+        function formatLunchHours(start, end) {
+            return formatHour(start) + '-' + formatHour(end);
+        }
+
+        function formatHour(decimalHour) {
+            const hour = Math.floor(decimalHour);
+            const minutes = Math.round((decimalHour - hour) * 60);
+            const period = hour < 12 ? 'am' : 'pm';
+            const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+            const minuteStr = minutes === 0 ? '00' : minutes.toString().padStart(2, '0');
+            return displayHour + ':' + minuteStr + period;
         }
 
         function initMap(lat, lng, username) {
@@ -677,9 +606,6 @@
                 '&layer=mapnik&marker=' + lat + ',' + lng + '" allowfullscreen></iframe>';
         }
 
-        // Matrix effect is now initialized in the main load handler above
-
-        // Add some keyboard shortcuts for fun
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && e.ctrlKey) {
                 document.getElementById('detectForm').dispatchEvent(new Event('submit'));

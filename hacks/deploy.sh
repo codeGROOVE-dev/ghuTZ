@@ -1,5 +1,5 @@
 #!/bin/sh
-GCP_PROJECT="ghutz"
+GCP_PROJECT="ghutz-468911"
 GCP_REGION="us-central1"
 APP_ID="ghutz"
 
