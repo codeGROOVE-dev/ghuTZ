@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -294,6 +293,19 @@ func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Res
 			d.logger.Debug("failed to close response body", "error", err)
 		}
 	}()
+	
+	// Check if user exists - GitHub returns 404 for non-existent users
+	if resp.StatusCode == http.StatusNotFound {
+		d.logger.Info("GitHub user not found", "username", username)
+		// Return a special result indicating user doesn't exist
+		// This will be cached to avoid repeated lookups
+		return &Result{
+			Username:   username,
+			Timezone:   "UTC",  // Default timezone for non-existent users
+			Confidence: 0,      // Zero confidence indicates non-existent user
+			Method:     "user_not_found",
+		}
+	}
 	
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -1528,7 +1540,7 @@ func timezoneFromOffset(offsetHours int) string {
 	return fmt.Sprintf("UTC%d", offsetHours) // Negative sign is already included
 }
 
-func getTimezoneCandidatesForOffset(offsetHours float64) []string {
+func timezoneCandidatesForOffset(offsetHours float64) []string {
 	switch offsetHours {
 	case -9:
 		return []string{"America/Anchorage"}
@@ -1574,6 +1586,7 @@ func getTimezoneCandidatesForOffset(offsetHours float64) []string {
 }
 
 func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]interface{}, verbose bool) (string, string, float64, error) {
+	// Check if we have activity data for confidence scoring later
 	activityTimezone := ""
 	hasActivityData := false
 	if tz, ok := contextData["activity_detected_timezone"].(string); ok && tz != "" {
@@ -1581,222 +1594,21 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 		hasActivityData = true
 	}
 	
-	var prompt string
-	if hasActivityData {
-		if verbose {
-			prompt = `You are a timezone detection expert. I have detected a timezone based on GitHub activity patterns, but I want you to validate or refine this detection using additional contextual clues.
-
-ACTIVITY-BASED DETECTION: The user's GitHub pull request timing patterns suggest they are in timezone: %s
-
-DETECTED WORK SCHEDULE (in local time based on activity analysis):
-- Work hours: Available in context data as work_start_local and work_end_local (e.g., 9.0 = 9:00am)
-- Lunch break: Available in context data as lunch_start_local and lunch_end_local with confidence level
-- Sleep hours: Available in context data as sleep_hours_utc (hours in UTC when user is typically inactive)
-
-Your task is to either:
-1. CONFIRM the activity-based timezone if the contextual evidence supports it
-2. REFINE it to a more accurate timezone in the same general region if you have strong evidence
-3. Return "UNKNOWN" if the contextual evidence strongly contradicts the activity patterns
-
-Consider these additional clues to validate/refine:
-- Complete GitHub profile JSON (location, company, blog, bio, email, etc.)
-- GitHub organization memberships and their locations/descriptions
-- Pull request titles and issue body text (may contain location/conference references, language patterns)
-- Website/blog content (may contain explicit location info, language, regional context)
-- Username patterns that might indicate nationality/region (e.g., "wojciechka" suggests Polish origin)
-- Company location vs user location (remote work is common)
-- Language patterns in PR/issue text (American vs British English spelling, local idioms)
-- Known tech company locations (e.g., Chainguard is US-based)
-- Work schedule patterns: Does the detected work schedule (start/end times, lunch timing) match typical patterns for the suspected region?
-
-IMPORTANT: DO NOT use cloud infrastructure regions as location hints:
-- AWS regions (us-east-1, eu-west-1, ap-southeast-2, etc.) in PRs/issues indicate deployment targets, not user location
-- GCP zones (us-central1-a, europe-west1-b, asia-southeast1-c, etc.) in PRs/issues indicate deployment targets, not user location
-- Azure regions mentioned in technical work are deployment targets, not user location
-- Docker registry regions, CDN endpoints, and other infrastructure references are technical choices, not location indicators
-
-Important guidelines:
-- TRUST the activity patterns - they are based on actual behavior
-- The work schedule data provides additional validation - unusual work hours might indicate remote work across timezones
-- Only change the timezone if you have STRONG evidence (explicit location mentions)
-- CRITICAL: Remote work is extremely common in tech - DO NOT assume someone lives where their company is based
-- If working for US company but no explicit current location, DO NOT assume US location
-- Birth country/nationality often indicates current location unless explicitly stated otherwise
-- Prefer timezones in the same UTC offset or neighboring regions  
-- Consider that the user might work remotely for companies in different countries
-- When username suggests a specific nationality/region that uses the SAME timezone as detected, feel confident suggesting that location and potentially refining to the country-specific timezone
-- For example: if activity patterns suggest Europe/Berlin and username suggests Polish origin, Europe/Warsaw (Poland) is more accurate since both are UTC+1/+2
-
-SPECIAL CASES TO WATCH:
-- If location says "Canada" but activity suggests Europe, they likely moved to Europe or work European hours
-- Canada spans UTC-3.5 to UTC-8, so Europe/Berlin (UTC+1/+2) is incompatible - trust the activity
-- If someone at Google has "Canada" location but European activity, they're likely in Europe now
-- For Etc/GMT timezones, these are rarely real - consider if the person might have unusual hours in a standard timezone
-
-IMPORTANT: For Etc/GMT timezones (like Etc/GMT-4), these are generic offset-based zones. Please suggest the most likely specific city or region based on:
-- The user's name/username origin (e.g., Polish names often indicate Poland location)
-- Company locations that match this offset
-- Common tech hubs in this timezone
-- Any contextual clues from their activity
-
-Note: If detected_gmt_offset is provided in the context, this is the GMT offset suggested by activity patterns. Consider which specific timezone (e.g., America/Los_Angeles for GMT-8, Europe/London for GMT+0) is most likely based on the user's name, company, and other contextual clues.
-
-Respond with a JSON object containing:
-- "timezone": IANA timezone identifier or "UNKNOWN"
-- "location": specific location name (city, region) or "UNKNOWN" 
-- "reasoning": brief explanation of your decision
-
-Context data: %s`
-		} else {
-			prompt = `You are a timezone detection expert. I have detected a timezone based on GitHub activity patterns, but I want you to validate or refine this detection using additional contextual clues.
-
-ACTIVITY-BASED DETECTION: The user's GitHub pull request timing patterns suggest they are in timezone: %s
-
-DETECTED WORK SCHEDULE (in local time based on activity analysis):
-- Work hours: Available in context data as work_start_local and work_end_local (e.g., 9.0 = 9:00am)
-- Lunch break: Available in context data as lunch_start_local and lunch_end_local with confidence level
-- Sleep hours: Available in context data as sleep_hours_utc (hours in UTC when user is typically inactive)
-
-Your task is to either:
-1. CONFIRM the activity-based timezone if the contextual evidence supports it
-2. REFINE it to a more accurate timezone in the same general region if you have strong evidence
-3. Return "UNKNOWN" if the contextual evidence strongly contradicts the activity patterns
-
-Consider these additional clues to validate/refine:
-- Complete GitHub profile JSON (location, company, blog, bio, email, etc.)
-- GitHub organization memberships and their locations/descriptions
-- Pull request titles and issue body text (may contain location/conference references, language patterns)
-- Website/blog content (may contain explicit location info, language, regional context)
-- Username patterns that might indicate nationality/region (e.g., "wojciechka" suggests Polish origin)
-- Company location vs user location (remote work is common)
-- Language patterns in PR/issue text (American vs British English spelling, local idioms)
-- Known tech company locations (e.g., Chainguard is US-based)
-- Work schedule patterns: Does the detected work schedule match typical patterns for the suspected region?
-
-IMPORTANT: DO NOT use cloud infrastructure regions as location hints:
-- AWS/GCP/Azure regions in PRs/issues indicate deployment targets, not user location
-- Docker registry regions and infrastructure references are technical choices, not location indicators
-
-Important guidelines:
-- TRUST the activity patterns - they are based on actual behavior
-- The work schedule data provides additional validation - unusual work hours might indicate remote work across timezones
-- Only change the timezone if you have STRONG evidence (explicit location mentions)
-- CRITICAL: Remote work is extremely common in tech - DO NOT assume someone lives where their company is based
-- If working for US company but no explicit current location, DO NOT assume US location
-- Birth country/nationality often indicates current location unless explicitly stated otherwise
-- Prefer timezones in the same UTC offset or neighboring regions
-- Consider that the user might work remotely for companies in different countries
-- When username suggests a specific nationality/region that uses the SAME timezone as detected, feel confident suggesting that location and potentially refining to the country-specific timezone
-- For example: if activity patterns suggest Europe/Berlin and username suggests Polish origin, Europe/Warsaw (Poland) is more accurate since both are UTC+1/+2
-
-Respond with a JSON object containing:
-- "timezone": IANA timezone identifier or "UNKNOWN"
-- "location": specific location name (city, region) or "UNKNOWN"
-- "reasoning": brief explanation of your decision
-
-Context data: %s`
-		}
-	} else {
-		if verbose {
-			prompt = `You are a timezone detection expert. Based on the complete GitHub user data and pull request history provided, determine the most likely timezone and specific location for this user.
-
-Analyze all available clues including:
-- Complete GitHub profile JSON (location, company, blog, bio, email, created_at, etc.)
-- GitHub organization memberships and their locations/descriptions  
-- Pull request titles and creation timestamps (up to 100 PRs)  
-- Website/blog content (may contain location references, language, or regional context)
-- Username patterns that might indicate nationality/region
-- Company names that might indicate location
-- Any contextual information from profile data, PR titles, organizations, or website content
-- Timing patterns in PR creation that might indicate working hours
-
-The location field may contain:
-- Real city/country names
-- Joke locations (like "Anarchist Jurisdiction") 
-- Company locations
-- Vague references
-
-Look beyond the obvious location field and use all contextual clues to make an informed decision. Be specific about location when you have strong evidence (e.g., "San Francisco Bay Area" instead of just "California").
-
-Username patterns can be valuable clues:
-- Names like "wojciechka" suggest Polish origin → consider Poland/Europe/Warsaw
-- Names like "giuseppe" suggest Italian origin → consider Italy/Europe/Rome  
-- Trust your instincts about nationality/region based on usernames when they align with detected timezone
-
-Important guidelines:
-- CRITICAL: Remote work is extremely common in tech - DO NOT assume someone lives where their company is based
-- Birth country/nationality often indicates current location unless explicitly stated otherwise  
-- If someone was born in Spain and works for a US company, they likely still live in Spain
-- Only assume relocation if there's explicit evidence of recent moves or current location mentions
-- Company employment alone is NOT evidence of physical location
-
-IMPORTANT: For Etc/GMT timezones (like Etc/GMT-4), these are generic offset-based zones. Please suggest the most likely specific city or region based on:
-- The user's name/username origin (e.g., Polish names often indicate Poland location)
-- Company locations that match this offset
-- Common tech hubs in this timezone
-- Any contextual clues from their activity
-
-Note: If detected_gmt_offset is provided in the context, this is the GMT offset suggested by activity patterns. Consider which specific timezone (e.g., America/Los_Angeles for GMT-8, Europe/London for GMT+0) is most likely based on the user's name, company, and other contextual clues.
-
-Respond with a JSON object containing:
-- "timezone": IANA timezone identifier or "UNKNOWN"
-- "location": specific location name (city, region) or "UNKNOWN" 
-- "reasoning": brief explanation of your decision
-
-User data: %s`
-		} else {
-			prompt = `You are a timezone detection expert. Based on the complete GitHub user data and pull request history provided, determine the most likely timezone and specific location for this user.
-
-Analyze all available clues including:
-- Complete GitHub profile JSON (location, company, blog, bio, email, created_at, etc.)
-- GitHub organization memberships and their locations/descriptions  
-- Pull request titles and creation timestamps (up to 100 PRs)  
-- Website/blog content (may contain location references, language, or regional context)
-- Username patterns that might indicate nationality/region
-- Company names that might indicate location
-- Any contextual information from profile data, PR titles, organizations, or website content
-- Timing patterns in PR creation that might indicate working hours
-
-The location field may contain:
-- Real city/country names
-- Joke locations (like "Anarchist Jurisdiction") 
-- Company locations
-- Vague references
-
-Look beyond the obvious location field and use all contextual clues to make an informed decision. Be specific about location when you have strong evidence (e.g., "San Francisco Bay Area" instead of just "California").
-
-Username patterns can be valuable clues:
-- Names like "wojciechka" suggest Polish origin → consider Poland/Europe/Warsaw
-- Names like "giuseppe" suggest Italian origin → consider Italy/Europe/Rome  
-- Trust your instincts about nationality/region based on usernames when they align with detected timezone
-
-Important guidelines:
-- CRITICAL: Remote work is extremely common in tech - DO NOT assume someone lives where their company is based
-- Birth country/nationality often indicates current location unless explicitly stated otherwise
-- If someone was born in Spain and works for a US company, they likely still live in Spain
-- Only assume relocation if there's explicit evidence of recent moves or current location mentions
-- Company employment alone is NOT evidence of physical location
-
-Respond with two lines:
-Line 1: TIMEZONE: followed by ONLY a valid IANA timezone identifier or "UNKNOWN"  
-Line 2: LOCATION: followed by a specific location name (city, region) or "UNKNOWN"
-
-User data: %s`
-		}
-	}
-
+	// Use the single consolidated prompt for all cases
+	prompt := unifiedGeminiPrompt()
+	
 	contextJSON, err := json.Marshal(contextData)
 	if err != nil {
 		return "", "", 0, err
 	}
 	
-	var fullPrompt string
+	// The consolidated prompt only takes one parameter - the context data
+	fullPrompt := fmt.Sprintf(prompt, string(contextJSON))
+	
 	if hasActivityData {
-		fullPrompt = fmt.Sprintf(prompt, activityTimezone, string(contextJSON))
 		d.logger.Debug("Gemini unified prompt (with activity)", "prompt_length", len(fullPrompt), 
 			"context_size_bytes", len(contextJSON), "activity_timezone", activityTimezone)
 	} else {
-		fullPrompt = fmt.Sprintf(prompt, string(contextJSON))
 		d.logger.Debug("Gemini unified prompt (context only)", "prompt_length", len(fullPrompt), 
 			"context_size_bytes", len(contextJSON))
 	}
@@ -1879,10 +1691,10 @@ User data: %s`
 			return "", "", 0, err
 		}
 		defer func() {
-		if err := resp.Body.Close(); err != nil {
-			d.logger.Debug("failed to close response body", "error", err)
-		}
-	}()
+			if err := resp.Body.Close(); err != nil {
+				d.logger.Debug("failed to close response body", "error", err)
+			}
+		}()
 		
 		if resp.StatusCode != 200 {
 			body, err := io.ReadAll(resp.Body)
@@ -1967,12 +1779,7 @@ User data: %s`
 		return "", "", 0, nil
 	}
 	
-	_, err = time.LoadLocation(timezone)
-	if err != nil {
-		d.logger.Debug("invalid timezone from unified Gemini", "timezone", timezone, "error", err)
-		return "", "", 0, nil
-	}
-	
+	// Calculate confidence based on whether activity data exists and matches
 	var confidence float64
 	if hasActivityData {
 		if timezone == activityTimezone {
@@ -1980,15 +1787,15 @@ User data: %s`
 			confidence = 0.9 // High confidence when activity + context agree
 		} else {
 			d.logger.Debug("Gemini refined activity-based timezone", "original", activityTimezone, "refined", timezone)
-			confidence = 0.85 // Good confidence for refinement
+			confidence = 0.75 // Medium-high confidence when Gemini refines based on strong evidence
 		}
 	} else {
-		confidence = 0.75 // Medium confidence for pure contextual analysis
+		// Pure context-based detection
+		confidence = 0.7 // Lower confidence without activity data
 	}
 	
 	return timezone, location, confidence, nil
 }
-
 
 func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) string {
 	if blogURL == "" {
@@ -2023,29 +1830,15 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 		return ""
 	}
 	
-	body := make([]byte, 50*1024)
-	n, err := io.ReadFull(resp.Body, body)
-	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
-		d.logger.Debug("failed to read blog content", "error", err)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024)) // 1MB limit
+	if err != nil {
+		d.logger.Debug("failed to read website body", "url", blogURL, "error", err)
 		return ""
 	}
-	content := string(body[:n])
 	
-	content = htmlTagRegex.ReplaceAllString(content, " ")
-	content = whitespaceRegex.ReplaceAllString(content, " ")
-	content = strings.TrimSpace(content)
-	
-	if len(content) > 2000 {
-		content = content[:2000] + "..."
-	}
-	
-	d.logger.Debug("fetched website content", "url", blogURL, "content_length", len(content))
-	return content
+	return string(body)
 }
 
-// detectLunchBreak analyzes activity patterns to find lunch breaks
-// Always returns a lunch break with confidence level based on consistency and size of dip
-// Prefers breaks closest to 12pm, limits to maximum 1 hour, supports 30-minute breaks
 func detectLunchBreak(hourCounts map[int]int, utcOffset int, workStart, workEnd int) (lunchStart, lunchEnd, confidence float64) {
 	// Convert hour counts to 30-minute buckets for better precision
 	bucketCounts := make(map[float64]int)

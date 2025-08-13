@@ -67,21 +67,11 @@ func NewOtterCache(dir string, ttl time.Duration, logger *slog.Logger) (*OtterCa
 	return c, nil
 }
 
-func (c *OtterCache) getCacheKey(url string) string {
-	h := sha256.New()
-	h.Write([]byte(url))
-	return hex.EncodeToString(h.Sum(nil))
-}
-
-func (c *OtterCache) getCacheKeyForAPICall(url string, requestBody []byte) string {
-	h := sha256.New()
-	h.Write([]byte(url))
-	h.Write(requestBody)
-	return hex.EncodeToString(h.Sum(nil))
-}
-
 func (c *OtterCache) Get(url string) ([]byte, string, bool) {
-	key := c.getCacheKey(url)
+	// Generate cache key from URL
+	h := sha256.New()
+	h.Write([]byte(url))
+	key := hex.EncodeToString(h.Sum(nil))
 	
 	entry, found := c.cache.GetIfPresent(key)
 	if !found {
@@ -100,7 +90,10 @@ func (c *OtterCache) Get(url string) ([]byte, string, bool) {
 }
 
 func (c *OtterCache) Set(url string, data []byte, etag string) error {
-	key := c.getCacheKey(url)
+	// Generate cache key from URL
+	h := sha256.New()
+	h.Write([]byte(url))
+	key := hex.EncodeToString(h.Sum(nil))
 	
 	entry := CacheEntry{
 		Data:      data,
@@ -114,7 +107,11 @@ func (c *OtterCache) Set(url string, data []byte, etag string) error {
 }
 
 func (c *OtterCache) SetAPICall(url string, requestBody []byte, data []byte) error {
-	key := c.getCacheKeyForAPICall(url, requestBody)
+	// Generate cache key from URL and request body
+	h := sha256.New()
+	h.Write([]byte(url))
+	h.Write(requestBody)
+	key := hex.EncodeToString(h.Sum(nil))
 	
 	entry := CacheEntry{
 		Data:      data,
@@ -128,7 +125,11 @@ func (c *OtterCache) SetAPICall(url string, requestBody []byte, data []byte) err
 }
 
 func (c *OtterCache) GetAPICall(url string, requestBody []byte) ([]byte, bool) {
-	key := c.getCacheKeyForAPICall(url, requestBody)
+	// Generate cache key from URL and request body
+	h := sha256.New()
+	h.Write([]byte(url))
+	h.Write(requestBody)
+	key := hex.EncodeToString(h.Sum(nil))
 	
 	entry, found := c.cache.GetIfPresent(key)
 	if !found {

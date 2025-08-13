@@ -1,594 +1,317 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ghuTZ - GitHub Timezone Detective</title>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --color-primary: #ffe838;
-            --color-primary-light: #fff176;
-            --color-primary-soft: #fffacd;
-            --color-secondary: #000000;
-            --color-white: #ffffff;
-            --color-gray-light: #fafafa;
-            --color-gray: #666666;
-            --color-gray-dark: #333333;
-            --color-accent: #9B59B6;
-            --color-accent-blue: #4ecdc4;
-            
-            --font-primary: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            
-            --border-radius: 0;
-            --shadow-brutal: 6px 6px 0 var(--color-secondary);
-            --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-
-        body {
-            font-family: var(--font-body);
-            background: var(--color-primary);
-            color: var(--color-secondary);
-            min-height: 100vh;
-            margin: 0;
-            padding: 0;
-            position: relative;
-            overflow-x: hidden;
-        }
-
-        /* Groovy background pattern */
-        body::before {
-            content: '';
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="20" cy="20" r="2" fill="rgba(0,0,0,0.1)"/><circle cx="80" cy="40" r="1" fill="rgba(0,0,0,0.1)"/><circle cx="40" cy="80" r="1.5" fill="rgba(0,0,0,0.1)"/></svg>') repeat;
-            opacity: 0.3;
-            z-index: -1;
-        }
-
-        .container {
-            max-width: 1000px;
-            margin: 0 auto;
-            background: var(--color-white);
-            min-height: 100vh;
-            position: relative;
-        }
-
-        /* Brutal header */
-        .header {
-            background: var(--color-primary);
-            border: 3px solid var(--color-secondary);
-            border-bottom: 6px solid var(--color-secondary);
-            padding: 12px 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            position: relative;
-        }
-
-        .logo {
-            font-family: var(--font-primary);
-            font-size: 24px;
-            font-weight: 700;
-            letter-spacing: -0.02em;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .logo-emoji {
-            font-size: 28px;
-            animation: groovyBounce 4s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite;
-        }
-
-        @keyframes groovyBounce {
-            0%, 100% { transform: translateY(0) rotate(0deg); }
-            25% { transform: translateY(-3px) rotate(-5deg); }
-            50% { transform: translateY(-1px) rotate(5deg); }
-            75% { transform: translateY(-4px) rotate(-3deg); }
-        }
-
-        .tagline {
-            font-size: 11px;
-            font-weight: 500;
-            opacity: 0.8;
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
-        }
-
-        .github-link {
-            color: var(--color-secondary);
-            text-decoration: none;
-            transition: var(--transition);
-            display: flex;
-            align-items: center;
-            padding: 4px;
-            border: 2px solid transparent;
-        }
-
-        .github-link:hover {
-            border: 2px solid var(--color-secondary);
-            background: var(--color-white);
-            transform: rotate(-5deg) scale(1.1);
-        }
-
-        /* Main content - Craigslist-style minimal layout */
-        .main-content {
-            display: grid;
-            grid-template-columns: 280px 1fr;
-            min-height: calc(100vh - 71px);
-        }
-
-        /* Left sidebar */
-        .sidebar {
-            background: var(--color-primary-soft);
-            border-right: 3px solid var(--color-secondary);
-            padding: 20px;
-        }
-
-        .input-section {
-            background: var(--color-white);
-            border: 3px solid var(--color-secondary);
-            padding: 16px;
-            margin-bottom: 20px;
-            position: relative;
-            box-shadow: var(--shadow-brutal);
-        }
-
-        .input-section:hover {
-            transform: translate(-2px, -2px);
-            box-shadow: 8px 8px 0 var(--color-secondary);
-        }
-
-        .section-title {
-            font-family: var(--font-primary);
-            font-size: 14px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .input-wrapper {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        input[type="text"] {
-            width: 100%;
-            padding: 10px;
-            border: 3px solid var(--color-secondary);
-            background: var(--color-white);
-            font-family: var(--font-body);
-            font-size: 14px;
-            font-weight: 500;
-            outline: none;
-            transition: var(--transition);
-        }
-
-        input[type="text"]:focus {
-            background: var(--color-primary-soft);
-            box-shadow: 0 0 0 2px var(--color-primary);
-        }
-
-        .detect-btn {
-            background: var(--color-secondary);
-            color: var(--color-primary);
-            border: none;
-            padding: 12px;
-            font-family: var(--font-primary);
-            font-weight: 700;
-            font-size: 14px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            cursor: pointer;
-            transition: var(--transition);
-            position: relative;
-            overflow: hidden;
-        }
-
-        .detect-btn::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
-            transition: left 0.5s;
-        }
-
-        .detect-btn:hover::before {
-            left: 100%;
-        }
-
-        .detect-btn:hover:not(:disabled) {
-            background: var(--color-gray-dark);
-            transform: scale(1.02);
-        }
-
-        .detect-btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            animation: pulse 1.5s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 0.6; }
-            50% { opacity: 0.8; }
-        }
-
-        /* Stats in brutal style */
-        .stats-box {
-            background: var(--color-white);
-            border: 3px solid var(--color-secondary);
-            padding: 12px;
-            margin-bottom: 20px;
-            font-size: 11px;
-            line-height: 1.5;
-            box-shadow: var(--shadow-brutal);
-        }
-
-        .stat-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 4px 0;
-            border-bottom: 1px solid var(--color-gray-light);
-        }
-
-        .stat-row:last-child {
-            border-bottom: none;
-        }
-
-        .stat-label {
-            font-weight: 600;
-            text-transform: uppercase;
-            font-size: 10px;
-            letter-spacing: 0.5px;
-        }
-
-        .stat-value {
-            font-family: var(--font-primary);
-            font-weight: 500;
-            color: var(--color-accent);
-        }
-
-        /* Right content area */
-        .content-area {
-            padding: 20px;
-            background: var(--color-white);
-        }
-
-        .result-container {
-            display: none;
-            animation: slideIn 0.5s ease;
-        }
-
-        .result-container.show {
-            display: block;
-        }
-
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Developer Timezone Lookup</title>
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
             }
-            to {
-                opacity: 1;
-                transform: translateY(0);
+
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+                font-size: 14px;
+                line-height: 1.5;
+                color: #000;
+                background: #fff;
+                max-width: 640px;
+                margin: 0 auto;
+                padding: 20px;
             }
-        }
 
-        .result-box {
-            background: var(--color-white);
-            border: 3px solid var(--color-secondary);
-            padding: 24px;
-            margin-bottom: 20px;
-            box-shadow: var(--shadow-brutal);
-            position: relative;
-            transform: rotate(-0.5deg);
-        }
-
-        .result-box:hover {
-            transform: rotate(0deg) translate(-2px, -2px);
-            box-shadow: 8px 8px 0 var(--color-secondary);
-        }
-
-        .result-grid {
-            display: grid;
-            grid-template-columns: 140px 1fr;
-            gap: 16px;
-            font-size: 14px;
-            align-items: center;
-        }
-
-        .result-label {
-            font-family: var(--font-primary);
-            font-weight: 700;
-            text-transform: uppercase;
-            font-size: 11px;
-            letter-spacing: 0.5px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .result-value {
-            font-weight: 600;
-            background: var(--color-primary-soft);
-            padding: 8px 12px;
-            border: 2px solid var(--color-secondary);
-            font-family: var(--font-primary);
-            font-size: 15px;
-            color: var(--color-secondary);
-            letter-spacing: -0.2px;
-            box-shadow: 2px 2px 0 rgba(0,0,0,0.1);
-        }
-
-        .result-value.high-contrast {
-            background: var(--color-secondary);
-            color: var(--color-primary);
-            font-weight: 700;
-        }
-
-        .confidence-badge {
-            display: inline-block;
-            padding: 2px 8px;
-            font-size: 10px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            border: 2px solid var(--color-secondary);
-        }
-
-        .confidence-high {
-            background: var(--color-accent-blue);
-            color: var(--color-secondary);
-        }
-
-        .confidence-medium {
-            background: var(--color-primary);
-            color: var(--color-secondary);
-        }
-
-        .confidence-low {
-            background: var(--color-accent);
-            color: var(--color-white);
-        }
-
-        .map-container {
-            margin-top: 20px;
-            border: 3px solid var(--color-secondary);
-            height: 200px;
-            background: var(--color-gray-light);
-            overflow: hidden;
-            box-shadow: var(--shadow-brutal);
-        }
-
-        .error-msg {
-            background: var(--color-accent);
-            color: var(--color-white);
-            border: 3px solid var(--color-secondary);
-            padding: 12px;
-            margin-top: 12px;
-            display: none;
-            font-weight: 600;
-            font-size: 12px;
-            box-shadow: var(--shadow-brutal);
-        }
-
-        .error-msg.show {
-            display: block;
-            animation: shake 0.5s;
-        }
-
-        @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            25% { transform: translateX(-5px); }
-            75% { transform: translateX(5px); }
-        }
-
-        /* Info section */
-        .info-box {
-            background: var(--color-white);
-            border: 3px solid var(--color-secondary);
-            padding: 16px;
-            margin-bottom: 20px;
-            box-shadow: var(--shadow-brutal);
-            transform: rotate(0.5deg);
-        }
-
-        .info-box:nth-child(even) {
-            transform: rotate(-0.5deg);
-        }
-
-        .info-content {
-            font-size: 11px;
-            line-height: 1.6;
-            color: var(--color-gray-dark);
-        }
-
-        .info-content li {
-            margin-bottom: 4px;
-            list-style-position: inside;
-        }
-
-        /* Footer */
-        .footer {
-            background: var(--color-secondary);
-            color: var(--color-primary);
-            padding: 12px 20px;
-            text-align: center;
-            font-size: 11px;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            border-top: 6px solid var(--color-secondary);
-        }
-
-        .footer a {
-            color: var(--color-primary);
-            text-decoration: none;
-            font-weight: 700;
-            border-bottom: 2px solid transparent;
-            transition: var(--transition);
-        }
-
-        .footer a:hover {
-            border-bottom-color: var(--color-primary);
-        }
-
-        /* Mobile */
-        @media (max-width: 768px) {
-            .main-content {
-                grid-template-columns: 1fr;
+            .header {
+                display: flex;
+                align-items: center;
+                margin-bottom: 20px;
+                border-bottom: 1px solid #ccc;
+                padding-bottom: 15px;
             }
-            
-            .sidebar {
-                border-right: none;
-                border-bottom: 3px solid var(--color-secondary);
+
+            .logo {
+                width: 32px;
+                height: 32px;
+                margin-right: 12px;
             }
-            
-            .result-box {
-                transform: none;
+
+            h1 {
+                font-size: 20px;
+                font-weight: 600;
+                margin: 0;
             }
-            
-            .info-box {
-                transform: none;
+
+            h2 {
+                font-size: 16px;
+                font-weight: 600;
+                margin: 20px 0 10px 0;
             }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
+
+            .form-section {
+                margin-bottom: 30px;
+            }
+
+            input[type="text"] {
+                width: 240px;
+                padding: 6px 8px;
+                border: 1px solid #999;
+                font-size: 14px;
+                font-family: inherit;
+            }
+
+            input[type="text"]:focus {
+                outline: none;
+                border-color: #000;
+            }
+
+            button {
+                padding: 6px 12px;
+                border: 1px solid #999;
+                background: #f5f5f5;
+                font-size: 14px;
+                cursor: pointer;
+                margin-left: 8px;
+                font-family: inherit;
+            }
+
+            button:hover {
+                background: #e5e5e5;
+                border-color: #666;
+            }
+
+            button:disabled {
+                background: #f9f9f9;
+                color: #999;
+                cursor: not-allowed;
+            }
+
+            .loading {
+                display: none;
+                padding: 20px 0;
+                color: #666;
+            }
+
+            .loading.show {
+                display: block;
+            }
+
+            .error {
+                display: none;
+                color: #000;
+                background: #f5f5f5;
+                padding: 10px;
+                border: 1px solid #ccc;
+                margin: 20px 0;
+            }
+
+            .error.show {
+                display: block;
+            }
+
+            .results {
+                display: none;
+                margin-top: 30px;
+            }
+
+            .results.show {
+                display: block;
+            }
+
+            .result-row {
+                margin: 8px 0;
+                border-bottom: 1px solid #eee;
+                padding-bottom: 8px;
+            }
+
+            .result-row:last-child {
+                border-bottom: none;
+            }
+
+            .result-label {
+                display: inline-block;
+                width: 120px;
+                color: #666;
+                font-size: 13px;
+            }
+
+            .result-value {
+                color: #000;
+                font-weight: 500;
+            }
+
+            .confidence-bar {
+                display: inline-block;
+                width: 100px;
+                height: 8px;
+                border: 1px solid #ccc;
+                background: #f5f5f5;
+                margin-left: 8px;
+                vertical-align: middle;
+            }
+
+            .confidence-fill {
+                height: 100%;
+                background: #000;
+                transition: width 0.3s ease;
+            }
+
+            #map {
+                width: 100%;
+                height: 200px;
+                border: 1px solid #ccc;
+                background: #f9f9f9;
+                margin-top: 10px;
+            }
+
+            .footer {
+                margin-top: 40px;
+                padding-top: 20px;
+                border-top: 1px solid #eee;
+                font-size: 12px;
+                color: #666;
+                text-align: center;
+            }
+
+            .footer a {
+                color: #000;
+                text-decoration: none;
+                margin: 0 10px;
+            }
+
+            .footer a:hover {
+                text-decoration: underline;
+            }
+
+            a {
+                color: #000;
+                text-decoration: none;
+            }
+
+            a:hover {
+                text-decoration: underline;
+            }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        </style>
+    </head>
+    <body>
         <div class="header">
-            <div class="logo">
-                <span class="logo-emoji">🕐</span>
-                <span>ghuTZ</span>
-            </div>
-            <div class="tagline">GitHub Timezone Detective</div>
-            <a href="https://github.com/codeGROOVE-dev/ghuTZ" target="_blank" class="github-link" title="View on GitHub">
-                <svg height="24" width="24" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-                </svg>
-            </a>
+            <img src="/static/logo.png" alt="ghuTZ" class="logo">
+            <h1>Developer Timezone Lookup</h1>
         </div>
         
-        <div class="main-content">
-            <div class="sidebar">
-                <div class="input-section">
-                    <h3 class="section-title">🔍 Detect User</h3>
-                    <form id="detectForm">
-                        <div class="input-wrapper">
-                            <input type="text" id="username" placeholder="Enter GitHub username" value="{{.Username}}" required>
-                            <button type="submit" class="detect-btn" id="submitBtn">DETECT</button>
-                        </div>
-                    </form>
-                    <div id="error" class="error-msg"></div>
-                </div>
-                
-                <div class="stats-box">
-                    <div class="stat-row">
-                        <span class="stat-label">Cache</span>
-                        <span class="stat-value">100K</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Methods</span>
-                        <span class="stat-value">8 types</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Speed</span>
-                        <span class="stat-value">&lt; 2 sec</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Accuracy</span>
-                        <span class="stat-value">~85%</span>
-                    </div>
-                </div>
+        <p>Detect the location, timezone, and working hours of any GitHub user for better collaboration timing.</p>
 
-                <div class="info-box">
-                    <h3 class="section-title">⚙️ Methods</h3>
-                    <div class="info-content">
-                        <ul>
-                            <li>Profile timezone</li>
-                            <li>Location geocoding</li>
-                            <li>Activity patterns (AI)</li>
-                            <li>Company heuristics</li>
-                            <li>Email/blog analysis</li>
-                            <li>Work schedule inference</li>
-                            <li>Lunch break detection</li>
-                        </ul>
-                    </div>
-                </div>
+        <div class="form-section">
+            <form id="detectForm">
+                <input type="text" id="username" placeholder="github username" value="{{.Username}}" autocomplete="off" required>
+                <button type="submit" id="submitBtn">Search</button>
+            </form>
+        </div>
+
+        <div id="error" class="error"></div>
+
+        <div id="loading" class="loading">
+            Searching...
+        </div>
+
+        <div id="result" class="results">
+            <h2>Results</h2>
+            
+            <div class="result-row">
+                <span class="result-label">Username:</span>
+                <span class="result-value" id="displayUsername">-</span>
             </div>
 
-            <div class="content-area">
-                <div id="result" class="result-container">
-                    <div class="result-box">
-                        <h3 class="section-title">📊 Detection Results</h3>
-                        <div class="result-grid">
-                            <div class="result-label">👤 User</div>
-                            <div class="result-value" id="displayUsername">-</div>
-                            
-                            <div id="nameRow" style="display: none;">
-                                <div class="result-label">📛 Name</div>
-                                <div class="result-value" id="displayName">-</div>
-                            </div>
-                            
-                            <div class="result-label">🌍 Zone</div>
-                            <div class="result-value high-contrast" id="timezone">-</div>
-                            
-                            <div class="result-label">📈 Confidence</div>
-                            <div class="result-value"><span id="confidence" class="confidence-badge">-</span></div>
-                            
-                            <div class="result-label" id="activityLabel" style="display: none;">📊 Activity Offset</div>
-                            <div class="result-value" id="activityTz" style="display: none;">-</div>
-                            
-                            <div class="result-label" id="hoursLabel" style="display: none;">⏰ Hours</div>
-                            <div class="result-value" id="activeHours" style="display: none;">-</div>
-                            
-                            <div class="result-label" id="lunchLabel" style="display: none;">🍽️ Lunch</div>
-                            <div class="result-value" id="lunchHours" style="display: none;">-</div>
-                            
-                            <div class="result-label" id="locationLabel" style="display: none;">📍 Location</div>
-                            <div class="result-value" id="location" style="display: none;">-</div>
-                            
-                            <div class="result-label">⚙️ Method</div>
-                            <div class="result-value" id="method">-</div>
-                        </div>
-                    </div>
+            <div class="result-row" id="nameRow" style="display: none;">
+                <span class="result-label">Name:</span>
+                <span class="result-value" id="displayName">-</span>
+            </div>
 
-                    <div id="map" class="map-container" style="display: none;"></div>
-                </div>
-                
-                <div class="info-box">
-                    <h3 class="section-title">🚀 How It Works</h3>
-                    <div class="info-content">
-                        <p>Analyzes GitHub activity patterns, profile data, and contextual clues to determine timezone. Uses AI to cross-reference work schedules, lunch breaks, and sleep patterns for accuracy.</p>
-                        <p style="margin-top: 12px;"><strong>Why?</strong> To achieve 10X faster code reviews, we need to find the perfect reviewer using signals like when they take lunch breaks.</p>
-                    </div>
-                </div>
+            <div class="result-row">
+                <span class="result-label">Timezone:</span>
+                <span class="result-value" id="timezone">-</span>
+            </div>
+
+            <div class="result-row" id="locationRow" style="display: none;">
+                <span class="result-label">Location:</span>
+                <span class="result-value" id="location">-</span>
+            </div>
+
+            <div class="result-row" id="activityRow" style="display: none;">
+                <span class="result-label">Activity timezone:</span>
+                <span class="result-value" id="activityTz">-</span>
+            </div>
+
+            <div class="result-row" id="hoursRow" style="display: none;">
+                <span class="result-label">Active hours:</span>
+                <span class="result-value" id="activeHours">-</span>
+            </div>
+
+            <div class="result-row" id="lunchRow" style="display: none;">
+                <span class="result-label">Lunch hours:</span>
+                <span class="result-value" id="lunchHours">-</span>
+            </div>
+
+            <div class="result-row">
+                <span class="result-label">Method:</span>
+                <span class="result-value" id="method">-</span>
+            </div>
+
+            <div class="result-row">
+                <span class="result-label">Confidence:</span>
+                <span class="result-value" id="confidenceText">-</span>
+                <span class="confidence-bar">
+                    <span class="confidence-fill" id="confidenceBar" style="width: 0%"></span>
+                </span>
+            </div>
+
+            <div class="result-row" id="mapRow" style="display: none;">
+                <span class="result-label">Map:</span>
+                <div id="map"></div>
             </div>
         </div>
-        
+
         <div class="footer">
-            <a href="https://codegroove.dev">codeGROOVE</a> • 10X faster code reviews
+            <a href="https://github.com/codeGROOVE-dev/ghuTZ">GitHub</a>
+            <a href="/api/v1/detect?username=octocat">API</a>
         </div>
-    </div>
 
-    <script src="/static/app.js"></script>
-</body>
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+        <script src="/static/app.js"></script>
+    </body>
 </html>

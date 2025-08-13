@@ -30,7 +30,9 @@ async function detectUser(username) {
     if (!username) return;
 
     submitBtn.disabled = true;
-    submitBtn.innerHTML = 'DETECTING...';
+    submitBtn.innerHTML = 'TRACKING...';
+    const loadingEl = document.getElementById('loading');
+    if (loadingEl) loadingEl.classList.add('show');
     errorDiv.classList.remove('show');
     resultDiv.classList.remove('show');
 
@@ -51,11 +53,18 @@ async function detectUser(username) {
         displayResults(data);
 
     } catch (error) {
-        errorDiv.textContent = '❌ ' + error.message;
+        // Check if it's a 404 (user not found)
+        if (error.message.includes('404') || error.message.includes('not found')) {
+            errorDiv.innerHTML = 'SUSPECT NOT FOUND: "' + username + '" - They\'ve gone off the grid!';
+        } else {
+            errorDiv.innerHTML = 'TRAIL WENT COLD: ' + error.message;
+        }
         errorDiv.classList.add('show');
     } finally {
         submitBtn.disabled = false;
-        submitBtn.innerHTML = 'DETECT';
+        submitBtn.innerHTML = 'TRACK DEVELOPER';
+        const loadingEl = document.getElementById('loading');
+        if (loadingEl) loadingEl.classList.remove('show');
     }
 }
 
@@ -68,15 +77,11 @@ document.getElementById('detectForm').addEventListener('submit', async (e) => {
 function displayResults(data) {
     // Reset all optional fields first
     document.getElementById('nameRow').style.display = 'none';
-    document.getElementById('activityLabel').style.display = 'none';
-    document.getElementById('activityTz').style.display = 'none';
-    document.getElementById('hoursLabel').style.display = 'none';
-    document.getElementById('activeHours').style.display = 'none';
-    document.getElementById('lunchLabel').style.display = 'none';
-    document.getElementById('lunchHours').style.display = 'none';
-    document.getElementById('locationLabel').style.display = 'none';
-    document.getElementById('location').style.display = 'none';
-    document.getElementById('map').style.display = 'none';
+    document.getElementById('activityRow').style.display = 'none';
+    document.getElementById('hoursRow').style.display = 'none';
+    document.getElementById('lunchRow').style.display = 'none';
+    document.getElementById('locationRow').style.display = 'none';
+    document.getElementById('mapRow').style.display = 'none';
     
     // Set required fields
     document.getElementById('displayUsername').textContent = data.username;
@@ -85,42 +90,36 @@ function displayResults(data) {
     // Display full name if available
     if (data.name) {
         document.getElementById('displayName').textContent = data.name;
-        document.getElementById('nameRow').style.display = 'contents';
+        document.getElementById('nameRow').style.display = 'block';
     }
 
-    const confidenceSpan = document.getElementById('confidence');
+    // Update confidence meter
     const confidencePct = Math.round((data.timezone_confidence || data.confidence || 0) * 100);
-    let badgeClass;
+    const confidenceBar = document.getElementById('confidenceBar');
+    const confidenceText = document.getElementById('confidenceText');
     
-    if (confidencePct >= 80) {
-        badgeClass = 'confidence-high';
-    } else if (confidencePct >= 50) {
-        badgeClass = 'confidence-medium';
-    } else {
-        badgeClass = 'confidence-low';
+    if (confidenceBar) {
+        confidenceBar.style.width = confidencePct + '%';
     }
-
-    confidenceSpan.textContent = confidencePct + '%';
-    confidenceSpan.className = 'confidence-badge ' + badgeClass;
+    if (confidenceText) {
+        confidenceText.textContent = confidencePct + '%';
+    }
 
     if (data.activity_timezone) {
         document.getElementById('activityTz').textContent = data.activity_timezone;
-        document.getElementById('activityLabel').style.display = 'flex';
-        document.getElementById('activityTz').style.display = 'block';
+        document.getElementById('activityRow').style.display = 'block';
     }
 
     if (data.active_hours_local && (data.active_hours_local.start || data.active_hours_local.end)) {
         const activeHoursText = formatActiveHours(data.active_hours_local.start, data.active_hours_local.end);
         document.getElementById('activeHours').textContent = activeHoursText;
-        document.getElementById('hoursLabel').style.display = 'flex';
-        document.getElementById('activeHours').style.display = 'block';
+        document.getElementById('hoursRow').style.display = 'block';
     }
 
     if (data.lunch_hours_local && data.lunch_hours_local.confidence > 0) {
         const lunchText = formatLunchHours(data.lunch_hours_local.start, data.lunch_hours_local.end);
         document.getElementById('lunchHours').textContent = lunchText + ' (' + Math.round(data.lunch_hours_local.confidence * 100) + '%)';
-        document.getElementById('lunchLabel').style.display = 'flex';
-        document.getElementById('lunchHours').style.display = 'block';
+        document.getElementById('lunchRow').style.display = 'block';
     }
 
     let locationText = '';
@@ -134,14 +133,17 @@ function displayResults(data) {
     
     if (locationText) {
         document.getElementById('location').textContent = locationText;
-        document.getElementById('locationLabel').style.display = 'flex';
-        document.getElementById('location').style.display = 'block';
+        document.getElementById('locationRow').style.display = 'block';
     }
 
     const methodName = formatMethodName(data.method);
     document.getElementById('method').textContent = methodName;
 
     if (data.location) {
+        const mapRow = document.getElementById('mapRow');
+        if (mapRow) {
+            mapRow.style.display = 'block';
+        }
         initMap(data.location.latitude, data.location.longitude, data.username);
     }
 
@@ -150,15 +152,15 @@ function displayResults(data) {
 
 function formatMethodName(method) {
     const methodNames = {
-        'github_profile': 'Profile',
-        'location_geocoding': 'Geocoding', 
-        'activity_patterns': 'Activity',
-        'gemini_refined_activity': 'AI+Activity',
-        'company_heuristic': 'Company',
-        'email_heuristic': 'Email',
-        'blog_heuristic': 'Blog',
-        'website_gemini_analysis': 'Website+AI',
-        'gemini_analysis': 'AI'
+        'github_profile': 'Profile Scraping',
+        'location_geocoding': 'Location Geocoding', 
+        'activity_patterns': 'Activity Analysis',
+        'gemini_refined_activity': 'AI + Activity',
+        'company_heuristic': 'Company Intel',
+        'email_heuristic': 'Email Domain',
+        'blog_heuristic': 'Blog Analysis',
+        'website_gemini_analysis': 'Website + AI',
+        'gemini_analysis': 'AI Analysis'
     };
     return methodNames[method] || method;
 }
@@ -182,11 +184,37 @@ function formatHour(decimalHour) {
 
 function initMap(lat, lng, username) {
     const mapDiv = document.getElementById('map');
-    mapDiv.style.display = 'block';
-    mapDiv.innerHTML = '<iframe width="100%" height="100%" frameborder="0" style="border:0" ' +
-        'src="https://www.openstreetmap.org/export/embed.html?bbox=' +
-        (lng - 0.1) + ',' + (lat - 0.1) + ',' + (lng + 0.1) + ',' + (lat + 0.1) +
-        '&layer=mapnik&marker=' + lat + ',' + lng + '" allowfullscreen></iframe>';
+    if (!mapDiv) return;
+    
+    // Clear any existing content
+    mapDiv.innerHTML = '';
+    
+    // Check if Leaflet is loaded
+    if (typeof L === 'undefined') {
+        // Fallback to simple link if Leaflet fails to load
+        const mapLink = document.createElement('a');
+        mapLink.href = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}&zoom=10#map=10/${lat}/${lng}`;
+        mapLink.target = '_blank';
+        mapLink.textContent = `View ${username} on OpenStreetMap (${lat.toFixed(2)}, ${lng.toFixed(2)})`;
+        mapLink.style.cssText = 'color: #000; text-decoration: underline;';
+        mapDiv.appendChild(mapLink);
+        return;
+    }
+    
+    // Create the map
+    const map = L.map(mapDiv).setView([lat, lng], 10);
+    
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 18,
+    }).addTo(map);
+    
+    // Add a marker for the user location
+    L.marker([lat, lng])
+        .addTo(map)
+        .bindPopup(`${username}<br/>${lat.toFixed(2)}, ${lng.toFixed(2)}`)
+        .openPopup();
 }
 
 document.addEventListener('keydown', (e) => {

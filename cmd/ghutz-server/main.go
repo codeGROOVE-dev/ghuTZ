@@ -140,12 +140,12 @@ func securityHeadersMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Content Security Policy - prevents XSS attacks
 		w.Header().Set("Content-Security-Policy", 
 			"default-src 'self'; "+
-			"script-src 'self'; "+
-			"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
-			"style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
-			"img-src 'self' data:; "+
+			"script-src 'self' https://unpkg.com; "+
+			"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "+
+			"style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "+
+			"img-src 'self' data: https://*.tile.openstreetmap.org; "+
 			"font-src 'self' https://fonts.gstatic.com; "+
-			"connect-src 'self'; "+
+			"connect-src 'self' https://*.tile.openstreetmap.org; "+
 			"frame-src https://www.openstreetmap.org; "+
 			"object-src 'none'; "+
 			"base-uri 'self'; "+
@@ -459,6 +459,13 @@ func handleAPIDetect(detector *ghutz.Detector, logger *slog.Logger) http.Handler
 		if err != nil {
 			logger.Error("Detection failed", "username", req.Username, "error", err)
 			http.Error(w, "Detection failed", http.StatusInternalServerError)
+			return
+		}
+
+		// Check if this is a "user not found" result
+		if result.Method == "user_not_found" {
+			logger.Info("User not found", "username", req.Username)
+			http.Error(w, "User not found", http.StatusNotFound)
 			return
 		}
 
