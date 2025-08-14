@@ -140,17 +140,88 @@ func printResult(result *ghutz.Result) {
 		fmt.Printf("📍 Location: %s\n", locationStr)
 	}
 	
-	fmt.Printf("🕐 Timezone: %s", result.Timezone)
+	// Timezone with GMT offset and current local time
+	tzName := result.Timezone
+	gmtOffset := ""
+	currentLocal := ""
+	
+	// Try to load the timezone
+	if loc, err := time.LoadLocation(tzName); err == nil {
+		now := time.Now().In(loc)
+		_, offset := now.Zone()
+		offsetHours := offset / 3600
+		if offsetHours >= 0 {
+			gmtOffset = fmt.Sprintf("GMT+%d", offsetHours)
+		} else {
+			gmtOffset = fmt.Sprintf("GMT%d", offsetHours)
+		}
+		currentLocal = now.Format("15:04")
+		fmt.Printf("🕐 Timezone: %s (%s, now %s)", tzName, gmtOffset, currentLocal)
+	} else {
+		// Fallback for UTC+/- format
+		fmt.Printf("🕐 Timezone: %s", result.Timezone)
+	}
+	
 	if result.ActivityTimezone != "" && result.ActivityTimezone != result.Timezone {
-		fmt.Printf("\n   └─ activity suggests %s", result.ActivityTimezone)
+		// Convert UTC format to GMT format for consistency
+		activityTz := result.ActivityTimezone
+		if strings.HasPrefix(activityTz, "UTC") {
+			offset := strings.TrimPrefix(activityTz, "UTC")
+			if offset == "" {
+				activityTz = "GMT"
+			} else if strings.HasPrefix(offset, "+") {
+				activityTz = "GMT" + offset
+			} else {
+				// Negative offset already has minus sign
+				activityTz = "GMT" + offset
+			}
+		}
+		fmt.Printf("\n   └─ activity suggests %s", activityTz)
 	}
 	fmt.Println()
 	
-	// Work schedule with visual indicators
+	// Work schedule with relative time indicators
 	if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
-		fmt.Printf("💼 Work Hours: %s → %s", 
+		workStartRelative := ""
+		workEndRelative := ""
+		
+		// Calculate relative times if we have a valid timezone
+		if loc, err := time.LoadLocation(tzName); err == nil {
+			now := time.Now().In(loc)
+			currentTime := float64(now.Hour()) + float64(now.Minute())/60.0
+			
+			// Calculate relative time to work start
+			hoursToStart := result.ActiveHoursLocal.Start - currentTime
+			if hoursToStart < 0 {
+				hoursToStart += 24 // Handle next day
+			}
+			if hoursToStart > 12 {
+				// It was yesterday/earlier today
+				hoursToStart = hoursToStart - 24
+			}
+			
+			// Calculate relative time to work end
+			hoursToEnd := result.ActiveHoursLocal.End - currentTime
+			if hoursToEnd < 0 && result.ActiveHoursLocal.End > result.ActiveHoursLocal.Start {
+				hoursToEnd += 24 // Handle next day
+			}
+			if hoursToEnd > 12 {
+				// It was yesterday/earlier today
+				hoursToEnd = hoursToEnd - 24
+			}
+			
+			// Format relative times tersely
+			workStartRelative = formatRelativeTime(hoursToStart)
+			workEndRelative = formatRelativeTime(hoursToEnd)
+		}
+		
+		fmt.Printf("🏃 Active Time: %s → %s", 
 			formatHour(result.ActiveHoursLocal.Start), 
 			formatHour(result.ActiveHoursLocal.End))
+		
+		if workStartRelative != "" && workEndRelative != "" {
+			fmt.Printf(" (%s → %s)", workStartRelative, workEndRelative)
+		}
 		
 		if result.LunchHoursLocal.Confidence > 0 {
 			fmt.Printf("\n🍽️  Lunch Break: %s → %s", 
@@ -159,6 +230,57 @@ func printResult(result *ghutz.Result) {
 			if result.LunchHoursLocal.Confidence < 0.7 {
 				fmt.Printf(" (uncertain)")
 			}
+		}
+		
+		// Add peak productivity time
+		if result.PeakProductivity.Count > 0 {
+			fmt.Printf("\n🔥 Peak Time: %s → %s",
+				formatHour(result.PeakProductivity.Start),
+				formatHour(result.PeakProductivity.End))
+		}
+		
+		// Add quiet hours (sleep/family time)
+		if len(result.QuietHoursUTC) > 0 {
+			// Convert quiet hours from UTC to local
+			quietStart := -1
+			quietEnd := -1
+			
+			// Find the continuous range of quiet hours
+			if len(result.QuietHoursUTC) > 0 {
+				// Calculate UTC offset from timezone
+				utcOffset := 0
+				if loc, err := time.LoadLocation(tzName); err == nil {
+					now := time.Now().In(loc)
+					_, offset := now.Zone()
+					utcOffset = offset / 3600
+				}
+				
+				// Convert first and last quiet hour to local time
+				quietStart = (result.QuietHoursUTC[0] + utcOffset + 24) % 24
+				quietEnd = (result.QuietHoursUTC[len(result.QuietHoursUTC)-1] + utcOffset + 24) % 24
+				
+				// Add one hour to end to show the end of the quiet period
+				quietEnd = (quietEnd + 1) % 24
+			}
+			
+			if quietStart >= 0 && quietEnd >= 0 {
+				fmt.Printf("\n💤 Quiet Time: %s → %s",
+					formatHour(float64(quietStart)),
+					formatHour(float64(quietEnd)))
+			}
+		}
+		
+		fmt.Println()
+	}
+	
+	// Show top organizations if available
+	if len(result.TopOrganizations) > 0 {
+		fmt.Print("🏢 Organizations: ")
+		for i, org := range result.TopOrganizations {
+			if i > 0 {
+				fmt.Print(", ")
+			}
+			fmt.Printf("%s (%d)", org.Name, org.Count)
 		}
 		fmt.Println()
 	}
@@ -174,6 +296,44 @@ func formatHour(decimalHour float64) string {
 	hour := int(decimalHour)
 	minutes := int((decimalHour - float64(hour)) * 60)
 	return fmt.Sprintf("%d:%02d", hour, minutes)
+}
+
+func formatRelativeTime(hours float64) string {
+	if hours < -12 || hours > 12 {
+		return "" // Too far in past/future
+	}
+	
+	absHours := hours
+	if absHours < 0 {
+		absHours = -absHours
+	}
+	
+	// Convert to minutes for better precision
+	totalMinutes := int(absHours * 60)
+	h := totalMinutes / 60
+	m := totalMinutes % 60
+	
+	// Format tersely
+	if hours < 0 {
+		// In the past
+		if h == 0 {
+			return fmt.Sprintf("%dm ago", m)
+		} else if m == 0 {
+			return fmt.Sprintf("%dh ago", h)
+		} else {
+			return fmt.Sprintf("%dh%dm ago", h, m)
+		}
+	} else {
+		// In the future
+		if h == 0 {
+			return fmt.Sprintf("in %dm", m)
+		} else if m == 0 {
+			return fmt.Sprintf("in %dh", h)
+		} else {
+			// For future times, keep it simple
+			return fmt.Sprintf("in %dh", h + (m + 29) / 60) // Round to nearest hour
+		}
+	}
 }
 
 func formatMethodName(method string) string {

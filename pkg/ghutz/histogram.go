@@ -98,7 +98,23 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 			}
 		}
 		
-		// Check if it's within work hours (but not lunch)
+		// Check for peak time first (highest priority)
+		if emoji == "" && result.PeakProductivity.Count > 0 {
+			peakStart := result.PeakProductivity.Start
+			peakEnd := result.PeakProductivity.End
+			localHourFloat := float64(localHour)
+			
+			// Check if the current hour overlaps with peak time
+			hourStart := localHourFloat
+			hourEnd := localHourFloat + 1.0
+			
+			// Check for overlap between [hourStart, hourEnd) and [peakStart, peakEnd)
+			if hourEnd > peakStart && hourStart < peakEnd {
+				emoji = " 🔥"
+			}
+		}
+		
+		// Check if it's within work hours (but not lunch or peak)
 		if emoji == "" && (result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0) {
 			localHourFloat := float64(localHour)
 			
@@ -124,12 +140,12 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 				
 				if workStart <= workEnd {
 					if localHourFloat >= workStart && localHourFloat < workEnd {
-						emoji = " ⚡"
+						// Don't add emoji for work hours - it's clear from the graph
 					}
 				} else {
 					// Wrap around midnight
 					if localHourFloat >= workStart || localHourFloat < workEnd {
-						emoji = " ⚡"
+						// Don't add emoji for work hours - it's clear from the graph
 					}
 				}
 			}
@@ -146,9 +162,6 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 		output.WriteString(emoji)
 		output.WriteString("\n")
 	}
-	
-	output.WriteString("\n")
-	output.WriteString("💤 sleep  ⚡ work  🍽 lunch\n")
 	
 	return output.String()
 }

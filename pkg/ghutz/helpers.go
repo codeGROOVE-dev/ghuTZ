@@ -91,19 +91,52 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 		sort.Ints(activityInRange)
 		// Use 5th percentile for start (ignore occasional early starts)
 		percentile5 := len(activityInRange) / 20
-		// Use 95th percentile for end (capture more of the workday, only exclude true outliers)
-		percentile95 := len(activityInRange) * 19 / 20
+		// Use 98th percentile for end to capture more of the workday
+		// Many developers work past traditional hours
+		percentile98 := len(activityInRange) * 98 / 100
 		
 		// Ensure we don't have invalid indices
 		if percentile5 < 0 {
 			percentile5 = 0
 		}
-		if percentile95 >= len(activityInRange) {
-			percentile95 = len(activityInRange) - 1
+		if percentile98 >= len(activityInRange) {
+			percentile98 = len(activityInRange) - 1
 		}
 
 		start = activityInRange[percentile5]
-		end = activityInRange[percentile95]
+		end = activityInRange[percentile98]
+		
+		// Also check if there's significant activity continuing past the current end
+		// If activity at end+1 hour is > 25% of max activity in work hours, extend
+		maxWorkActivity := 0
+		for h := start; h != end; h = (h + 1) % 24 {
+			if hourCounts[h] > maxWorkActivity {
+				maxWorkActivity = hourCounts[h]
+			}
+		}
+		
+		// Keep extending end time while there's meaningful activity
+		for {
+			nextHour := (end + 1) % 24
+			// Stop if we hit quiet hours or wrap around to start
+			if nextHour == start {
+				break
+			}
+			// Check if this hour is in quiet hours
+			isQuiet := false
+			if quietMap[nextHour] {
+				isQuiet = true
+			}
+			if isQuiet {
+				break
+			}
+			// If activity is still meaningful (>20% of max), extend
+			if hourCounts[nextHour] > maxWorkActivity/5 {
+				end = nextHour
+			} else {
+				break
+			}
+		}
 	}
 
 	// Convert from UTC to local time
@@ -511,6 +544,16 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		}
 	}
 
+	// REPOSITORIES SECTION
+	if repos, ok := contextData["repositories"].([]string); ok && len(repos) > 0 {
+		evidence.WriteString("## REPOSITORIES USER IS ACTIVE IN\n")
+		evidence.WriteString("These repositories may provide clues about the user's location, work affiliations, and timezone:\n")
+		for _, repo := range repos {
+			evidence.WriteString(fmt.Sprintf("- %s\n", repo))
+		}
+		evidence.WriteString("\n")
+	}
+
 	// WEBSITE CONTENT SECTION
 	if websiteContent, ok := contextData["website_content"].(string); ok && websiteContent != "" {
 		evidence.WriteString("## WEBSITE/BLOG CONTENT\n")
@@ -525,4 +568,40 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	}
 
 	return evidence.String()
+}
+
+// detectPeakProductivity finds the single most productive 30-minute slot
+func detectPeakProductivity(hourCounts map[int]int, utcOffset int) (start, end float64, count int) {
+	// Convert hour counts to 30-minute buckets in local time
+	bucketCounts := make(map[float64]int)
+	
+	// Distribute hourly counts into 30-minute buckets
+	for utcHour, hourCount := range hourCounts {
+		// Convert UTC hour to local hour
+		localHour := (utcHour + utcOffset + 24) % 24
+		
+		// Split the count between two 30-minute buckets
+		// Give slightly more weight to the first half-hour since most activity
+		// tends to happen at the start of an hour
+		bucketCounts[float64(localHour)] += (hourCount + 1) / 2
+		bucketCounts[float64(localHour)+0.5] += hourCount / 2
+	}
+	
+	// Find the single 30-minute bucket with the highest activity
+	maxActivity := 0
+	peakBucket := 0.0
+	
+	for bucket := 0.0; bucket < 24.0; bucket += 0.5 {
+		if bucketCounts[bucket] > maxActivity {
+			maxActivity = bucketCounts[bucket]
+			peakBucket = bucket
+		}
+	}
+	
+	// Return the peak 30-minute slot
+	if maxActivity > 0 {
+		return peakBucket, peakBucket + 0.5, maxActivity
+	}
+	
+	return 0, 0, 0
 }

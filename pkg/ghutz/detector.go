@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -178,6 +179,20 @@ func (d *Detector) Close() error {
 	return nil
 }
 
+// mergeActivityData copies activity analysis data into the result
+func mergeActivityData(result, activityResult *Result) {
+	if activityResult == nil || result == nil {
+		return
+	}
+	result.ActivityTimezone = activityResult.ActivityTimezone
+	result.QuietHoursUTC = activityResult.QuietHoursUTC
+	result.ActiveHoursLocal = activityResult.ActiveHoursLocal
+	result.LunchHoursLocal = activityResult.LunchHoursLocal
+	result.PeakProductivity = activityResult.PeakProductivity
+	result.TopOrganizations = activityResult.TopOrganizations
+	result.HourlyActivityUTC = activityResult.HourlyActivityUTC
+}
+
 func (d *Detector) Detect(ctx context.Context, username string) (*Result, error) {
 	if username == "" {
 		return nil, fmt.Errorf("username cannot be empty")
@@ -205,23 +220,23 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		d.logger.Debug("fetched user full name", "username", username, "name", fullName)
 	}
 
+	// Fetch public events once and share between analyses
+	events, err := d.fetchPublicEvents(ctx, username)
+	if err != nil {
+		d.logger.Debug("failed to fetch public events", "username", username, "error", err)
+		events = []PublicEvent{}
+	}
+	
 	// Always perform activity analysis for fun and comparison
 	d.logger.Debug("performing activity pattern analysis", "username", username)
-	activityResult := d.tryActivityPatterns(ctx, username)
+	activityResult := d.tryActivityPatternsWithEvents(ctx, username, events)
 
 	// Try quick detection methods first
 	d.logger.Debug("trying profile HTML scraping", "username", username)
 	if result := d.tryProfileScraping(ctx, username); result != nil {
 		d.logger.Info("detected from profile HTML", "username", username, "timezone", result.Timezone)
 		result.Name = fullName
-		// Add activity data if we have it
-		if activityResult != nil {
-			result.ActivityTimezone = activityResult.ActivityTimezone
-			result.QuietHoursUTC = activityResult.QuietHoursUTC
-			result.ActiveHoursLocal = activityResult.ActiveHoursLocal
-			result.LunchHoursLocal = activityResult.LunchHoursLocal
-			result.HourlyActivityUTC = activityResult.HourlyActivityUTC
-		}
+		mergeActivityData(result, activityResult)
 		return result, nil
 	}
 	d.logger.Debug("profile HTML scraping failed", "username", username)
@@ -230,20 +245,13 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	if result := d.tryLocationField(ctx, username); result != nil {
 		d.logger.Info("detected from location field", "username", username, "timezone", result.Timezone, "location", result.LocationName)
 		result.Name = fullName
-		// Add activity data if we have it
-		if activityResult != nil {
-			result.ActivityTimezone = activityResult.ActivityTimezone
-			result.QuietHoursUTC = activityResult.QuietHoursUTC
-			result.ActiveHoursLocal = activityResult.ActiveHoursLocal
-			result.LunchHoursLocal = activityResult.LunchHoursLocal
-			result.HourlyActivityUTC = activityResult.HourlyActivityUTC
-		}
+		mergeActivityData(result, activityResult)
 		return result, nil
 	}
 	d.logger.Debug("location field analysis failed", "username", username)
 
 	d.logger.Debug("trying Gemini analysis with contextual data", "username", username, "has_activity_data", activityResult != nil)
-	if result := d.tryUnifiedGeminiAnalysis(ctx, username, activityResult); result != nil {
+	if result := d.tryUnifiedGeminiAnalysisWithEvents(ctx, username, activityResult, events); result != nil {
 		result.Name = fullName
 		if activityResult != nil {
 			// Preserve activity data in the final result
@@ -394,6 +402,17 @@ func (d *Detector) tryLocationField(ctx context.Context, username string) *Resul
 
 // tryUnifiedGeminiAnalysis uses Gemini with all available data (activity + context) in a single call.
 func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string, activityResult *Result) *Result {
+	// Fetch events if not provided
+	events, err := d.fetchPublicEvents(ctx, username)
+	if err != nil {
+		d.logger.Debug("failed to fetch public events", "username", username, "error", err)
+		events = []PublicEvent{}
+	}
+	return d.tryUnifiedGeminiAnalysisWithEvents(ctx, username, activityResult, events)
+}
+
+// tryUnifiedGeminiAnalysisWithEvents uses Gemini with provided events data.
+func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, username string, activityResult *Result, events []PublicEvent) *Result {
 	// The SDK will automatically use API key if set, otherwise try Application Default Credentials
 	// No need to explicitly check - let the SDK handle authentication
 
@@ -404,11 +423,16 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 		return nil
 	}
 
-	// Fetch events for context (PRs, issues, etc.)
-	events, err := d.fetchPublicEvents(ctx, username)
-	if err != nil {
-		d.logger.Debug("failed to fetch public events", "username", username, "error", err)
-		events = []PublicEvent{}
+	// Use provided events (already fetched)
+
+	// Collect unique repositories from all activity
+	uniqueRepos := make(map[string]bool)
+	
+	// Add repos from events
+	for _, event := range events {
+		if event.Repo.Name != "" {
+			uniqueRepos[event.Repo.Name] = true
+		}
 	}
 
 	// Extract PR and issue information from events for context
@@ -468,6 +492,43 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 		longestBody = longestBody[:5000] + "..."
 	}
 
+	// Fetch PRs and issues to get more repository info
+	prs, err := d.fetchPullRequests(ctx, username)
+	if err != nil {
+		d.logger.Debug("failed to fetch PRs for repos", "username", username, "error", err)
+	} else {
+		for _, pr := range prs {
+			if pr.Repository != "" {
+				uniqueRepos[pr.Repository] = true
+			}
+		}
+	}
+	
+	issues, err := d.fetchIssues(ctx, username)
+	if err != nil {
+		d.logger.Debug("failed to fetch issues for repos", "username", username, "error", err)
+	} else {
+		for _, issue := range issues {
+			if issue.Repository != "" {
+				uniqueRepos[issue.Repository] = true
+			}
+		}
+	}
+	
+	// Convert unique repos to sorted list
+	var repositories []string
+	for repo := range uniqueRepos {
+		repositories = append(repositories, repo)
+	}
+	sort.Strings(repositories)
+	
+	// Limit to 50 repos for Gemini context
+	if len(repositories) > 50 {
+		repositories = repositories[:50]
+	}
+	
+	d.logger.Debug("collected unique repositories", "username", username, "count", len(repositories))
+	
 	var websiteContent string
 	if user.Blog != "" {
 		d.logger.Debug("fetching website content for Gemini analysis", "username", username, "blog_url", user.Blog)
@@ -486,6 +547,7 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 		"pull_requests":          prSummary,
 		"website_content":        websiteContent,
 		"organizations":          orgs,
+		"repositories":           repositories,
 		"longest_pr_issue_body":  longestBody,
 		"longest_pr_issue_title": longestTitle,
 		"issue_count":            issueCount,
@@ -554,13 +616,7 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 	}
 
 	// Preserve activity data from activityResult if available
-	if activityResult != nil {
-		result.HourlyActivityUTC = activityResult.HourlyActivityUTC
-		result.ActiveHoursLocal = activityResult.ActiveHoursLocal
-		result.LunchHoursLocal = activityResult.LunchHoursLocal
-		result.QuietHoursUTC = activityResult.QuietHoursUTC
-		result.ActivityTimezone = activityResult.ActivityTimezone
-	}
+	mergeActivityData(result, activityResult)
 
 	// Try to geocode the AI-suggested location to get coordinates for the map
 	if location != "" {
@@ -883,8 +939,14 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 	}
 
 	// Parse response
-	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+	if len(resp.Candidates) == 0 {
+		d.logger.Error("Gemini returned no candidates")
 		return nil, fmt.Errorf("no response from Gemini")
+	}
+	
+	if len(resp.Candidates[0].Content.Parts) == 0 {
+		d.logger.Error("Gemini returned no content parts", "candidates_count", len(resp.Candidates))
+		return nil, fmt.Errorf("no content in Gemini response")
 	}
 
 	// The response should be JSON text
@@ -895,6 +957,47 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 		return nil, fmt.Errorf("unexpected response type from Gemini")
 	}
 
+	// Log the raw response for debugging
+	d.logger.Debug("Gemini raw response", "response_length", len(jsonText))
+	
+	// Log first 500 chars of response for debugging (in case it's truncated)
+	if len(jsonText) > 0 {
+		previewLen := len(jsonText)
+		if previewLen > 500 {
+			previewLen = 500
+		}
+		d.logger.Debug("Gemini response preview", "first_500_chars", jsonText[:previewLen])
+	}
+	
+	// Clean up the response - Gemini sometimes wraps JSON in markdown code blocks
+	jsonText = strings.TrimSpace(jsonText)
+	
+	// Check for empty response
+	if jsonText == "" || jsonText == "{}" {
+		d.logger.Error("Gemini returned empty response")
+		return nil, fmt.Errorf("Gemini returned empty response")
+	}
+	
+	// Remove markdown code block wrapper if present
+	if strings.HasPrefix(jsonText, "```json") {
+		jsonText = strings.TrimPrefix(jsonText, "```json")
+		jsonText = strings.TrimSuffix(jsonText, "```")
+		jsonText = strings.TrimSpace(jsonText)
+		d.logger.Debug("Stripped markdown JSON wrapper from Gemini response")
+	} else if strings.HasPrefix(jsonText, "```") {
+		jsonText = strings.TrimPrefix(jsonText, "```")
+		jsonText = strings.TrimSuffix(jsonText, "```")
+		jsonText = strings.TrimSpace(jsonText)
+		d.logger.Debug("Stripped markdown wrapper from Gemini response")
+	}
+	
+	// Check if response looks like an error message instead of JSON
+	if !strings.HasPrefix(jsonText, "{") {
+		d.logger.Error("Gemini response doesn't look like JSON",
+			"response_preview", jsonText[:min(200, len(jsonText))])
+		return nil, fmt.Errorf("Gemini response is not valid JSON")
+	}
+
 	var result struct {
 		Timezone   string `json:"timezone"`
 		Location   string `json:"location"`
@@ -903,7 +1006,27 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 	}
 
 	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
+		// Log the full response when parsing fails
+		d.logger.Error("Failed to parse Gemini JSON response", 
+			"error", err,
+			"response_length", len(jsonText),
+			"raw_response", jsonText)
 		return nil, fmt.Errorf("failed to parse Gemini response: %w", err)
+	}
+	
+	// Validate the response has required fields
+	if result.Timezone == "" {
+		d.logger.Error("Gemini response missing timezone field", 
+			"parsed_result", result,
+			"raw_response", jsonText)
+		return nil, fmt.Errorf("Gemini response missing timezone field")
+	}
+	
+	if result.Location == "" {
+		d.logger.Error("Gemini response missing location field",
+			"parsed_result", result,
+			"raw_response", jsonText)
+		return nil, fmt.Errorf("Gemini response missing location field")
 	}
 
 	// Convert confidence to float

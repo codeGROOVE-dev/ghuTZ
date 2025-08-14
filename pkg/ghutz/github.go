@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -119,9 +120,11 @@ func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]Pu
 	var result struct {
 		TotalCount int `json:"total_count"`
 		Items      []struct {
-			Title     string    `json:"title"`
-			Body      string    `json:"body"`
-			CreatedAt time.Time `json:"created_at"`
+			Title         string    `json:"title"`
+			Body          string    `json:"body"`
+			CreatedAt     time.Time `json:"created_at"`
+			HTMLURL       string    `json:"html_url"`
+			RepositoryURL string    `json:"repository_url"` // This is just a URL string
 		} `json:"items"`
 	}
 
@@ -133,10 +136,22 @@ func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]Pu
 
 	var prs []PullRequest
 	for _, item := range result.Items {
+		// Extract repository from HTML URL (format: https://github.com/owner/repo/pull/123)
+		repo := ""
+		if item.HTMLURL != "" {
+			if strings.HasPrefix(item.HTMLURL, "https://github.com/") {
+				parts := strings.Split(strings.TrimPrefix(item.HTMLURL, "https://github.com/"), "/")
+				if len(parts) >= 2 {
+					repo = parts[0] + "/" + parts[1]
+				}
+			}
+		}
 		prs = append(prs, PullRequest{
-			Title:     item.Title,
-			Body:      item.Body,
-			CreatedAt: item.CreatedAt,
+			Title:      item.Title,
+			Body:       item.Body,
+			CreatedAt:  item.CreatedAt,
+			HTMLURL:    item.HTMLURL,
+			Repository: repo,
 		})
 	}
 
@@ -196,11 +211,22 @@ func (d *Detector) fetchIssues(ctx context.Context, username string) ([]Issue, e
 
 	var issues []Issue
 	for _, item := range result.Items {
+		// Extract repository from HTML URL (format: https://github.com/owner/repo/issues/123)
+		repo := ""
+		if item.HTMLURL != "" {
+			if strings.HasPrefix(item.HTMLURL, "https://github.com/") {
+				parts := strings.Split(strings.TrimPrefix(item.HTMLURL, "https://github.com/"), "/")
+				if len(parts) >= 2 {
+					repo = parts[0] + "/" + parts[1]
+				}
+			}
+		}
 		issues = append(issues, Issue{
-			Title:     item.Title,
-			Body:      item.Body,
-			CreatedAt: item.CreatedAt,
-			HTMLURL:   item.HTMLURL,
+			Title:      item.Title,
+			Body:       item.Body,
+			CreatedAt:  item.CreatedAt,
+			HTMLURL:    item.HTMLURL,
+			Repository: repo,
 		})
 	}
 

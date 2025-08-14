@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,42 +18,60 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 		// Don't return nil - try other sources
 		events = []PublicEvent{}
 	}
+	return d.tryActivityPatternsWithEvents(ctx, username, events)
+}
 
-	d.logger.Debug("fetched public events", "username", username, "count", len(events))
+func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username string, events []PublicEvent) *Result {
 
-	// Use a map of timestamps to deduplicate events
-	uniqueTimestamps := make(map[time.Time]bool)
-	hourCounts := make(map[int]int)
+	// Collect all timestamps first (we'll deduplicate and limit later)
+	type timestampEntry struct {
+		time time.Time
+		source string // for debugging
+		org    string // organization/owner name
+	}
+	allTimestamps := []timestampEntry{}
+	orgCounts := make(map[string]int) // Track organization activity
+	
+	// Add events
+	for _, event := range events {
+		// Extract organization from repo name (e.g., "kubernetes/kubernetes" -> "kubernetes")
+		org := ""
+		if event.Repo.Name != "" {
+			if idx := strings.Index(event.Repo.Name, "/"); idx > 0 {
+				org = event.Repo.Name[:idx]
+			}
+		}
+		allTimestamps = append(allTimestamps, timestampEntry{
+			time:   event.CreatedAt,
+			source: "event",
+			org:    org,
+		})
+	}
 	
 	// Track the oldest event to check data coverage
 	var oldestEventTime time.Time
-	twoWeeksAgo := time.Now().AddDate(0, 0, -14)
-	
-	// Add events with deduplication
-	for _, event := range events {
-		if !uniqueTimestamps[event.CreatedAt] {
-			uniqueTimestamps[event.CreatedAt] = true
-			hour := event.CreatedAt.UTC().Hour()
-			hourCounts[hour]++
-			
-			// Track oldest event
-			if oldestEventTime.IsZero() || event.CreatedAt.Before(oldestEventTime) {
+	if len(events) > 0 {
+		oldestEventTime = events[len(events)-1].CreatedAt // Assuming sorted by recency
+		for _, event := range events {
+			if event.CreatedAt.Before(oldestEventTime) {
 				oldestEventTime = event.CreatedAt
 			}
 		}
 	}
 	
+	twoWeeksAgo := time.Now().AddDate(0, 0, -14)
+	
 	// Decide if we need supplemental data:
 	// 1. If we have less than 300 events, OR
 	// 2. If our oldest event is newer than 2 weeks ago (insufficient time coverage)
-	needSupplemental := len(events) < 300 || oldestEventTime.After(twoWeeksAgo)
+	needSupplemental := len(events) < 300 || oldestEventTime.IsZero() || oldestEventTime.After(twoWeeksAgo)
 	
 	if needSupplemental {
 		reason := ""
 		if len(events) < 300 {
 			reason = fmt.Sprintf("only %d events", len(events))
 		}
-		if oldestEventTime.After(twoWeeksAgo) {
+		if !oldestEventTime.IsZero() && oldestEventTime.After(twoWeeksAgo) {
 			daysCovered := int(time.Since(oldestEventTime).Hours() / 24)
 			if reason != "" {
 				reason += " and "
@@ -64,97 +84,104 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 		// Fetch additional data in parallel
 		additionalData := d.fetchSupplementalActivity(ctx, username)
 		
-		// Filter out data older than 6 months
-		sixMonthsAgo := time.Now().AddDate(0, -6, 0)
-		duplicates := 0
-		tooOld := 0
-		
-		// Add PRs with deduplication and age filtering
+		// Add all timestamps from supplemental data
 		for _, pr := range additionalData.PullRequests {
-			if pr.CreatedAt.Before(sixMonthsAgo) {
-				tooOld++
-				continue // Skip data older than 6 months
+			// Extract organization from repository
+			org := ""
+			if pr.Repository != "" {
+				if idx := strings.Index(pr.Repository, "/"); idx > 0 {
+					org = pr.Repository[:idx]
+				}
 			}
-			if !uniqueTimestamps[pr.CreatedAt] {
-				uniqueTimestamps[pr.CreatedAt] = true
-				hour := pr.CreatedAt.UTC().Hour()
-				hourCounts[hour]++
-			} else {
-				duplicates++
-			}
+			allTimestamps = append(allTimestamps, timestampEntry{
+				time:   pr.CreatedAt,
+				source: "pr",
+				org:    org,
+			})
 		}
 		
-		// Add issues with deduplication and age filtering
 		for _, issue := range additionalData.Issues {
-			if issue.CreatedAt.Before(sixMonthsAgo) {
-				tooOld++
-				continue // Skip data older than 6 months
+			// Extract organization from repository
+			org := ""
+			if issue.Repository != "" {
+				if idx := strings.Index(issue.Repository, "/"); idx > 0 {
+					org = issue.Repository[:idx]
+				}
 			}
-			if !uniqueTimestamps[issue.CreatedAt] {
-				uniqueTimestamps[issue.CreatedAt] = true
-				hour := issue.CreatedAt.UTC().Hour()
-				hourCounts[hour]++
-			} else {
-				duplicates++
-			}
+			allTimestamps = append(allTimestamps, timestampEntry{
+				time:   issue.CreatedAt,
+				source: "issue",
+				org:    org,
+			})
 		}
 		
-		// Add comments with deduplication and age filtering
 		for _, comment := range additionalData.Comments {
-			if comment.CreatedAt.Before(sixMonthsAgo) {
-				tooOld++
-				continue // Skip data older than 6 months
-			}
-			if !uniqueTimestamps[comment.CreatedAt] {
-				uniqueTimestamps[comment.CreatedAt] = true
-				hour := comment.CreatedAt.UTC().Hour()
-				hourCounts[hour]++
-			} else {
-				duplicates++
-			}
+			// Comments don't have repository info directly
+			allTimestamps = append(allTimestamps, timestampEntry{
+				time:   comment.CreatedAt,
+				source: "comment",
+				org:    "",
+			})
 		}
 		
-		if duplicates > 0 || tooOld > 0 {
-			d.logger.Debug("filtered activities", "username", username, 
-				"duplicates", duplicates, "too_old", tooOld)
-		}
-		
-		// Count unique activities
-		totalActivity := len(uniqueTimestamps)
-		
-		d.logger.Debug("total activity after supplementing", "username", username,
-			"events", len(events),
-			"prs", len(additionalData.PullRequests),
-			"issues", len(additionalData.Issues),
-			"comments", len(additionalData.Comments),
-			"duplicates_removed", duplicates,
-			"too_old_removed", tooOld,
-			"unique_total", totalActivity)
-		
-		// Check minimum threshold
-		if totalActivity < 3 {
-			d.logger.Debug("insufficient activity data", "username", username,
-				"total_activity", totalActivity,
-				"minimum_required", 3)
-			return nil
-		}
-		
-		// Warn if we have limited data
-		if totalActivity < 20 {
-			d.logger.Debug("limited activity data - results may be less accurate", "username", username,
-				"total_activity", totalActivity,
-				"recommended", 20)
-		}
-	} else {
-		daysCovered := int(time.Since(oldestEventTime).Hours() / 24)
-		d.logger.Debug("sufficient event coverage, skipping supplemental queries", "username", username,
-			"event_count", len(events), "days_covered", daysCovered)
+		d.logger.Debug("collected all timestamps", "username", username,
+			"total_before_dedup", len(allTimestamps))
 	}
 	
-	// Calculate total activity count for logging
-	totalActivity := 0
-	for _, count := range hourCounts {
-		totalActivity += count
+	// Sort timestamps by recency (newest first)
+	sort.Slice(allTimestamps, func(i, j int) bool {
+		return allTimestamps[i].time.After(allTimestamps[j].time)
+	})
+	
+	// Deduplicate and take the most recent 480 unique timestamps
+	const maxTimestamps = 480
+	uniqueTimestamps := make(map[time.Time]bool)
+	hourCounts := make(map[int]int)
+	duplicates := 0
+	used := 0
+	
+	for _, entry := range allTimestamps {
+		if !uniqueTimestamps[entry.time] {
+			uniqueTimestamps[entry.time] = true
+			hour := entry.time.UTC().Hour()
+			hourCounts[hour]++
+			// Track organization counts
+			if entry.org != "" {
+				orgCounts[entry.org]++
+			}
+			used++
+			
+			// Stop after we have enough unique timestamps
+			if used >= maxTimestamps {
+				break
+			}
+		} else {
+			duplicates++
+		}
+	}
+	
+	// Count total unique activities used
+	totalActivity := len(uniqueTimestamps)
+	
+	d.logger.Debug("activity data summary", "username", username,
+		"total_timestamps_collected", len(allTimestamps),
+		"duplicates_removed", duplicates,
+		"unique_timestamps_used", totalActivity,
+		"max_allowed", maxTimestamps)
+	
+	// Check minimum threshold
+	if totalActivity < 3 {
+		d.logger.Debug("insufficient activity data", "username", username,
+			"total_activity", totalActivity,
+			"minimum_required", 3)
+		return nil
+	}
+	
+	// Warn if we have limited data
+	if totalActivity < 20 {
+		d.logger.Debug("limited activity data - results may be less accurate", "username", username,
+			"total_activity", totalActivity,
+			"recommended", 20)
 	}
 
 	maxActivity := 0
@@ -328,6 +355,11 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 	d.logger.Debug("lunch detection attempt", "username", username,
 		"lunch_start", lunchStart, "lunch_end", lunchEnd, "confidence", lunchConfidence,
 		"work_start", activeStart, "work_end", activeEnd, "utc_offset", offsetInt)
+	
+	// Detect peak productivity window
+	peakStart, peakEnd, peakCount := detectPeakProductivity(hourCounts, offsetInt)
+	d.logger.Debug("peak productivity detected", "username", username,
+		"peak_start", peakStart, "peak_end", peakEnd, "activity_count", peakCount)
 
 	// Use work schedule validation for timezone detection
 	// Be more flexible - some people work early shifts or late shifts
@@ -399,9 +431,38 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 		offsetInt = correctedOffset
 		timezone = timezoneFromOffset(offsetInt)
 
-		// Recalculate active hours and lunch with corrected offset
+		// Recalculate active hours, lunch, and peak productivity with corrected offset
 		activeStart, activeEnd = calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
 		lunchStart, lunchEnd, lunchConfidence = detectLunchBreak(hourCounts, offsetInt, activeStart, activeEnd)
+		peakStart, peakEnd, peakCount = detectPeakProductivity(hourCounts, offsetInt)
+	}
+	
+	// Process top organizations
+	type orgActivity struct {
+		name  string
+		count int
+	}
+	var orgs []orgActivity
+	for name, count := range orgCounts {
+		orgs = append(orgs, orgActivity{name: name, count: count})
+	}
+	// Sort by count descending
+	sort.Slice(orgs, func(i, j int) bool {
+		return orgs[i].count > orgs[j].count
+	})
+	// Take top 5
+	var topOrgs []struct {
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+	}
+	for i := 0; i < 5 && i < len(orgs); i++ {
+		topOrgs = append(topOrgs, struct {
+			Name  string `json:"name"`
+			Count int    `json:"count"`
+		}{
+			Name:  orgs[i].name,
+			Count: orgs[i].count,
+		})
 	}
 
 	result := &Result{
@@ -416,8 +477,9 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 			Start: float64(activeStart),
 			End:   float64(activeEnd),
 		},
-		Confidence: 0.8,
-		Method:     "activity_patterns",
+		TopOrganizations:  topOrgs,
+		Confidence:        0.8,
+		Method:            "activity_patterns",
 		HourlyActivityUTC: hourCounts, // Store for histogram generation
 	}
 
@@ -431,6 +493,18 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 		End:        lunchEnd,
 		Confidence: lunchConfidence,
 	}
+	
+	// Add peak productivity window
+	result.PeakProductivity = struct {
+		Start float64 `json:"start"`
+		End   float64 `json:"end"`
+		Count int     `json:"count"`
+	}{
+		Start: peakStart,
+		End:   peakEnd,
+		Count: peakCount,
+	}
+	
 	d.logger.Debug("detected lunch break", "username", username,
 		"lunch_start", lunchStart, "lunch_end", lunchEnd, "confidence", lunchConfidence)
 
