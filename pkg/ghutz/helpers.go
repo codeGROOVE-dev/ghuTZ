@@ -37,17 +37,17 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 
 	// Find all continuous work blocks (gaps <= 2 hours allowed, except for lunch)
 	type workBlock struct {
-		start, end     int
-		totalActivity  int
-		hourCount      int
+		start, end    int
+		totalActivity int
+		hourCount     int
 	}
-	
+
 	var blocks []workBlock
 	currentBlock := workBlock{start: -1}
-	
+
 	for hour := 0; hour < 24; hour++ {
 		hasActivity := !quietMap[hour] && hourCounts[hour] > threshold
-		
+
 		if hasActivity {
 			if currentBlock.start == -1 {
 				// Start new block
@@ -66,7 +66,7 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 				// Check if we should end the current block
 				// Allow gaps of up to 1 hour (for lunch breaks)
 				foundActivity := false
-				
+
 				// Look ahead up to 1 hour for continuation (serious lunch breaks!)
 				for lookahead := 1; lookahead <= 1; lookahead++ {
 					nextHour := (hour + lookahead) % 24
@@ -75,7 +75,7 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 						break
 					}
 				}
-				
+
 				if !foundActivity {
 					// End current block - no meaningful activity found within 1 hour
 					blocks = append(blocks, currentBlock)
@@ -84,32 +84,32 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 			}
 		}
 	}
-	
+
 	// Don't forget to add the last block if we ended on activity
 	if currentBlock.start != -1 {
 		blocks = append(blocks, currentBlock)
 	}
-	
+
 	if len(blocks) == 0 {
 		// Default to 9am-5pm if no clear pattern
 		return 9, 17
 	}
-	
+
 	// Find the longest block by total activity (not just hour count)
 	bestBlock := blocks[0]
 	for _, block := range blocks[1:] {
 		// Prefer blocks with more total activity and longer duration
 		score := block.totalActivity * block.hourCount
 		bestScore := bestBlock.totalActivity * bestBlock.hourCount
-		
+
 		if score > bestScore {
 			bestBlock = block
 		}
 	}
-	
+
 	start = bestBlock.start
 	end = bestBlock.end
-	
+
 	// Convert UTC hours to local hours for final result
 	start = (start + utcOffset) % 24
 	if start < 0 {
@@ -119,12 +119,12 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 	if end < 0 {
 		end += 24
 	}
-	
+
 	return start, end
 }
 
 // findSleepHours looks for continuous quiet periods of at least 3 hours
-// Only returns quiet periods that are 3+ hours continuous 
+// Only returns quiet periods that are 3+ hours continuous
 func findSleepHours(hourCounts map[int]int) []int {
 	// Find threshold for quiet hours (≤5% of max activity or ≤1 event)
 	maxActivity := 0
@@ -133,18 +133,18 @@ func findSleepHours(hourCounts map[int]int) []int {
 			maxActivity = count
 		}
 	}
-	
+
 	threshold := maxActivity / 20
 	if threshold < 1 {
 		threshold = 1
 	}
-	
+
 	// Find all quiet hours
 	quietHours := make([]bool, 24)
 	for hour := 0; hour < 24; hour++ {
 		quietHours[hour] = hourCounts[hour] <= threshold
 	}
-	
+
 	// If very few quiet hours, be more strict (only zero activity)
 	totalQuietHours := 0
 	for _, isQuiet := range quietHours {
@@ -152,18 +152,18 @@ func findSleepHours(hourCounts map[int]int) []int {
 			totalQuietHours++
 		}
 	}
-	
+
 	if totalQuietHours < 4 {
 		// Be more strict - only use hours with zero activity
 		for hour := 0; hour < 24; hour++ {
 			quietHours[hour] = hourCounts[hour] == 0
 		}
 	}
-	
+
 	// Find continuous blocks of quiet hours that are at least 3 hours long
 	var result []int
 	var blocks [][]int
-	
+
 	// First pass: Find all continuous blocks
 	var currentBlock []int
 	for hour := 0; hour < 24; hour++ {
@@ -176,16 +176,16 @@ func findSleepHours(hourCounts map[int]int) []int {
 			currentBlock = nil
 		}
 	}
-	
+
 	// Handle wraparound case: check if first and last blocks can be combined
 	// (e.g., [22, 23] and [0, 1, 2] should become [22, 23, 0, 1, 2])
 	if len(currentBlock) > 0 && len(blocks) > 0 {
 		firstBlock := blocks[0]
 		lastBlock := currentBlock
-		
+
 		// Check if they can be combined (last hour of currentBlock is 23, first hour of firstBlock is 0)
-		if len(lastBlock) > 0 && len(firstBlock) > 0 && 
-		   lastBlock[len(lastBlock)-1] == 23 && firstBlock[0] == 0 {
+		if len(lastBlock) > 0 && len(firstBlock) > 0 &&
+			lastBlock[len(lastBlock)-1] == 23 && firstBlock[0] == 0 {
 			// Combine the blocks: [22, 23] + [0, 1, 2] = [22, 23, 0, 1, 2]
 			combined := append(lastBlock, firstBlock...)
 			if len(combined) >= 3 {
@@ -202,17 +202,17 @@ func findSleepHours(hourCounts map[int]int) []int {
 		// No existing blocks, just add the current one if it's long enough
 		blocks = append(blocks, currentBlock)
 	}
-	
+
 	// Flatten all valid blocks into the result
 	for _, block := range blocks {
 		result = append(result, block...)
 	}
-	
+
 	// If no continuous blocks of 3+ hours found, fall back to old method
 	if len(result) == 0 {
 		return findQuietHours(hourCounts)
 	}
-	
+
 	return result
 }
 
@@ -253,14 +253,14 @@ func timezoneFromOffset(offsetHours int) string {
 func detectLunchBreak(hourCounts map[int]int, utcOffset int, workStart, workEnd int) (lunchStart, lunchEnd, confidence float64) {
 	// If work hours are too short (less than 3 hours), we can't reliably detect lunch
 	// This prevents false positives when there's minimal activity data
-	if workEnd - workStart < 3 {
+	if workEnd-workStart < 3 {
 		// Return no lunch detected
 		return 0, 0, 0
 	}
-	
+
 	// First, check for clear gaps (hours with 0 activity) during work hours
 	// This is more accurate than the bucket approach when we have clear data
-	for localHour := workStart + 1; localHour < workEnd - 1; localHour++ {
+	for localHour := workStart + 1; localHour < workEnd-1; localHour++ {
 		utcHour := localHour - utcOffset
 		// Normalize to 0-23 range
 		for utcHour < 0 {
@@ -269,7 +269,7 @@ func detectLunchBreak(hourCounts map[int]int, utcOffset int, workStart, workEnd 
 		for utcHour >= 24 {
 			utcHour -= 24
 		}
-		
+
 		// Check if this hour has zero activity (potential lunch hour)
 		if hourCounts[utcHour] == 0 {
 			// Check if it's in typical lunch time range (11am-2pm)
@@ -286,7 +286,7 @@ func detectLunchBreak(hourCounts map[int]int, utcOffset int, workStart, workEnd 
 			}
 		}
 	}
-	
+
 	// If no clear gaps, fall back to the bucket-based approach for finding dips
 	// Convert hour counts to 30-minute buckets for better precision
 	bucketCounts := make(map[float64]int)
@@ -483,7 +483,7 @@ func detectLunchBreak(hourCounts map[int]int, utcOffset int, workStart, workEnd 
 		if candidate.start < float64(workStart)+1.0 {
 			continue // Skip this candidate - too early to be lunch
 		}
-		
+
 		// Also ensure lunch ends before work ends (with some buffer)
 		if candidate.end > float64(workEnd)-0.5 {
 			continue // Skip this candidate - too late to be lunch
@@ -512,101 +512,96 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	// ACTIVITY ANALYSIS SECTION
 	if activityTz, ok := contextData["activity_detected_timezone"].(string); ok {
 		evidence.WriteString("## ACTIVITY ANALYSIS (BEHAVIORAL DATA)\n")
-		
+
 		// Check for suspicious work patterns
 		workStart := 9.0 // default
 		if ws, ok := contextData["work_start_local"].(float64); ok {
 			workStart = ws
 		}
-		
-		// Calculate alternative timezone candidates based on patterns
-		evidence.WriteString("### TIMEZONE CANDIDATES (with confidence):\n")
-		
+
+		// Generate timezone candidates sorted by confidence (all times in UTC)
+		evidence.WriteString("### TIMEZONE CANDIDATES (sorted by confidence):\n")
+
 		// Primary detected timezone
 		primaryConfidence := 80.0
 		if confidence, ok := contextData["activity_confidence"].(float64); ok {
 			primaryConfidence = confidence * 100
 		}
-		
-		// If work starts very early, acknowledge the issue but keep primary timezone as highest confidence
+
+		// If work starts very early, reduce confidence but still list it first
 		if workStart < 6.0 {
-			primaryConfidence = 60.0 // Moderate confidence - unusual but still the detected timezone
-			
-			evidence.WriteString(fmt.Sprintf("1. **%s** (%.0f%% confidence)\n", activityTz, primaryConfidence))
-			evidence.WriteString("   - ⚠️ Work starts very early (unusual pattern)\n")
-			evidence.WriteString("   - Could indicate night shift, remote work, or irregular schedule\n")
-			evidence.WriteString("   - Sleep pattern still aligns with this timezone\n\n")
+			primaryConfidence = 60.0 // Moderate confidence - unusual pattern
+		}
+
+		// Convert local times to UTC for consistency
+		var workStartUTC, workEndUTC, lunchStartUTC, lunchEndUTC float64
+		var lunchConfidence float64
+		var utcOffset int
+
+		if offsetStr, ok := contextData["detected_gmt_offset"].(string); ok {
+			if offsetStr == "GMT+0" || offsetStr == "GMT-0" {
+				utcOffset = 0
+			} else if strings.HasPrefix(offsetStr, "GMT+") {
+				fmt.Sscanf(offsetStr, "GMT+%d", &utcOffset)
+			} else if strings.HasPrefix(offsetStr, "GMT-") {
+				fmt.Sscanf(offsetStr, "GMT-%d", &utcOffset)
+				utcOffset = -utcOffset
+			}
+		}
+
+		if ws, ok := contextData["work_start_local"].(float64); ok {
+			if we, ok := contextData["work_end_local"].(float64); ok {
+				workStartUTC = math.Mod(ws-float64(utcOffset)+24, 24)
+				workEndUTC = math.Mod(we-float64(utcOffset)+24, 24)
+			}
+		}
+
+		if ls, ok := contextData["lunch_start_local"].(float64); ok {
+			if le, ok := contextData["lunch_end_local"].(float64); ok {
+				if lc, ok := contextData["lunch_confidence"].(float64); ok {
+					lunchStartUTC = math.Mod(ls-float64(utcOffset)+24, 24)
+					lunchEndUTC = math.Mod(le-float64(utcOffset)+24, 24)
+					lunchConfidence = lc * 100
+				}
+			}
+		}
+
+		// Primary timezone candidate
+		evidence.WriteString(fmt.Sprintf("1. **%s** (%.0f%% confidence)\n", activityTz, primaryConfidence))
+		if workStartUTC != 0 || workEndUTC != 0 {
+			evidence.WriteString(fmt.Sprintf("   - Work Hours UTC: %.1f-%.1f\n", workStartUTC, workEndUTC))
+		}
+		if lunchStartUTC != 0 || lunchEndUTC != 0 {
+			evidence.WriteString(fmt.Sprintf("   - Lunch Hours UTC: %.1f-%.1f (%.0f%% confidence)\n",
+				lunchStartUTC, lunchEndUTC, lunchConfidence))
+		}
+		if sleepHours, ok := contextData["sleep_hours_utc"].([]int); ok && len(sleepHours) > 0 {
+			evidence.WriteString(fmt.Sprintf("   - Sleep Hours UTC: %v\n", sleepHours))
+		}
+		if workStart < 6.0 {
+			evidence.WriteString("   - ⚠️ Work starts very early (unusual pattern - possible night shift/remote work)\n")
 		} else {
-			// Normal work hours - higher confidence
-			evidence.WriteString(fmt.Sprintf("1. **%s** (%.0f%% confidence)\n", activityTz, primaryConfidence))
-			evidence.WriteString("   - Work hours align with typical business hours\n")
-			evidence.WriteString("   - Sleep pattern matches expected timezone\n\n")
+			evidence.WriteString("   - Work hours align with typical business patterns\n")
 		}
-		
-		// Add alternative timezone possibilities based on detected timezone and context
-		if sleepHours, ok := contextData["sleep_hours_utc"].([]int); ok && len(sleepHours) > 0 {
-			evidence.WriteString("\n### Other Possible Timezones (lower confidence):\n")
-			
-			// Generate contextually appropriate alternatives based on primary detection
-			if activityTz == "UTC+1" {
-				if workStart < 6.0 {
-					evidence.WriteString("- Night shift worker in Central Europe (Germany, Poland, etc.)\n")
-					evidence.WriteString("- Remote worker aligning with US East Coast hours (UTC-5)\n") 
-					evidence.WriteString("- Freelancer with irregular schedule in Central European timezone\n")
-				} else {
-					evidence.WriteString("- UTC+5:30 (India) - Indian developer working European hours from India\n")
-					evidence.WriteString("  → Common for Indians at European companies (HERE Maps, SAP, etc.)\n")
-					evidence.WriteString("  → Would be working 2pm-11pm IST to align with Berlin office\n")
-				}
-				evidence.WriteString("- UTC+3 (East Africa/Arabia) - adjacent timezone possibility\n")
-			} else if activityTz == "UTC+2" {
-				evidence.WriteString("- UTC+1 (Central Europe) - one hour west possibility\n")
-				evidence.WriteString("- UTC+3 (Eastern Europe/Middle East) - one hour east possibility\n")
-			} else if activityTz == "UTC-5" {
-				evidence.WriteString("- UTC-6 (Central US) - typical American pattern\n")
-				evidence.WriteString("- UTC-4 (Eastern US) - East Coast possibility\n")
-			} else if activityTz == "UTC-6" {
-				evidence.WriteString("- UTC-6 (Central US) - typical American pattern\n")
-				evidence.WriteString("- UTC-5 (Eastern US) - East Coast possibility\n")
-				evidence.WriteString("- UTC-7 (Mountain US) - Western US possibility\n")
-			} else if strings.Contains(activityTz, "UTC+8") {
-				evidence.WriteString("- UTC+8 (China/Singapore) - Chinese developer with late night work pattern\n")
-				evidence.WriteString("  → Would be working 11am-2am CST which is common for global teams\n")
-				evidence.WriteString("  → If name is clearly Chinese (Quan, Wei, Zhang, etc), strongly consider this\n")
+		evidence.WriteString("\n")
+
+		// Generate 2-3 alternative timezone candidates based on context
+		altCandidates := generateAlternativeTimezones(activityTz, workStart)
+		for i, alt := range altCandidates {
+			evidence.WriteString(fmt.Sprintf("%d. **%s** (%.0f%% confidence)\n", i+2, alt.Timezone, alt.Confidence*100))
+			for _, reason := range alt.Evidence {
+				evidence.WriteString(fmt.Sprintf("   - %s\n", reason))
 			}
-			evidence.WriteString("Note: Consider these alternatives if name/company evidence strongly suggests them\n")
-		}
-
-		if workStart, ok := contextData["work_start_local"].(float64); ok {
-			if workEnd, ok := contextData["work_end_local"].(float64); ok {
-				evidence.WriteString(fmt.Sprintf("Work Hours: %.1f-%.1f local time\n", workStart, workEnd))
-			}
-		}
-
-		if lunchStart, ok := contextData["lunch_start_local"].(float64); ok {
-			if lunchEnd, ok := contextData["lunch_end_local"].(float64); ok {
-				if lunchConf, ok := contextData["lunch_confidence"].(float64); ok {
-					evidence.WriteString(fmt.Sprintf("Lunch Hours: %.1f-%.1f local time (%.1f%% confidence)\n",
-						lunchStart, lunchEnd, lunchConf*100))
-				}
-			}
-		}
-
-		if sleepHours, ok := contextData["sleep_hours_utc"].([]int); ok && len(sleepHours) > 0 {
-			evidence.WriteString(fmt.Sprintf("Sleep Hours UTC: %v\n", sleepHours))
-		}
-
-		if offset, ok := contextData["detected_gmt_offset"].(string); ok {
-			evidence.WriteString(fmt.Sprintf("GMT Offset: %s\n", offset))
+			evidence.WriteString("\n")
 		}
 
 		// Add activity date range for daylight saving context
 		if oldestDate, ok := contextData["activity_oldest_date"].(string); ok {
 			if newestDate, ok := contextData["activity_newest_date"].(string); ok {
 				if totalDays, ok := contextData["activity_total_days"].(int); ok {
-					evidence.WriteString(fmt.Sprintf("Activity Period: %s to %s (%d days)\n", 
+					evidence.WriteString(fmt.Sprintf("Activity Period: %s to %s (%d days)\n",
 						oldestDate, newestDate, totalDays))
-					
+
 					if spansDST, ok := contextData["activity_spans_dst_transitions"].(bool); ok && spansDST {
 						evidence.WriteString("⚠️  Data spans DST transitions (spring & fall) - UTC offsets reflect mixed standard/daylight periods\n")
 						evidence.WriteString("⚠️  Note: Some regions (Arizona, Saskatchewan, parts of Indiana, most of Asia/Africa) don't observe DST\n")
@@ -621,8 +616,8 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	// GITHUB USER PROFILE SECTION
 	if userJSON, ok := contextData["github_user_json"]; ok {
 		evidence.WriteString("## GITHUB USER PROFILE\n")
-		
-		// Handle GitHubUser struct directly 
+
+		// Handle GitHubUser struct directly
 		if user, ok := userJSON.(*GitHubUser); ok && user != nil {
 			// Important fields first
 			if user.Name != "" {
@@ -698,7 +693,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	// ORGANIZATIONS SECTION
 	if orgs, ok := contextData["organizations"]; ok {
 		evidence.WriteString("## ORGANIZATION MEMBERSHIPS\n")
-		
+
 		// Handle []Organization slice directly
 		if orgsList, ok := orgs.([]Organization); ok {
 			for _, org := range orgsList {
@@ -733,7 +728,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	// PULL REQUESTS SECTION
 	if prs, ok := contextData["pull_requests"]; ok {
 		evidence.WriteString("## RECENT PULL REQUEST TITLES\n")
-		
+
 		// Handle []map[string]interface{} format (actual format from detector.go)
 		if prsList, ok := prs.([]map[string]interface{}); ok {
 			for _, pr := range prsList {
@@ -742,7 +737,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 				}
 			}
 		} else if prsList, ok := prs.([]interface{}); ok {
-			// Fallback: handle []interface{} format  
+			// Fallback: handle []interface{} format
 			for _, pr := range prsList {
 				if prMap, ok := pr.(map[string]interface{}); ok {
 					if title, ok := prMap["title"].(string); ok && title != "" {
@@ -781,7 +776,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		}
 		evidence.WriteString("\n")
 	}
-	
+
 	// CONTRIBUTED REPOSITORIES SECTION (existing activity data)
 	if repos, ok := contextData["repositories"].([]string); ok && len(repos) > 0 {
 		evidence.WriteString("## REPOSITORIES USER IS ACTIVE IN\n")
@@ -808,39 +803,157 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	return evidence.String()
 }
 
+// generateAlternativeTimezones creates 2-3 plausible alternative timezone candidates
+func generateAlternativeTimezones(primaryTz string, workStart float64) []TimezoneCandidate {
+	var candidates []TimezoneCandidate
+
+	switch primaryTz {
+	case "UTC+1":
+		if workStart < 6.0 {
+			candidates = append(candidates, TimezoneCandidate{
+				Timezone:   "UTC-5",
+				Confidence: 0.25,
+				Evidence:   []string{"Early hours could indicate US East Coast remote work alignment"},
+			})
+			candidates = append(candidates, TimezoneCandidate{
+				Timezone:   "UTC+3",
+				Confidence: 0.20,
+				Evidence:   []string{"Night shift worker in Eastern Europe/Middle East"},
+			})
+		} else {
+			candidates = append(candidates, TimezoneCandidate{
+				Timezone:   "UTC+5:30",
+				Confidence: 0.30,
+				Evidence:   []string{"Indian developer working European hours (common in global companies)"},
+			})
+			candidates = append(candidates, TimezoneCandidate{
+				Timezone:   "UTC+3",
+				Confidence: 0.20,
+				Evidence:   []string{"Adjacent Eastern European timezone possibility"},
+			})
+		}
+	case "UTC+2":
+		candidates = append(candidates, TimezoneCandidate{
+			Timezone:   "UTC+1",
+			Confidence: 0.25,
+			Evidence:   []string{"One hour west (Central Europe) possibility"},
+		})
+		candidates = append(candidates, TimezoneCandidate{
+			Timezone:   "UTC+3",
+			Confidence: 0.20,
+			Evidence:   []string{"One hour east (Eastern Europe/Middle East) possibility"},
+		})
+	case "UTC-5":
+		candidates = append(candidates, TimezoneCandidate{
+			Timezone:   "UTC-6",
+			Confidence: 0.25,
+			Evidence:   []string{"Central US timezone possibility"},
+		})
+		candidates = append(candidates, TimezoneCandidate{
+			Timezone:   "UTC-4",
+			Confidence: 0.20,
+			Evidence:   []string{"Atlantic timezone or Eastern Daylight Time"},
+		})
+	case "UTC-6":
+		candidates = append(candidates, TimezoneCandidate{
+			Timezone:   "UTC-5",
+			Confidence: 0.25,
+			Evidence:   []string{"Eastern US timezone possibility"},
+		})
+		candidates = append(candidates, TimezoneCandidate{
+			Timezone:   "UTC-7",
+			Confidence: 0.20,
+			Evidence:   []string{"Mountain US timezone possibility"},
+		})
+	case "UTC-7":
+		candidates = append(candidates, TimezoneCandidate{
+			Timezone:   "UTC-8",
+			Confidence: 0.25,
+			Evidence:   []string{"Pacific US timezone possibility"},
+		})
+		candidates = append(candidates, TimezoneCandidate{
+			Timezone:   "UTC-6",
+			Confidence: 0.20,
+			Evidence:   []string{"Central US timezone possibility"},
+		})
+	case "UTC-8":
+		candidates = append(candidates, TimezoneCandidate{
+			Timezone:   "UTC-7",
+			Confidence: 0.25,
+			Evidence:   []string{"Mountain US timezone possibility"},
+		})
+		candidates = append(candidates, TimezoneCandidate{
+			Timezone:   "UTC-9",
+			Confidence: 0.15,
+			Evidence:   []string{"Alaska timezone possibility"},
+		})
+	case "UTC+8":
+		candidates = append(candidates, TimezoneCandidate{
+			Timezone:   "UTC+9",
+			Confidence: 0.25,
+			Evidence:   []string{"Japan/Korea timezone possibility"},
+		})
+		candidates = append(candidates, TimezoneCandidate{
+			Timezone:   "UTC+7",
+			Confidence: 0.20,
+			Evidence:   []string{"Southeast Asia (Thailand/Vietnam) possibility"},
+		})
+	case "UTC+9":
+		candidates = append(candidates, TimezoneCandidate{
+			Timezone:   "UTC+8",
+			Confidence: 0.25,
+			Evidence:   []string{"China/Singapore timezone possibility"},
+		})
+		candidates = append(candidates, TimezoneCandidate{
+			Timezone:   "UTC+10",
+			Confidence: 0.20,
+			Evidence:   []string{"Eastern Australia timezone possibility"},
+		})
+	default:
+		// Fallback for other timezones - adjacent possibilities
+		candidates = append(candidates, TimezoneCandidate{
+			Timezone:   "Adjacent timezone",
+			Confidence: 0.20,
+			Evidence:   []string{"Adjacent timezone possibility based on geographic proximity"},
+		})
+	}
+
+	return candidates
+}
+
 // detectPeakProductivity finds the single most productive 30-minute slot
 func detectPeakProductivity(hourCounts map[int]int, utcOffset int) (start, end float64, count int) {
 	// Convert hour counts to 30-minute buckets in local time
 	bucketCounts := make(map[float64]int)
-	
+
 	// Distribute hourly counts into 30-minute buckets
 	for utcHour, hourCount := range hourCounts {
 		// Convert UTC hour to local hour
 		localHour := (utcHour + utcOffset + 24) % 24
-		
+
 		// Split the count between two 30-minute buckets
 		// Give slightly more weight to the first half-hour since most activity
 		// tends to happen at the start of an hour
 		bucketCounts[float64(localHour)] += (hourCount + 1) / 2
 		bucketCounts[float64(localHour)+0.5] += hourCount / 2
 	}
-	
+
 	// Find the single 30-minute bucket with the highest activity
 	maxActivity := 0
 	peakBucket := 0.0
-	
+
 	for bucket := 0.0; bucket < 24.0; bucket += 0.5 {
 		if bucketCounts[bucket] > maxActivity {
 			maxActivity = bucketCounts[bucket]
 			peakBucket = bucket
 		}
 	}
-	
+
 	// Return the peak 30-minute slot
 	if maxActivity > 0 {
 		return peakBucket, peakBucket + 0.5, maxActivity
 	}
-	
+
 	return 0, 0, 0
 }
 
@@ -855,45 +968,45 @@ type CountryTLD struct {
 func extractCountryTLDs(urls ...string) []CountryTLD {
 	// Map of ccTLDs to countries and regions for location hints
 	ccTLDMap := map[string]CountryTLD{
-		".ca":  {".ca", "Canada", "North America"},
-		".uk":  {".uk", "United Kingdom", "Europe"},
-		".de":  {".de", "Germany", "Europe"},
-		".fr":  {".fr", "France", "Europe"},
-		".it":  {".it", "Italy", "Europe"},
-		".es":  {".es", "Spain", "Europe"},
-		".nl":  {".nl", "Netherlands", "Europe"},
-		".ch":  {".ch", "Switzerland", "Europe"},
-		".at":  {".at", "Austria", "Europe"},
-		".be":  {".be", "Belgium", "Europe"},
-		".dk":  {".dk", "Denmark", "Europe"},
-		".fi":  {".fi", "Finland", "Europe"},
-		".no":  {".no", "Norway", "Europe"},
-		".se":  {".se", "Sweden", "Europe"},
-		".pl":  {".pl", "Poland", "Europe"},
-		".cz":  {".cz", "Czech Republic", "Europe"},
-		".hu":  {".hu", "Hungary", "Europe"},
-		".ru":  {".ru", "Russia", "Europe/Asia"},
-		".ua":  {".ua", "Ukraine", "Europe"},
-		".jp":  {".jp", "Japan", "Asia"},
-		".kr":  {".kr", "South Korea", "Asia"},
-		".cn":  {".cn", "China", "Asia"},
-		".hk":  {".hk", "Hong Kong", "Asia"},
-		".sg":  {".sg", "Singapore", "Asia"},
-		".in":  {".in", "India", "Asia"},
-		".au":  {".au", "Australia", "Oceania"},
-		".nz":  {".nz", "New Zealand", "Oceania"},
-		".br":  {".br", "Brazil", "South America"},
-		".ar":  {".ar", "Argentina", "South America"},
-		".cl":  {".cl", "Chile", "South America"},
-		".mx":  {".mx", "Mexico", "North America"},
-		".za":  {".za", "South Africa", "Africa"},
-		".ie":  {".ie", "Ireland", "Europe"},
-		".pt":  {".pt", "Portugal", "Europe"},
-		".gr":  {".gr", "Greece", "Europe"},
-		".tr":  {".tr", "Turkey", "Europe/Asia"},
-		".is":  {".is", "Iceland", "Europe"},
-		".il":  {".il", "Israel", "Middle East"},
-		".eg":  {".eg", "Egypt", "Africa/Middle East"},
+		".ca": {".ca", "Canada", "North America"},
+		".uk": {".uk", "United Kingdom", "Europe"},
+		".de": {".de", "Germany", "Europe"},
+		".fr": {".fr", "France", "Europe"},
+		".it": {".it", "Italy", "Europe"},
+		".es": {".es", "Spain", "Europe"},
+		".nl": {".nl", "Netherlands", "Europe"},
+		".ch": {".ch", "Switzerland", "Europe"},
+		".at": {".at", "Austria", "Europe"},
+		".be": {".be", "Belgium", "Europe"},
+		".dk": {".dk", "Denmark", "Europe"},
+		".fi": {".fi", "Finland", "Europe"},
+		".no": {".no", "Norway", "Europe"},
+		".se": {".se", "Sweden", "Europe"},
+		".pl": {".pl", "Poland", "Europe"},
+		".cz": {".cz", "Czech Republic", "Europe"},
+		".hu": {".hu", "Hungary", "Europe"},
+		".ru": {".ru", "Russia", "Europe/Asia"},
+		".ua": {".ua", "Ukraine", "Europe"},
+		".jp": {".jp", "Japan", "Asia"},
+		".kr": {".kr", "South Korea", "Asia"},
+		".cn": {".cn", "China", "Asia"},
+		".hk": {".hk", "Hong Kong", "Asia"},
+		".sg": {".sg", "Singapore", "Asia"},
+		".in": {".in", "India", "Asia"},
+		".au": {".au", "Australia", "Oceania"},
+		".nz": {".nz", "New Zealand", "Oceania"},
+		".br": {".br", "Brazil", "South America"},
+		".ar": {".ar", "Argentina", "South America"},
+		".cl": {".cl", "Chile", "South America"},
+		".mx": {".mx", "Mexico", "North America"},
+		".za": {".za", "South Africa", "Africa"},
+		".ie": {".ie", "Ireland", "Europe"},
+		".pt": {".pt", "Portugal", "Europe"},
+		".gr": {".gr", "Greece", "Europe"},
+		".tr": {".tr", "Turkey", "Europe/Asia"},
+		".is": {".is", "Iceland", "Europe"},
+		".il": {".il", "Israel", "Middle East"},
+		".eg": {".eg", "Egypt", "Africa/Middle East"},
 	}
 
 	var foundTLDs []CountryTLD
@@ -934,24 +1047,24 @@ func extractCountryTLDs(urls ...string) []CountryTLD {
 // extractSocialMediaURLs extracts URLs from various social media fields in user profile
 func extractSocialMediaURLs(user *GitHubUser) []string {
 	var urls []string
-	
+
 	// Blog/website URL
 	if user.Blog != "" {
 		urls = append(urls, user.Blog)
 	}
-	
+
 	// Twitter URL construction
 	if user.TwitterUsername != "" {
 		urls = append(urls, "https://twitter.com/"+user.TwitterUsername)
 	}
-	
+
 	// Extract URLs from bio using regex
 	if user.Bio != "" {
 		// Simple regex to find URLs in bio
 		urlRegex := regexp.MustCompile(`https?://[^\s<>"{}|\\^` + "`" + `\[\]]+`)
 		bioURLs := urlRegex.FindAllString(user.Bio, -1)
 		urls = append(urls, bioURLs...)
-		
+
 		// Also check for domain-only references (e.g., "jamon.ca")
 		domainRegex := regexp.MustCompile(`[a-zA-Z0-9-]+\.[a-z]{2,}`)
 		domains := domainRegex.FindAllString(user.Bio, -1)
@@ -963,7 +1076,7 @@ func extractSocialMediaURLs(user *GitHubUser) []string {
 			}
 		}
 	}
-	
+
 	return urls
 }
 
@@ -977,10 +1090,10 @@ func fetchMastodonWebsite(mastodonURL string, logger *slog.Logger) string {
 		logger.Debug("invalid Mastodon URL format", "url", mastodonURL)
 		return ""
 	}
-	
+
 	instance := matches[1]
 	username := matches[2]
-	
+
 	// Try to fetch the Mastodon profile page
 	resp, err := http.Get(mastodonURL)
 	if err != nil {
@@ -988,20 +1101,20 @@ func fetchMastodonWebsite(mastodonURL string, logger *slog.Logger) string {
 		return ""
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		logger.Debug("Mastodon profile returned non-200 status", "url", mastodonURL, "status", resp.StatusCode)
 		return ""
 	}
-	
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		logger.Debug("failed to read Mastodon profile body", "url", mastodonURL, "error", err)
 		return ""
 	}
-	
+
 	html := string(body)
-	
+
 	// Look for website in meta tags or profile fields
 	// Pattern 1: Look for website in profile fields (common in Mastodon)
 	websiteRegex := regexp.MustCompile(`(?i)(?:website|homepage|blog|site)[^>]*>.*?href="([^"]+)"`)
@@ -1010,7 +1123,7 @@ func fetchMastodonWebsite(mastodonURL string, logger *slog.Logger) string {
 		logger.Debug("found website in Mastodon profile", "mastodon", mastodonURL, "website", website)
 		return website
 	}
-	
+
 	// Pattern 2: Look for verified links (rel="me" links that Mastodon verifies)
 	verifiedRegex := regexp.MustCompile(`rel="me[^"]*"[^>]*href="([^"]+)"`)
 	if matches := verifiedRegex.FindStringSubmatch(html); len(matches) > 1 {
@@ -1021,7 +1134,7 @@ func fetchMastodonWebsite(mastodonURL string, logger *slog.Logger) string {
 			return website
 		}
 	}
-	
+
 	// Pattern 3: Try the Mastodon API
 	apiURL := fmt.Sprintf("https://%s/api/v1/accounts/lookup?acct=%s", instance, username)
 	apiResp, err := http.Get(apiURL)
@@ -1039,8 +1152,8 @@ func fetchMastodonWebsite(mastodonURL string, logger *slog.Logger) string {
 			// Check fields for website
 			for _, field := range account.Fields {
 				fieldName := strings.ToLower(field.Name)
-				if strings.Contains(fieldName, "website") || strings.Contains(fieldName, "site") || 
-				   strings.Contains(fieldName, "blog") || strings.Contains(fieldName, "homepage") {
+				if strings.Contains(fieldName, "website") || strings.Contains(fieldName, "site") ||
+					strings.Contains(fieldName, "blog") || strings.Contains(fieldName, "homepage") {
 					// Extract URL from HTML value
 					urlRegex := regexp.MustCompile(`href="([^"]+)"`)
 					if matches := urlRegex.FindStringSubmatch(field.Value); len(matches) > 1 {
@@ -1052,7 +1165,7 @@ func fetchMastodonWebsite(mastodonURL string, logger *slog.Logger) string {
 			}
 		}
 	}
-	
+
 	logger.Debug("no website found in Mastodon profile", "url", mastodonURL)
 	return ""
 }
@@ -1062,9 +1175,9 @@ func isPolishName(name string) bool {
 	if name == "" {
 		return false
 	}
-	
+
 	nameLower := strings.ToLower(name)
-	
+
 	// Check for Polish special characters
 	polishChars := []string{"ł", "ą", "ć", "ę", "ń", "ó", "ś", "ź", "ż"}
 	for _, char := range polishChars {
@@ -1072,7 +1185,7 @@ func isPolishName(name string) bool {
 			return true
 		}
 	}
-	
+
 	// Check for common Polish name endings
 	polishEndings := []string{"ski", "cki", "wicz", "czak", "czyk", "owski", "ewski", "iński"}
 	for _, ending := range polishEndings {
@@ -1080,13 +1193,13 @@ func isPolishName(name string) bool {
 			return true
 		}
 	}
-	
+
 	// Check for common Polish first names
-	polishFirstNames := []string{"łukasz", "paweł", "michał", "piotr", "wojciech", 
+	polishFirstNames := []string{"łukasz", "paweł", "michał", "piotr", "wojciech",
 		"krzysztof", "andrzej", "marek", "tomasz", "jan", "stanisław", "zbigniew",
 		"anna", "maria", "katarzyna", "małgorzata", "agnieszka", "barbara", "ewa",
 		"elżbieta", "zofia", "teresa", "magdalena", "joanna", "aleksandra"}
-	
+
 	nameWords := strings.Fields(nameLower)
 	for _, word := range nameWords {
 		for _, firstName := range polishFirstNames {
@@ -1095,14 +1208,14 @@ func isPolishName(name string) bool {
 			}
 		}
 	}
-	
+
 	return false
 }
 
 // extractSocialMediaFromHTML extracts social media links from GitHub profile HTML
 func extractSocialMediaFromHTML(html string) []string {
 	var urls []string
-	
+
 	// Extract Mastodon links (format: @username@instance.domain)
 	// Look for pattern like: href="https://infosec.exchange/@jamon">@jamon@infosec.exchange
 	mastodonRegex := regexp.MustCompile(`href="(https?://[^"]+/@[^"]+)"[^>]*>@[^@]+@[^<]+`)
@@ -1112,7 +1225,7 @@ func extractSocialMediaFromHTML(html string) []string {
 			urls = append(urls, match[1])
 		}
 	}
-	
+
 	// Also look for rel="nofollow me" links which are commonly used for Mastodon verification
 	relMeRegex := regexp.MustCompile(`rel="[^"]*\bme\b[^"]*"[^>]*href="([^"]+)"`)
 	relMeMatches := relMeRegex.FindAllStringSubmatch(html, -1)
@@ -1121,7 +1234,7 @@ func extractSocialMediaFromHTML(html string) []string {
 			urls = append(urls, match[1])
 		}
 	}
-	
+
 	// Alternative pattern for rel="me" links
 	altRelMeRegex := regexp.MustCompile(`href="([^"]+)"[^>]*rel="[^"]*\bme\b[^"]*"`)
 	altRelMeMatches := altRelMeRegex.FindAllStringSubmatch(html, -1)
@@ -1130,6 +1243,6 @@ func extractSocialMediaFromHTML(html string) []string {
 			urls = append(urls, match[1])
 		}
 	}
-	
+
 	return urls
 }

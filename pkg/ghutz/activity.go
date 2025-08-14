@@ -25,13 +25,13 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 
 	// Collect all timestamps first (we'll deduplicate and limit later)
 	type timestampEntry struct {
-		time time.Time
+		time   time.Time
 		source string // for debugging
 		org    string // organization/owner name
 	}
 	allTimestamps := []timestampEntry{}
 	orgCounts := make(map[string]int) // Track organization activity
-	
+
 	// Add events
 	eventOldest := time.Now()
 	eventNewest := time.Time{}
@@ -55,7 +55,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			eventNewest = event.CreatedAt
 		}
 	}
-	
+
 	if len(events) > 0 {
 		d.logger.Debug("GitHub Events data", "username", username,
 			"count", len(events),
@@ -63,7 +63,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			"newest", eventNewest.Format("2006-01-02"),
 			"days_covered", int(eventNewest.Sub(eventOldest).Hours()/24))
 	}
-	
+
 	// Track the oldest event to check data coverage
 	var oldestEventTime time.Time
 	if len(events) > 0 {
@@ -74,14 +74,14 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			}
 		}
 	}
-	
+
 	twoWeeksAgo := time.Now().AddDate(0, 0, -14)
-	
+
 	// Decide if we need supplemental data:
 	// 1. If we have less than 300 events, OR
 	// 2. If our oldest event is newer than 2 weeks ago (insufficient time coverage)
 	needSupplemental := len(events) < 300 || oldestEventTime.IsZero() || oldestEventTime.After(twoWeeksAgo)
-	
+
 	if needSupplemental {
 		reason := ""
 		if len(events) < 300 {
@@ -94,12 +94,12 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			}
 			reason += fmt.Sprintf("only %d days of data", daysCovered)
 		}
-		d.logger.Debug("supplementing with additional API queries", "username", username, 
+		d.logger.Debug("supplementing with additional API queries", "username", username,
 			"reason", reason)
-		
+
 		// Fetch additional data in parallel
 		additionalData := d.fetchSupplementalActivity(ctx, username)
-		
+
 		// Add all timestamps from supplemental data
 		prOldest := time.Now()
 		prNewest := time.Time{}
@@ -123,7 +123,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				prNewest = pr.CreatedAt
 			}
 		}
-		
+
 		if len(additionalData.PullRequests) > 0 {
 			d.logger.Debug("Pull Requests data", "username", username,
 				"count", len(additionalData.PullRequests),
@@ -131,7 +131,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				"newest", prNewest.Format("2006-01-02"),
 				"days_covered", int(prNewest.Sub(prOldest).Hours()/24))
 		}
-		
+
 		issueOldest := time.Now()
 		issueNewest := time.Time{}
 		for _, issue := range additionalData.Issues {
@@ -154,7 +154,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				issueNewest = issue.CreatedAt
 			}
 		}
-		
+
 		if len(additionalData.Issues) > 0 {
 			d.logger.Debug("Issues data", "username", username,
 				"count", len(additionalData.Issues),
@@ -162,7 +162,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				"newest", issueNewest.Format("2006-01-02"),
 				"days_covered", int(issueNewest.Sub(issueOldest).Hours()/24))
 		}
-		
+
 		commentOldest := time.Now()
 		commentNewest := time.Time{}
 		for _, comment := range additionalData.Comments {
@@ -179,7 +179,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				commentNewest = comment.CreatedAt
 			}
 		}
-		
+
 		if len(additionalData.Comments) > 0 {
 			d.logger.Debug("Comments data", "username", username,
 				"count", len(additionalData.Comments),
@@ -187,19 +187,29 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				"newest", commentNewest.Format("2006-01-02"),
 				"days_covered", int(commentNewest.Sub(commentOldest).Hours()/24))
 		}
-		
+
 		d.logger.Debug("collected all timestamps", "username", username,
 			"total_before_dedup", len(allTimestamps),
 			"prs", len(additionalData.PullRequests),
-			"issues", len(additionalData.Issues), 
+			"issues", len(additionalData.Issues),
 			"comments", len(additionalData.Comments))
 	}
-	
+
+	// Filter out activity older than 3 years to focus on current timezone behavior
+	threeYearsAgo := time.Now().AddDate(-3, 0, 0)
+	var recentTimestamps []timestampEntry
+	for _, entry := range allTimestamps {
+		if entry.time.After(threeYearsAgo) {
+			recentTimestamps = append(recentTimestamps, entry)
+		}
+	}
+	allTimestamps = recentTimestamps
+
 	// Sort timestamps by recency (newest first)
 	sort.Slice(allTimestamps, func(i, j int) bool {
 		return allTimestamps[i].time.After(allTimestamps[j].time)
 	})
-	
+
 	// Deduplicate and take the most recent 480 unique timestamps
 	const maxTimestamps = 480
 	uniqueTimestamps := make(map[time.Time]bool)
@@ -207,13 +217,13 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	hourOrgActivity := make(map[int]map[string]int) // Track org activity by hour
 	duplicates := 0
 	used := 0
-	
+
 	for _, entry := range allTimestamps {
 		if !uniqueTimestamps[entry.time] {
 			uniqueTimestamps[entry.time] = true
 			hour := entry.time.UTC().Hour()
 			hourCounts[hour]++
-			
+
 			// Track organization counts
 			if entry.org != "" {
 				orgCounts[entry.org]++
@@ -224,7 +234,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				hourOrgActivity[hour][entry.org]++
 			}
 			used++
-			
+
 			// Stop after we have enough unique timestamps
 			if used >= maxTimestamps {
 				break
@@ -233,10 +243,10 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			duplicates++
 		}
 	}
-	
+
 	// Count total unique activities used
 	totalActivity := len(uniqueTimestamps)
-	
+
 	// Find oldest and newest timestamps from the unique set
 	var oldestActivity, newestActivity time.Time
 	for timestamp := range uniqueTimestamps {
@@ -247,13 +257,13 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			newestActivity = timestamp
 		}
 	}
-	
+
 	// Calculate total days covered
 	var totalDays int
 	var spansDSTTransitions bool
 	if !oldestActivity.IsZero() && !newestActivity.IsZero() {
 		totalDays = int(newestActivity.Sub(oldestActivity).Hours()/24) + 1
-		
+
 		// Check if the activity period spans DST transitions
 		// DST transitions happen in March/April (spring forward) and September/October/November (fall back)
 		// We need both a spring and fall month to indicate DST transitions
@@ -261,14 +271,14 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		for timestamp := range uniqueTimestamps {
 			monthsPresent[int(timestamp.Month())] = true
 		}
-		
-		hasSpringDST := monthsPresent[3] || monthsPresent[4]    // March or April
+
+		hasSpringDST := monthsPresent[3] || monthsPresent[4]                     // March or April
 		hasFallDST := monthsPresent[9] || monthsPresent[10] || monthsPresent[11] // September, October, or November
-		
+
 		// Only mark as spanning DST if we have both spring AND fall transition periods
 		spansDSTTransitions = hasSpringDST && hasFallDST && totalDays > 90
 	}
-	
+
 	d.logger.Debug("activity data summary", "username", username,
 		"total_timestamps_collected", len(allTimestamps),
 		"duplicates_removed", duplicates,
@@ -277,7 +287,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		"oldest_activity", oldestActivity.Format("2006-01-02"),
 		"newest_activity", newestActivity.Format("2006-01-02"),
 		"total_days", totalDays)
-	
+
 	// Check minimum threshold
 	if totalActivity < 3 {
 		d.logger.Debug("insufficient activity data", "username", username,
@@ -285,7 +295,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			"minimum_required", 3)
 		return nil
 	}
-	
+
 	// Warn if we have limited data
 	if totalActivity < 20 {
 		d.logger.Debug("limited activity data - results may be less accurate", "username", username,
@@ -400,24 +410,24 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// So: UTC_offset = local_time - utc_time
 	// But we have UTC sleep time and want to find offset
 	// So: UTC_offset = assumed_local_sleep - observed_utc_sleep
-	
+
 	// However, we need to think about this differently:
 	// If midQuiet (UTC) is 2.5 and we expect local sleep at 2.0 (Europe)
 	// That means UTC is AHEAD of local, which would be UTC-0.5
 	// But that's wrong for Europe!
-	
-	// The correct logic: 
+
+	// The correct logic:
 	// For positive UTC offsets (east of Greenwich): local_time = utc_time + offset
 	// So if they sleep at 2.5 UTC and we expect 3.5 local (typical for UTC+1)
 	// Then offset = 3.5 - 2.5 = +1
-	
+
 	// We need to adjust assumed sleep midpoints based on patterns
 	var offsetFromUTC float64
 	if float64(europeanActivity) > float64(americanActivity)*1.2 {
 		// European/Asian pattern - need to distinguish between them
 		// Asian timezones (UTC+8/+9) have sleep around 15-20 UTC (midnight-5am local)
 		// European timezones (UTC+0/+1/+2) have sleep around 0-5 UTC (midnight-5am local)
-		
+
 		if midQuiet >= 14 && midQuiet <= 20 {
 			// Asian pattern - sleep hours in the afternoon/evening UTC
 			// If they sleep at 17 UTC and expect 2am local, offset = 2 + 24 - 17 = 9
@@ -431,15 +441,15 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		} else {
 			// European pattern - sleep hours in early morning UTC
 			assumedSleepMidpoint = midQuiet + 1.0 // Assume UTC+1 for Europe
-			offsetFromUTC = 1.0 // Default to CET
-			
+			offsetFromUTC = 1.0                   // Default to CET
+
 			// Fine-tune based on exact sleep timing
 			if midQuiet < 2.0 {
 				offsetFromUTC = 2.0 // Eastern Europe (UTC+2)
 			} else if midQuiet > 3.0 && midQuiet < 14 {
 				offsetFromUTC = 0.0 // UK/Portugal (UTC+0)
 			}
-			
+
 			d.logger.Debug("European timezone detection", "username", username,
 				"midQuiet", midQuiet, "assumed_offset", offsetFromUTC)
 		}
@@ -447,69 +457,69 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		// American pattern - need better US timezone differentiation
 		// Calculate base offset from sleep pattern
 		baseOffset := assumedSleepMidpoint - midQuiet
-		
+
 		// For US timezones, consider multiple possibilities when sleep patterns are ambiguous
 		// US sleep patterns typically map to:
 		// - Eastern (UTC-5): sleep 5-10 UTC (midnight-5am local)
-		// - Central (UTC-6): sleep 6-11 UTC (midnight-5am local) 
+		// - Central (UTC-6): sleep 6-11 UTC (midnight-5am local)
 		// - Mountain (UTC-7): sleep 7-12 UTC (midnight-5am local)
 		// - Pacific (UTC-8): sleep 8-13 UTC (midnight-5am local)
-		
+
 		// Check for ambiguous sleep patterns that could match multiple US zones
 		// Expanded range to catch more edge cases like early sleepers
 		if midQuiet >= 4 && midQuiet <= 13 && len(quietHours) >= 4 {
 			// This sleep pattern could match Eastern, Central, Mountain, or Pacific time
 			d.logger.Debug("ambiguous US sleep pattern detected", "username", username,
 				"midQuiet", midQuiet, "baseOffset", baseOffset, "quietHours", quietHours)
-			
+
 			// Use additional heuristics for US timezone differentiation
-			
+
 			// Check evening activity patterns (7-11pm local converted to UTC)
 			// Eastern Time (UTC-5): 7-11pm local = 0-4am UTC (next day, or 12-16 UTC same day in DST)
 			// Central Time (UTC-6): 7-11pm local = 1-5am UTC (next day, or 13-17 UTC same day in DST)
 			// Mountain Time (UTC-7): 7-11pm local = 2-6am UTC (next day, or 14-18 UTC same day in DST)
 			// Pacific Time (UTC-8): 7-11pm local = 3-7am UTC (next day, or 15-19 UTC same day in DST)
-			
+
 			eveningActivityEastern := hourCounts[0] + hourCounts[1] + hourCounts[2] + hourCounts[3] + hourCounts[12] + hourCounts[13] + hourCounts[14] + hourCounts[15]
 			eveningActivityCentral := hourCounts[1] + hourCounts[2] + hourCounts[3] + hourCounts[4] + hourCounts[13] + hourCounts[14] + hourCounts[15] + hourCounts[16]
 			eveningActivityMountain := hourCounts[2] + hourCounts[3] + hourCounts[4] + hourCounts[5] + hourCounts[14] + hourCounts[15] + hourCounts[16] + hourCounts[17]
 			eveningActivityPacific := hourCounts[3] + hourCounts[4] + hourCounts[5] + hourCounts[6] + hourCounts[15] + hourCounts[16] + hourCounts[17] + hourCounts[18]
-			
+
 			d.logger.Debug("evening activity analysis", "username", username,
 				"eastern_evening", eveningActivityEastern,
-				"central_evening", eveningActivityCentral, 
+				"central_evening", eveningActivityCentral,
 				"mountain_evening", eveningActivityMountain,
 				"pacific_evening", eveningActivityPacific)
-			
+
 			// Choose timezone based on which has the highest evening activity
 			// Evening activity is a strong signal for timezone since people often code in the evenings
 			bestTimezone := "eastern"
 			bestActivity := eveningActivityEastern
 			bestOffset := -5.0
-			
+
 			if eveningActivityCentral > bestActivity {
 				bestTimezone = "central"
 				bestActivity = eveningActivityCentral
 				bestOffset = -6.0
 			}
-			
+
 			if eveningActivityMountain > bestActivity {
 				bestTimezone = "mountain"
-				bestActivity = eveningActivityMountain  
+				bestActivity = eveningActivityMountain
 				bestOffset = -7.0
 			}
-			
+
 			if eveningActivityPacific > bestActivity {
 				bestTimezone = "pacific"
 				bestActivity = eveningActivityPacific
 				bestOffset = -8.0
 			}
-			
+
 			// Apply the best evening activity match, but add sleep pattern validation
 			// If sleep pattern strongly disagrees (>2 hours off), consider alternatives
 			if bestTimezone == "eastern" && midQuiet > 8.0 {
 				// Eastern time but very late sleep pattern - might actually be Central
-				if float64(eveningActivityCentral) > float64(eveningActivityEastern) * 0.7 { // Within 30% of eastern
+				if float64(eveningActivityCentral) > float64(eveningActivityEastern)*0.7 { // Within 30% of eastern
 					offsetFromUTC = -6.0 // Central Time
 					d.logger.Debug("adjusted Eastern to Central due to late sleep pattern", "username", username,
 						"midQuiet", midQuiet, "eastern_evening", eveningActivityEastern, "central_evening", eveningActivityCentral)
@@ -520,8 +530,8 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				}
 			} else if bestTimezone == "mountain" && midQuiet < 6.0 {
 				// Mountain time but very early sleep pattern - might actually be Eastern
-				if float64(eveningActivityEastern) > float64(eveningActivityMountain) * 0.7 { // Within 30% of mountain
-					offsetFromUTC = -5.0 // Eastern Time  
+				if float64(eveningActivityEastern) > float64(eveningActivityMountain)*0.7 { // Within 30% of mountain
+					offsetFromUTC = -5.0 // Eastern Time
 					d.logger.Debug("adjusted Mountain to Eastern due to early sleep pattern", "username", username,
 						"midQuiet", midQuiet, "mountain_evening", eveningActivityMountain, "eastern_evening", eveningActivityEastern)
 				} else {
@@ -531,7 +541,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				}
 			} else if bestTimezone == "pacific" && midQuiet < 8.0 {
 				// Pacific time but earlier sleep pattern - might actually be Mountain or Central
-				if float64(eveningActivityMountain) > float64(eveningActivityPacific) * 0.7 { // Within 30% of pacific
+				if float64(eveningActivityMountain) > float64(eveningActivityPacific)*0.7 { // Within 30% of pacific
 					offsetFromUTC = -7.0 // Mountain Time
 					d.logger.Debug("adjusted Pacific to Mountain due to early sleep pattern", "username", username,
 						"midQuiet", midQuiet, "pacific_evening", eveningActivityPacific, "mountain_evening", eveningActivityMountain)
@@ -545,7 +555,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				offsetFromUTC = bestOffset
 				d.logger.Debug("selected timezone based on evening activity", "username", username,
 					"selected_timezone", bestTimezone, "evening_activity", bestActivity, "offset", bestOffset,
-					"eastern_evening", eveningActivityEastern, "central_evening", eveningActivityCentral, 
+					"eastern_evening", eveningActivityEastern, "central_evening", eveningActivityCentral,
 					"mountain_evening", eveningActivityMountain, "pacific_evening", eveningActivityPacific)
 			}
 		} else {
@@ -623,7 +633,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	d.logger.Debug("lunch detection attempt", "username", username,
 		"lunch_start", lunchStart, "lunch_end", lunchEnd, "confidence", lunchConfidence,
 		"work_start", activeStart, "work_end", activeEnd, "utc_offset", offsetInt)
-	
+
 	// Detect peak productivity window
 	peakStart, peakEnd, peakCount := detectPeakProductivity(hourCounts, offsetInt)
 	d.logger.Debug("peak productivity detected", "username", username,
@@ -633,7 +643,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// The corrections were sometimes moving people further from their actual timezone
 	// For example, egibs in Kansas (UTC-6) was being detected as UTC-7 (close!)
 	// but then "corrected" to UTC-9 based on lunch timing, which is worse.
-	// 
+	//
 	// The sleep-based detection is generally more reliable than trying to correct
 	// based on work/lunch schedules, as people have varying work patterns.
 	//
@@ -642,7 +652,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		"work_start", activeStart, "work_end", activeEnd,
 		"lunch_start", lunchStart, "lunch_end", lunchEnd,
 		"detected_offset", offsetInt)
-	
+
 	// Process top organizations
 	type orgActivity struct {
 		name  string
@@ -680,18 +690,18 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	confidence := 0.8
 	suspiciousWorkHours := false
 	alternativeTimezone := ""
-	
+
 	d.logger.Info("checking work hours for suspicion", "username", username,
 		"activeStart", activeStart, "midQuiet", midQuiet, "offsetInt", offsetInt)
-	
+
 	if activeStart < 6 {
 		// Work starting before 6am is very unusual
 		suspiciousWorkHours = true
 		confidence = 0.4 // Lower confidence
-		
+
 		d.logger.Info("suspicious early work detected", "username", username,
 			"work_start", activeStart, "midQuiet", midQuiet)
-		
+
 		// If sleep is around 19-23 UTC, could be:
 		// - UTC+8 (China) - would make work start at 11am instead of 3am
 		// - UTC-8 (Pacific) - would make work start at 7pm (night shift)
@@ -709,23 +719,23 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		d.logger.Debug("late work start detected", "username", username,
 			"work_start", activeStart, "detected_tz", timezone)
 	}
-	
+
 	// Lunch timing confidence validation
 	// Use lunch patterns as an additional signal to validate timezone detection
 	if lunchConfidence > 0 {
 		lunchStartLocal := lunchStart
 		lunchEndLocal := lunchEnd
-		
+
 		// Check if lunch timing makes sense (typical lunch: 11:30am-2:30pm)
-		reasonableLunchStart := lunchStartLocal >= 11.5 && lunchStartLocal <= 14.5  // 11:30am-2:30pm
-		reasonableLunchEnd := lunchEndLocal >= 12.0 && lunchEndLocal <= 15.0        // 12:00pm-3:00pm
-		normalLunchDuration := (lunchEndLocal - lunchStartLocal) >= 0.5 && (lunchEndLocal - lunchStartLocal) <= 2.0 // 30min-2hr
-		
+		reasonableLunchStart := lunchStartLocal >= 11.5 && lunchStartLocal <= 14.5                              // 11:30am-2:30pm
+		reasonableLunchEnd := lunchEndLocal >= 12.0 && lunchEndLocal <= 15.0                                    // 12:00pm-3:00pm
+		normalLunchDuration := (lunchEndLocal-lunchStartLocal) >= 0.5 && (lunchEndLocal-lunchStartLocal) <= 2.0 // 30min-2hr
+
 		if lunchConfidence >= 0.75 { // High lunch confidence
 			if reasonableLunchStart && reasonableLunchEnd && normalLunchDuration {
 				// High confidence lunch at reasonable time = boost timezone confidence
 				originalConfidence := confidence
-				confidence = math.Min(confidence + 0.15, 0.95) // Boost by 15%, cap at 95%
+				confidence = math.Min(confidence+0.15, 0.95) // Boost by 15%, cap at 95%
 				d.logger.Debug("lunch timing boosts timezone confidence", "username", username,
 					"lunch_time", fmt.Sprintf("%.1f-%.1f", lunchStartLocal, lunchEndLocal),
 					"lunch_confidence", lunchConfidence,
@@ -733,7 +743,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			} else {
 				// High confidence lunch at weird time = reduce timezone confidence significantly
 				originalConfidence := confidence
-				confidence = math.Max(confidence - 0.25, 0.2) // Reduce by 25%, floor at 20%
+				confidence = math.Max(confidence-0.25, 0.2) // Reduce by 25%, floor at 20%
 				d.logger.Info("suspicious lunch timing reduces timezone confidence", "username", username,
 					"lunch_time", fmt.Sprintf("%.1f-%.1f", lunchStartLocal, lunchEndLocal),
 					"lunch_confidence", lunchConfidence,
@@ -744,25 +754,25 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			if reasonableLunchStart && reasonableLunchEnd && normalLunchDuration {
 				// Medium confidence lunch at reasonable time = small boost
 				originalConfidence := confidence
-				confidence = math.Min(confidence + 0.08, 0.9) // Boost by 8%, cap at 90%
+				confidence = math.Min(confidence+0.08, 0.9) // Boost by 8%, cap at 90%
 				d.logger.Debug("reasonable lunch timing slightly boosts confidence", "username", username,
 					"lunch_confidence", lunchConfidence, "original_confidence", originalConfidence, "new_confidence", confidence)
 			} else {
 				// Medium confidence lunch at weird time = small penalty
-				originalConfidence := confidence  
-				confidence = math.Max(confidence - 0.1, 0.3) // Reduce by 10%, floor at 30%
+				originalConfidence := confidence
+				confidence = math.Max(confidence-0.1, 0.3) // Reduce by 10%, floor at 30%
 				d.logger.Debug("questionable lunch timing slightly reduces confidence", "username", username,
 					"lunch_confidence", lunchConfidence, "original_confidence", originalConfidence, "new_confidence", confidence)
 			}
 		}
 		// Low lunch confidence (< 0.5) doesn't affect timezone confidence much
-		
+
 		// Check for late lunch suggesting timezone offset error
 		// If lunch is at 2pm or later, we might be off by 2-3 hours
 		if lunchConfidence >= 0.5 && lunchStartLocal >= 14.0 {
 			// Late lunch detected - check if adjusting timezone would normalize it
 			suggestedOffsetCorrection := 0
-			
+
 			// If lunch is at 2pm, shifting 2 hours earlier would make it noon (normal)
 			// If lunch is at 3pm, shifting 3 hours earlier would make it noon
 			if lunchStartLocal >= 14.0 && lunchStartLocal < 15.0 {
@@ -770,32 +780,32 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			} else if lunchStartLocal >= 15.0 && lunchStartLocal < 16.0 {
 				suggestedOffsetCorrection = -3 // Shift 3 hours west
 			}
-			
+
 			// Apply correction if it results in a valid US timezone
 			potentialOffset := offsetInt + suggestedOffsetCorrection
 			if suggestedOffsetCorrection != 0 && potentialOffset >= -8 && potentialOffset <= -5 {
 				d.logger.Info("late lunch suggests timezone correction", "username", username,
 					"lunch_start", lunchStartLocal, "current_offset", offsetInt,
 					"suggested_correction", suggestedOffsetCorrection, "new_offset", potentialOffset)
-				
+
 				// Apply the correction
 				offsetInt = potentialOffset
 				timezone = timezoneFromOffset(offsetInt)
-				
+
 				// Recalculate work hours with corrected offset
 				activeStart, activeEnd = calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
-				
+
 				// Recalculate lunch with corrected offset
 				newLunchStart, newLunchEnd, newLunchConfidence := detectLunchBreak(hourCounts, offsetInt, activeStart, activeEnd)
-				
+
 				// If the new lunch time is more reasonable, keep the correction
 				if newLunchStart >= 11.5 && newLunchStart <= 13.0 {
 					lunchStart = newLunchStart
 					lunchEnd = newLunchEnd
 					lunchConfidence = newLunchConfidence
-					
+
 					// Boost confidence since lunch correction worked
-					confidence = math.Min(confidence + 0.15, 0.85)
+					confidence = math.Min(confidence+0.15, 0.85)
 					d.logger.Info("lunch-based timezone correction successful", "username", username,
 						"new_lunch_start", lunchStart, "new_offset", offsetInt, "new_confidence", confidence)
 				} else {
@@ -805,13 +815,13 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 					activeStart, activeEnd = calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
 					d.logger.Debug("lunch-based correction didn't improve, reverting", "username", username)
 				}
-				
+
 				// Recalculate peak with final offset
 				peakStart, peakEnd, peakCount = detectPeakProductivity(hourCounts, offsetInt)
 			}
 		}
 	}
-	
+
 	// If we have suspicious work hours and detected European timezone,
 	// but sleep pattern could fit Asia, consider adjusting to Asia
 	// UNLESS we have strong evidence for Europe (e.g., Polish name)
@@ -819,47 +829,47 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		// Get user's full name to check for regional indicators
 		user := d.fetchUser(ctx, username)
 		isLikelyEuropean := false
-		
+
 		if user != nil && user.Name != "" {
 			// Check for Polish name indicators
 			if isPolishName(user.Name) {
 				isLikelyEuropean = true
-				d.logger.Info("Polish name detected, keeping European timezone despite unusual hours", 
+				d.logger.Info("Polish name detected, keeping European timezone despite unusual hours",
 					"username", username, "name", user.Name, "timezone", timezone)
 			}
 		}
-		
+
 		// Also check for activity in European projects/organizations
 		for orgName := range orgCounts {
 			orgLower := strings.ToLower(orgName)
 			if strings.Contains(orgLower, "canonical") || strings.Contains(orgLower, "ubuntu") {
 				// Canonical/Ubuntu has significant European presence
 				isLikelyEuropean = true
-				d.logger.Info("European organization activity detected, keeping European timezone", 
+				d.logger.Info("European organization activity detected, keeping European timezone",
 					"username", username, "org", orgName)
 				break
 			}
 		}
-		
+
 		if !isLikelyEuropean {
-			d.logger.Info("adjusting timezone from Europe to Asia due to unreasonable work hours", 
+			d.logger.Info("adjusting timezone from Europe to Asia due to unreasonable work hours",
 				"username", username, "original", timezone, "adjusted", alternativeTimezone,
 				"work_start", activeStart)
 			timezone = alternativeTimezone
 			offsetInt = 8
-			
+
 			// Recalculate work hours with new offset
 			activeStart, activeEnd = calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
-			
+
 			// Recalculate lunch with new offset
 			lunchStart, lunchEnd, lunchConfidence = detectLunchBreak(hourCounts, offsetInt, activeStart, activeEnd)
 		}
-		
+
 		// Recalculate peak with new offset
 		peakStart, peakEnd, peakCount = detectPeakProductivity(hourCounts, offsetInt)
-		
+
 		confidence = 0.7 // Moderate confidence after adjustment
-		
+
 		d.logger.Info("recalculated work hours after timezone adjustment", "username", username,
 			"new_work_start", activeStart, "new_work_end", activeEnd, "new_offset", offsetInt)
 	}
@@ -876,13 +886,13 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			Start: float64(activeStart),
 			End:   float64(activeEnd),
 		},
-		TopOrganizations:            topOrgs,
-		Confidence:                  confidence,
-		Method:                      "activity_patterns",
-		HourlyActivityUTC:           hourCounts, // Store for histogram generation
-		HourlyOrganizationActivity:  hourOrgActivity, // Store org-specific activity
+		TopOrganizations:           topOrgs,
+		Confidence:                 confidence,
+		Method:                     "activity_patterns",
+		HourlyActivityUTC:          hourCounts,      // Store for histogram generation
+		HourlyOrganizationActivity: hourOrgActivity, // Store org-specific activity
 	}
-	
+
 	// Add activity date range information
 	result.ActivityDateRange.OldestActivity = oldestActivity
 	result.ActivityDateRange.NewestActivity = newestActivity
@@ -891,11 +901,11 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 
 	// Convert lunch and peak hours from local (activity timezone) to UTC for storage
 	// This ensures all times are stored consistently in UTC and converted only during display
-	lunchStartUTC := math.Mod(lunchStart - float64(offsetInt) + 24, 24)
-	lunchEndUTC := math.Mod(lunchEnd - float64(offsetInt) + 24, 24)
-	peakStartUTC := math.Mod(peakStart - float64(offsetInt) + 24, 24)
-	peakEndUTC := math.Mod(peakEnd - float64(offsetInt) + 24, 24)
-	
+	lunchStartUTC := math.Mod(lunchStart-float64(offsetInt)+24, 24)
+	lunchEndUTC := math.Mod(lunchEnd-float64(offsetInt)+24, 24)
+	peakStartUTC := math.Mod(peakStart-float64(offsetInt)+24, 24)
+	peakEndUTC := math.Mod(peakEnd-float64(offsetInt)+24, 24)
+
 	// Store lunch hours in UTC (renamed from LunchHoursLocal to LunchHoursUTC)
 	result.LunchHoursLocal = struct {
 		Start      float64 `json:"start"`
@@ -906,8 +916,8 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		End:        lunchEndUTC,
 		Confidence: lunchConfidence,
 	}
-	
-	// Store peak productivity window in UTC  
+
+	// Store peak productivity window in UTC
 	result.PeakProductivity = struct {
 		Start float64 `json:"start"`
 		End   float64 `json:"end"`
@@ -917,7 +927,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		End:   peakEndUTC,
 		Count: peakCount,
 	}
-	
+
 	d.logger.Debug("detected lunch break", "username", username,
 		"lunch_start", lunchStart, "lunch_end", lunchEnd, "confidence", lunchConfidence)
 
@@ -986,4 +996,3 @@ func (d *Detector) fetchSupplementalActivity(ctx context.Context, username strin
 		return &ActivityData{}
 	}
 }
-

@@ -104,7 +104,7 @@ func main() {
 		fmt.Printf("\n🤖 Gemini Prompt:\n")
 		fmt.Println(strings.Repeat("─", 50))
 		fmt.Printf("%s\n\n", result.GeminiPrompt)
-		
+
 		if result.GeminiReasoning != "" {
 			fmt.Printf("🧠 Gemini Reasoning:\n")
 			fmt.Println(strings.Repeat("─", 50))
@@ -114,13 +114,13 @@ func main() {
 
 	// Print results in CLI format
 	printResult(result)
-	
+
 	// Show histogram by default if activity data is available
 	if result.HourlyActivityUTC != nil {
 		// Calculate UTC offset from the FINAL detected timezone for consistent display
 		// Both histogram and quiet times should be shown in the user's detected timezone
 		utcOffset := 0
-		
+
 		if strings.HasPrefix(result.Timezone, "UTC") {
 			offsetStr := strings.TrimPrefix(result.Timezone, "UTC")
 			if offsetStr == "" {
@@ -133,7 +133,7 @@ func main() {
 			_, offset := now.Zone()
 			utcOffset = offset / 3600
 		}
-		
+
 		histogramOutput := ghutz.GenerateHistogram(result, result.HourlyActivityUTC, utcOffset)
 		fmt.Print(histogramOutput)
 	}
@@ -143,7 +143,7 @@ func printResult(result *ghutz.Result) {
 	// Modern header with emoji
 	fmt.Printf("\n🌍 GitHub User: %s\n", result.Username)
 	fmt.Println(strings.Repeat("─", 50))
-	
+
 	// Location and timezone in a cleaner format
 	locationStr := ""
 	if result.GeminiSuggestedLocation != "" {
@@ -153,16 +153,16 @@ func printResult(result *ghutz.Result) {
 	} else if result.Location != nil {
 		locationStr = fmt.Sprintf("%.3f, %.3f", result.Location.Latitude, result.Location.Longitude)
 	}
-	
+
 	if locationStr != "" {
 		fmt.Printf("📍 Location: %s\n", locationStr)
 	}
-	
+
 	// Timezone with GMT offset and current local time
 	tzName := result.Timezone
 	gmtOffset := ""
 	currentLocal := ""
-	
+
 	// Try to load the timezone
 	if loc, err := time.LoadLocation(tzName); err == nil {
 		now := time.Now().In(loc)
@@ -179,7 +179,7 @@ func printResult(result *ghutz.Result) {
 		// Fallback for UTC+/- format
 		fmt.Printf("🕐 Timezone: %s", result.Timezone)
 	}
-	
+
 	if result.ActivityTimezone != "" && result.ActivityTimezone != result.Timezone {
 		// Convert UTC format to GMT format for consistency
 		activityTz := result.ActivityTimezone
@@ -197,17 +197,17 @@ func printResult(result *ghutz.Result) {
 		fmt.Printf("\n   └─ activity suggests %s", activityTz)
 	}
 	fmt.Println()
-	
+
 	// Work schedule with relative time indicators
 	if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
 		workStartRelative := ""
 		workEndRelative := ""
-		
+
 		// Calculate relative times if we have a valid timezone
 		if loc, err := time.LoadLocation(tzName); err == nil {
 			now := time.Now().In(loc)
 			currentTime := float64(now.Hour()) + float64(now.Minute())/60.0
-			
+
 			// Calculate relative time to work start
 			hoursToStart := result.ActiveHoursLocal.Start - currentTime
 			if hoursToStart < 0 {
@@ -217,7 +217,7 @@ func printResult(result *ghutz.Result) {
 				// It was yesterday/earlier today
 				hoursToStart = hoursToStart - 24
 			}
-			
+
 			// Calculate relative time to work end
 			hoursToEnd := result.ActiveHoursLocal.End - currentTime
 			if hoursToEnd < 0 && result.ActiveHoursLocal.End > result.ActiveHoursLocal.Start {
@@ -227,20 +227,20 @@ func printResult(result *ghutz.Result) {
 				// It was yesterday/earlier today
 				hoursToEnd = hoursToEnd - 24
 			}
-			
+
 			// Format relative times tersely
 			workStartRelative = formatRelativeTime(hoursToStart)
 			workEndRelative = formatRelativeTime(hoursToEnd)
 		}
-		
-		fmt.Printf("🏃 Active Time: %s → %s", 
-			formatHour(result.ActiveHoursLocal.Start), 
+
+		fmt.Printf("🏃 Active Time: %s → %s",
+			formatHour(result.ActiveHoursLocal.Start),
 			formatHour(result.ActiveHoursLocal.End))
-		
+
 		if workStartRelative != "" && workEndRelative != "" {
 			fmt.Printf(" (%s → %s)", workStartRelative, workEndRelative)
 		}
-		
+
 		if result.LunchHoursLocal.Confidence > 0 {
 			// Convert lunch times from UTC to final detected timezone for display
 			finalOffset := 0
@@ -256,18 +256,18 @@ func printResult(result *ghutz.Result) {
 				_, offset := now.Zone()
 				finalOffset = offset / 3600
 			}
-			
-			lunchStart := math.Mod(result.LunchHoursLocal.Start + float64(finalOffset) + 24, 24)
-			lunchEnd := math.Mod(result.LunchHoursLocal.End + float64(finalOffset) + 24, 24)
-			
-			fmt.Printf("\n🍽️  Lunch Break: %s → %s", 
+
+			lunchStart := math.Mod(result.LunchHoursLocal.Start+float64(finalOffset)+24, 24)
+			lunchEnd := math.Mod(result.LunchHoursLocal.End+float64(finalOffset)+24, 24)
+
+			fmt.Printf("\n🍽️  Lunch Break: %s → %s",
 				formatHour(lunchStart),
 				formatHour(lunchEnd))
 			if result.LunchHoursLocal.Confidence < 0.7 {
 				fmt.Printf(" (uncertain)")
 			}
 		}
-		
+
 		// Add peak productivity time
 		if result.PeakProductivity.Count > 0 {
 			// Convert peak times from UTC to final detected timezone for display
@@ -284,21 +284,21 @@ func printResult(result *ghutz.Result) {
 				_, offset := now.Zone()
 				finalOffset = offset / 3600
 			}
-			
-			peakStart := math.Mod(result.PeakProductivity.Start + float64(finalOffset) + 24, 24)
-			peakEnd := math.Mod(result.PeakProductivity.End + float64(finalOffset) + 24, 24)
-			
+
+			peakStart := math.Mod(result.PeakProductivity.Start+float64(finalOffset)+24, 24)
+			peakEnd := math.Mod(result.PeakProductivity.End+float64(finalOffset)+24, 24)
+
 			fmt.Printf("\n🔥 Activity Peak: %s → %s",
 				formatHour(peakStart),
 				formatHour(peakEnd))
 		}
-		
+
 		// Add quiet hours (sleep/family time)
 		if len(result.QuietHoursUTC) > 0 {
 			// Calculate UTC offset from the FINAL detected timezone for display
 			// Quiet hours are stored in UTC and should be converted to the user's detected timezone
 			utcOffset := 0
-			
+
 			// First try to extract offset from UTC+X format
 			if strings.HasPrefix(tzName, "UTC") {
 				offsetStr := strings.TrimPrefix(tzName, "UTC")
@@ -312,36 +312,36 @@ func printResult(result *ghutz.Result) {
 				_, offset := now.Zone()
 				utcOffset = offset / 3600
 			}
-			
+
 			// Convert UTC quiet hours to local hours
 			localQuietHours := make([]int, len(result.QuietHoursUTC))
 			for i, utcHour := range result.QuietHoursUTC {
 				localQuietHours[i] = (utcHour + utcOffset + 24) % 24
 			}
-			
+
 			// Group consecutive quiet hours into ranges
 			type quietRange struct {
 				start, end int
 			}
-			
+
 			var ranges []quietRange
 			if len(localQuietHours) > 0 {
 				currentStart := localQuietHours[0]
 				currentEnd := localQuietHours[0]
-				
+
 				for i := 1; i < len(localQuietHours); i++ {
 					hour := localQuietHours[i]
-					
+
 					// Check if this hour is consecutive (handle day wraparound)
 					isConsecutive := false
-					if hour == (currentEnd + 1) % 24 {
+					if hour == (currentEnd+1)%24 {
 						isConsecutive = true
 					}
 					// Special case: if current end is 23 and next hour is 0
 					if currentEnd == 23 && hour == 0 {
 						isConsecutive = true
 					}
-					
+
 					if isConsecutive {
 						currentEnd = hour
 					} else {
@@ -351,26 +351,26 @@ func printResult(result *ghutz.Result) {
 						currentEnd = hour
 					}
 				}
-				
+
 				// Add the final range
 				ranges = append(ranges, quietRange{currentStart, (currentEnd + 1) % 24})
 			}
-			
+
 			// Format and display ranges
 			if len(ranges) > 0 {
 				var rangeStrings []string
 				for _, r := range ranges {
-					rangeStrings = append(rangeStrings, fmt.Sprintf("%s - %s", 
-						formatHour(float64(r.start)), 
+					rangeStrings = append(rangeStrings, fmt.Sprintf("%s - %s",
+						formatHour(float64(r.start)),
 						formatHour(float64(r.end))))
 				}
 				fmt.Printf("\n💤 Quiet Time: %s", strings.Join(rangeStrings, ", "))
 			}
 		}
-		
+
 		fmt.Println()
 	}
-	
+
 	// Show all organizations with color-coded counts
 	if len(result.TopOrganizations) > 0 {
 		colors := []string{
@@ -379,35 +379,35 @@ func printResult(result *ghutz.Result) {
 			"\033[31m", // Red for 3rd
 		}
 		grey := "\033[90m" // Grey for others
-		
+
 		// Build the organizations string with colors and counts
 		var orgsStr strings.Builder
 		for i, org := range result.TopOrganizations {
 			if i > 0 {
 				orgsStr.WriteString(", ")
 			}
-			
+
 			// Choose color based on rank
 			color := grey
 			if i < 3 {
 				color = colors[i]
 			}
-			
+
 			// Format: name (colorized count)
 			orgsStr.WriteString(fmt.Sprintf("%s (%s%d\033[0m)", org.Name, color, org.Count))
 		}
-		
+
 		// Format with proper wrapping
 		label := "🏢 Organizations:"
 		content := orgsStr.String()
-		
+
 		// Check if it fits on one line
 		if len(stripANSI(content)) <= 55 {
 			fmt.Printf("%s %s\n", label, content)
 		} else {
 			// Split organizations for multi-line display
 			fmt.Printf("%s\n", label)
-			
+
 			// Wrap organizations with proper indentation
 			const indent = "                 " // 17 spaces to align with other content
 			lines := wrapOrganizationsWithCounts(result.TopOrganizations, colors, grey, 55)
@@ -416,10 +416,10 @@ func printResult(result *ghutz.Result) {
 			}
 		}
 	}
-	
+
 	// Detection method as a subtle footer
-	fmt.Printf("✨ Detection: %s (%.0f%% confidence)\n", 
-		formatMethodName(result.Method), 
+	fmt.Printf("✨ Detection: %s (%.0f%% confidence)\n",
+		formatMethodName(result.Method),
 		result.Confidence*100)
 	fmt.Println()
 }
@@ -434,17 +434,17 @@ func formatRelativeTime(hours float64) string {
 	if hours < -12 || hours > 12 {
 		return "" // Too far in past/future
 	}
-	
+
 	absHours := hours
 	if absHours < 0 {
 		absHours = -absHours
 	}
-	
+
 	// Convert to minutes for better precision
 	totalMinutes := int(absHours * 60)
 	h := totalMinutes / 60
 	m := totalMinutes % 60
-	
+
 	// Format tersely
 	if hours < 0 {
 		// In the past
@@ -463,7 +463,7 @@ func formatRelativeTime(hours float64) string {
 			return fmt.Sprintf("in %dh", h)
 		} else {
 			// For future times, keep it simple
-			return fmt.Sprintf("in %dh", h + (m + 29) / 60) // Round to nearest hour
+			return fmt.Sprintf("in %dh", h+(m+29)/60) // Round to nearest hour
 		}
 	}
 }
@@ -494,53 +494,56 @@ func stripANSI(s string) string {
 }
 
 // wrapOrganizationsWithCounts creates wrapped lines of organizations with color-coded counts
-func wrapOrganizationsWithCounts(orgs []struct{ Name string `json:"name"`; Count int `json:"count"` }, 
+func wrapOrganizationsWithCounts(orgs []struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+},
 	colors []string, grey string, maxWidth int) []string {
 	var lines []string
 	var currentLine strings.Builder
 	currentLength := 0
-	
+
 	for i, org := range orgs {
 		// Choose color based on rank
 		color := grey
 		if i < 3 {
 			color = colors[i]
 		}
-		
+
 		// Build the formatted org string: name (colorized count)
 		orgStr := fmt.Sprintf("%s (%s%d\033[0m)", org.Name, color, org.Count)
-		
+
 		// Add comma if not first item on line
 		if currentLine.Len() > 0 {
 			orgStr = ", " + orgStr
 		}
-		
+
 		// Calculate visual length: name + " (" + count digits + ")"
 		countStr := fmt.Sprintf("%d", org.Count)
 		orgLength := len(org.Name) + len(countStr) + 3 // " (123)"
 		if currentLine.Len() > 0 {
 			orgLength += 2 // ", " separator
 		}
-		
-		if currentLength > 0 && currentLength + orgLength > maxWidth {
+
+		if currentLength > 0 && currentLength+orgLength > maxWidth {
 			// Start a new line
 			lines = append(lines, currentLine.String())
 			currentLine.Reset()
 			currentLength = 0
-			
+
 			// Don't add comma at start of new line
 			orgStr = fmt.Sprintf("%s (%s%d\033[0m)", org.Name, color, org.Count)
 			orgLength = len(org.Name) + len(countStr) + 3
 		}
-		
+
 		currentLine.WriteString(orgStr)
 		currentLength += orgLength
 	}
-	
+
 	// Add the last line if not empty
 	if currentLine.Len() > 0 {
 		lines = append(lines, currentLine.String())
 	}
-	
+
 	return lines
 }
