@@ -1,4 +1,5 @@
 let currentUsername = '';
+let currentMap = null; // Track current map instance
 
 window.addEventListener('load', function() {
     // Check if username is already filled (from server-side template)
@@ -147,10 +148,8 @@ function displayResults(data) {
         if (mapRow) {
             mapRow.style.display = 'block';
         }
-        // Initialize map after results are visible and DOM has updated
-        setTimeout(() => {
-            initMap(data.location.latitude, data.location.longitude, data.username);
-        }, 100);
+        // Initialize map after ensuring all DOM updates are complete and Leaflet is ready
+        initMapWhenReady(data.location.latitude, data.location.longitude, data.username);
     }
 }
 
@@ -186,24 +185,68 @@ function formatHour(decimalHour) {
     return displayHour + ':' + minuteStr + period;
 }
 
+function initMapWhenReady(lat, lng, username) {
+    // Ensure DOM updates are complete and Leaflet is ready
+    function attemptMapInit() {
+        const mapDiv = document.getElementById('map');
+        if (!mapDiv) {
+            // Map container not ready, try again
+            setTimeout(attemptMapInit, 50);
+            return;
+        }
+        
+        // Check if map container is actually visible and has dimensions
+        if (mapDiv.offsetHeight === 0 || mapDiv.offsetWidth === 0) {
+            // Container not properly sized yet, try again
+            setTimeout(attemptMapInit, 50);
+            return;
+        }
+        
+        // Check if Leaflet is loaded
+        if (typeof L === 'undefined') {
+            // Leaflet not loaded yet, try again (but don't wait forever)
+            const maxRetries = 20; // 1 second max wait
+            if (!attemptMapInit.retries) attemptMapInit.retries = 0;
+            if (attemptMapInit.retries < maxRetries) {
+                attemptMapInit.retries++;
+                setTimeout(attemptMapInit, 50);
+                return;
+            }
+            // Fallback if Leaflet never loads
+            createMapFallback(lat, lng, username, mapDiv);
+            return;
+        }
+        
+        // All conditions met, initialize the map
+        initMap(lat, lng, username);
+    }
+    
+    // Start with a small delay to ensure DOM updates are complete
+    setTimeout(attemptMapInit, 100);
+}
+
+function createMapFallback(lat, lng, username, mapDiv) {
+    const mapLink = document.createElement('a');
+    mapLink.href = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}&zoom=6#map=6/${lat}/${lng}`;
+    mapLink.target = '_blank';
+    mapLink.textContent = `View ${username} on OpenStreetMap (${lat.toFixed(2)}, ${lng.toFixed(2)})`;
+    mapLink.style.cssText = 'color: #000; text-decoration: underline;';
+    mapDiv.innerHTML = '';
+    mapDiv.appendChild(mapLink);
+}
+
 function initMap(lat, lng, username) {
     const mapDiv = document.getElementById('map');
     if (!mapDiv) return;
     
+    // Remove any existing map instance
+    if (currentMap) {
+        currentMap.remove();
+        currentMap = null;
+    }
+    
     // Clear any existing content
     mapDiv.innerHTML = '';
-    
-    // Check if Leaflet is loaded
-    if (typeof L === 'undefined') {
-        // Fallback to simple link if Leaflet fails to load
-        const mapLink = document.createElement('a');
-        mapLink.href = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}&zoom=6#map=6/${lat}/${lng}`;
-        mapLink.target = '_blank';
-        mapLink.textContent = `View ${username} on OpenStreetMap (${lat.toFixed(2)}, ${lng.toFixed(2)})`;
-        mapLink.style.cssText = 'color: #000; text-decoration: underline;';
-        mapDiv.appendChild(mapLink);
-        return;
-    }
     
     try {
         // Create the map with explicit options
@@ -213,6 +256,9 @@ function initMap(lat, lng, username) {
             scrollWheelZoom: false,
             attributionControl: true
         });
+        
+        // Store the map instance globally for cleanup
+        currentMap = map;
         
         // Add OpenStreetMap tiles with proper attribution
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -236,13 +282,7 @@ function initMap(lat, lng, username) {
     } catch (error) {
         console.error('Failed to initialize map:', error);
         // Fallback to link if map creation fails
-        const mapLink = document.createElement('a');
-        mapLink.href = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}&zoom=6#map=6/${lat}/${lng}`;
-        mapLink.target = '_blank';
-        mapLink.textContent = `View ${username} on OpenStreetMap (${lat.toFixed(2)}, ${lng.toFixed(2)})`;
-        mapLink.style.cssText = 'color: #000; text-decoration: underline;';
-        mapDiv.innerHTML = '';
-        mapDiv.appendChild(mapLink);
+        createMapFallback(lat, lng, username, mapDiv);
     }
 }
 

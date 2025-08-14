@@ -532,13 +532,27 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 		return nil
 	}
 	
-	return &Result{
+	result := &Result{
 		Username:                username,
 		Timezone:                timezone,
 		GeminiSuggestedLocation: location,
 		Confidence:              confidence,
 		Method:                  method,
 	}
+	
+	// Try to geocode the AI-suggested location to get coordinates for the map
+	if location != "" {
+		d.logger.Debug("geocoding AI-suggested location", "username", username, "location", location)
+		if coords, err := d.geocodeLocation(ctx, location); err == nil {
+			result.Location = coords
+			result.LocationName = location
+			d.logger.Debug("successfully geocoded AI location", "username", username, "location", location, "lat", coords.Latitude, "lng", coords.Longitude)
+		} else {
+			d.logger.Debug("failed to geocode AI location", "username", username, "location", location, "error", err)
+		}
+	}
+	
+	return result
 }
 
 func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Result {

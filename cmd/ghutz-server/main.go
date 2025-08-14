@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"html"
 	"html/template"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -23,6 +24,9 @@ import (
 
 //go:embed templates/home.html
 var homeTemplate string
+
+//go:embed static/*
+var staticFiles embed.FS
 
 var (
 	port         = flag.String("port", "8080", "Port for web server")
@@ -267,11 +271,26 @@ func runServer(detector *ghutz.Detector, logger *slog.Logger) {
 	
 	// Register handlers with security middleware
 	mux.HandleFunc("POST /api/v1/detect", panicRecoveryMiddleware(logger, securityHeadersMiddleware(rateLimitMiddleware(handleAPIDetect(detector, logger)))))
-	// Static file server with path traversal protection
-	staticDir := "./cmd/ghutz-server/static"
-	fileServer := http.FileServer(http.Dir(staticDir))
+	// Static file server using embedded files
+	staticFS, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		logger.Error("failed to create static file system", "error", err)
+		os.Exit(1)
+	}
+	fileServer := http.FileServer(http.FS(staticFS))
 	staticHandler := http.StripPrefix("/static/", fileServer)
 	mux.Handle("/static/", panicRecoveryMiddleware(logger, securityHeadersMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		// Set proper MIME types for static files
+		if strings.HasSuffix(r.URL.Path, ".js") {
+			w.Header().Set("Content-Type", "application/javascript")
+		} else if strings.HasSuffix(r.URL.Path, ".css") {
+			w.Header().Set("Content-Type", "text/css")
+		} else if strings.HasSuffix(r.URL.Path, ".png") {
+			w.Header().Set("Content-Type", "image/png")
+		} else if strings.HasSuffix(r.URL.Path, ".jpg") || strings.HasSuffix(r.URL.Path, ".jpeg") {
+			w.Header().Set("Content-Type", "image/jpeg")
+		}
+		
 		// Additional security for static files
 		w.Header().Set("Cache-Control", "public, max-age=3600, immutable")
 		staticHandler.ServeHTTP(w, r)
