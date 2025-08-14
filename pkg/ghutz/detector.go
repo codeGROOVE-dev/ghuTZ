@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/codeGROOVE-dev/retry"
+	"google.golang.org/genai"
 )
 
 // SECURITY: GitHub token patterns for validation.
@@ -125,6 +126,7 @@ func (d *Detector) isValidGitHubToken(token string) bool {
 		   githubAppTokenRegex.MatchString(token) || 
 		   githubFineGrainedRegex.MatchString(token)
 }
+
 
 func New(opts ...Option) *Detector {
 	return NewWithLogger(slog.Default(), opts...)
@@ -404,10 +406,8 @@ func (d *Detector) tryLocationField(ctx context.Context, username string) *Resul
 
 // tryUnifiedGeminiAnalysis uses Gemini with all available data (activity + context) in a single call.
 func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string, activityResult *Result) *Result {
-	if d.geminiAPIKey == "" {
-		d.logger.Warn("Gemini API key not configured - skipping AI analysis. Set GEMINI_API_KEY environment variable", "username", username)
-		return nil
-	}
+	// The SDK will automatically use API key if set, otherwise try Application Default Credentials
+	// No need to explicitly check - let the SDK handle authentication
 	
 	// Gather contextual data about the user
 	user := d.fetchUser(ctx, username)
@@ -1628,134 +1628,201 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 		d.logger.Debug("Gemini full prompt", "full_prompt", fullPrompt)
 	}
 	
-	reqBody := map[string]interface{}{
-		"contents": []map[string]interface{}{
-			{
-				"parts": []map[string]string{
-					{"text": fullPrompt},
-				},
-			},
-		},
-		"generationConfig": map[string]interface{}{
-			"temperature": 0.1,
-			"responseMimeType": "application/json",
-			"responseSchema": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"timezone": map[string]string{
-						"type": "string",
-						"description": "IANA timezone identifier",
-					},
-					"location": map[string]string{
-						"type": "string", 
-						"description": "Specific location name (city, region) - NEVER return UNKNOWN",
-					},
-					"confidence": map[string]string{
-						"type": "string",
-						"description": "Confidence level: high, medium, or low",
-					},
-					"reasoning": map[string]string{
-						"type": "string",
-						"description": "Brief explanation of the decision and evidence used",
-					},
-				},
-				"required": []string{"timezone", "location", "confidence", "reasoning"},
-			},
-			"maxOutputTokens": func() int {
-				if verbose {
-					return 300
-				}
-				return 100
-			}(),
-		},
-	}
-	
-	jsonBody, err := json.Marshal(reqBody)
+	// Use the official genai SDK (handles both API key and ADC)
+	geminiResp, err := d.callGeminiWithSDK(ctx, fullPrompt, verbose)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", 0, fmt.Errorf("Gemini API call failed: %w", err)
 	}
-	
-	model := d.geminiModel
-	if model == "" {
-		model = "gemini-2.5-flash-lite"
-	}
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, d.geminiAPIKey)
-	
-	// Check cache first for Gemini API calls
-	var responseBody []byte
+	return geminiResp.timezone, geminiResp.location, geminiResp.confidence, nil
+}
+
+type geminiResponse struct {
+	timezone   string
+	location   string
+	confidence float64
+	reasoning  string
+}
+
+// callGeminiWithSDK uses the official Google AI SDK which handles authentication automatically
+func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose bool) (*geminiResponse, error) {
+	// Check cache first if available
+	cacheKey := fmt.Sprintf("genai:%s:%s", d.geminiModel, prompt)
 	if d.cache != nil {
-		if cachedData, found := d.cache.GetAPICall(url, jsonBody); found {
-			responseBody = cachedData
-		} else {
-			d.logger.Warn("GEMINI CACHE MISS - making API call", "url", url)
+		if cachedData, found := d.cache.GetAPICall(cacheKey, []byte(prompt)); found {
+			d.logger.Debug("Gemini SDK cache hit")
+			var result geminiResponse
+			if err := json.Unmarshal(cachedData, &result); err == nil {
+				return &result, nil
+			}
 		}
 	}
 	
-	if responseBody == nil {
-		// Make actual API call if not cached
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
-		if err != nil {
-			return "", "", 0, err
+	// Create client - always use Vertex AI (supports both API key and ADC)
+	var client *genai.Client
+	var err error
+	
+	// Determine project ID
+	projectID := d.gcpProject
+	if projectID == "" {
+		// Try to get from environment
+		projectID = os.Getenv("GCP_PROJECT")
+		if projectID == "" {
+			projectID = os.Getenv("GOOGLE_CLOUD_PROJECT")
 		}
-		
-		req.Header.Set("Content-Type", "application/json")
-		
-		client := &http.Client{Timeout: 15 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			return "", "", 0, err
+		if projectID == "" {
+			// Default project for ghuTZ
+			projectID = "ghutz-468911"
 		}
-		defer func() {
-			if err := resp.Body.Close(); err != nil {
-				d.logger.Debug("failed to close response body", "error", err)
-			}
-		}()
-		
-		if resp.StatusCode != 200 {
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				return "", "", 0, fmt.Errorf("Gemini API error: %d (failed to read response)", resp.StatusCode)
-			}
-			return "", "", 0, fmt.Errorf("Gemini API error: %d %s", resp.StatusCode, string(body))
-		}
-		
-		responseBody, err = io.ReadAll(resp.Body)
-		if err != nil {
-			return "", "", 0, err
-		}
-		
-		// Cache the response for 20 days
-		if d.cache != nil {
-			if err := d.cache.SetAPICall(url, jsonBody, responseBody); err != nil {
-				d.logger.Error("Failed to cache Gemini response", "error", err)
+	}
+	
+	// Configure client for Vertex AI
+	config := &genai.ClientConfig{
+		Backend:  genai.BackendVertexAI,
+		Project:  projectID,
+		Location: "us-central1",
+	}
+	
+	// Add API key if available (Vertex AI supports both API key and ADC)
+	if d.geminiAPIKey != "" {
+		config.APIKey = d.geminiAPIKey
+		d.logger.Info("Using Vertex AI with API key", "project", projectID, "location", "us-central1")
+	} else {
+		d.logger.Info("Using Vertex AI with Application Default Credentials", "project", projectID, "location", "us-central1")
+	}
+	
+	client, err = genai.NewClient(ctx, config)
+	
+	if err != nil {
+		return nil, fmt.Errorf("failed to create genai client: %w", err)
+	}
+	
+	// Select model for Vertex AI
+	modelName := d.geminiModel
+	if modelName == "" {
+		modelName = "gemini-2.5-flash-lite"
+	}
+	
+	// Vertex AI expects the model name without "models/" prefix
+	modelName = strings.TrimPrefix(modelName, "models/")
+	
+	d.logger.Debug("Using Vertex AI model", "model", modelName, "project", projectID)
+	
+	// Prepare content with user role
+	contents := []*genai.Content{
+		{
+			Role: "user",
+			Parts: []*genai.Part{
+				{Text: prompt},
+			},
+		},
+	}
+	
+	// Configure generation
+	maxTokens := int32(100)
+	if verbose {
+		maxTokens = 300
+	}
+	
+	temperature := float32(0.1)
+	genConfig := &genai.GenerateContentConfig{
+		Temperature:      &temperature,
+		MaxOutputTokens:  maxTokens,
+		ResponseMIMEType: "application/json",
+		ResponseSchema: &genai.Schema{
+			Type: genai.TypeObject,
+			Properties: map[string]*genai.Schema{
+				"timezone": {
+					Type:        genai.TypeString,
+					Description: "IANA timezone identifier",
+				},
+				"location": {
+					Type:        genai.TypeString,
+					Description: "Specific location name (city, region) - NEVER return UNKNOWN",
+				},
+				"confidence": {
+					Type:        genai.TypeString,
+					Description: "Confidence level: high, medium, or low",
+				},
+				"reasoning": {
+					Type:        genai.TypeString,
+					Description: "Brief explanation of the decision and evidence used",
+				},
+			},
+			Required: []string{"timezone", "location", "confidence", "reasoning"},
+		},
+	}
+	
+	// Generate content
+	resp, err := client.Models.GenerateContent(ctx, modelName, contents, genConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate content: %w", err)
+	}
+	
+	// Parse response
+	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+		return nil, fmt.Errorf("no response from Gemini")
+	}
+	
+	// The response should be JSON text
+	jsonText := ""
+	if textPart := resp.Candidates[0].Content.Parts[0]; textPart != nil && textPart.Text != "" {
+		jsonText = textPart.Text
+	} else {
+		return nil, fmt.Errorf("unexpected response type from Gemini")
+	}
+	
+	var result struct {
+		Timezone   string `json:"timezone"`
+		Location   string `json:"location"`
+		Confidence string `json:"confidence"`
+		Reasoning  string `json:"reasoning"`
+	}
+	
+	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse Gemini response: %w", err)
+	}
+	
+	// Convert confidence to float
+	var confidence float64
+	switch strings.ToLower(result.Confidence) {
+	case "high":
+		confidence = 0.9
+	case "medium":
+		confidence = 0.7
+	case "low":
+		confidence = 0.5
+	default:
+		confidence = 0.6
+	}
+	
+	d.logger.Info("Gemini detection via SDK successful", 
+		"timezone", result.Timezone,
+		"location", result.Location,
+		"confidence", confidence,
+		"reasoning", result.Reasoning)
+	
+	response := &geminiResponse{
+		timezone:   result.Timezone,
+		location:   result.Location,
+		confidence: confidence,
+		reasoning:  result.Reasoning,
+	}
+	
+	// Cache the successful response
+	if d.cache != nil {
+		if responseData, err := json.Marshal(response); err == nil {
+			if err := d.cache.SetAPICall(cacheKey, []byte(prompt), responseData); err != nil {
+				d.logger.Error("Failed to cache Gemini SDK response", "error", err)
 			} else {
-				d.logger.Info("Gemini response cached for 20 days", "url", url)
+				d.logger.Info("Gemini SDK response cached for 20 days")
 			}
 		}
 	}
 	
-	var geminiResp struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
-	}
-	
-	if err := json.Unmarshal(responseBody, &geminiResp); err != nil {
-		return "", "", 0, err
-	}
-	
-	if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
-		return "", "", 0, fmt.Errorf("no response from Gemini")
-	}
-	
-	fullResponse := strings.TrimSpace(geminiResp.Candidates[0].Content.Parts[0].Text)
-	
-	d.logger.Debug("Gemini full response", "full_response", fullResponse)
-	
+	return response, nil
+}
+
+func (d *Detector) parseGeminiResponse(fullResponse string) (string, string, float64, error) {
 	var timezone, location, confidence string
 	
 	var jsonResponse map[string]interface{}
@@ -1777,10 +1844,7 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 		d.logger.Debug("Gemini reasoning", "reasoning", reasoning)
 	}
 	
-	d.logger.Debug("Gemini unified response", "extracted_timezone", timezone, "extracted_location", location, "confidence", confidence, "had_activity_data", hasActivityData, "verbose_mode", verbose)
-	if hasActivityData {
-		d.logger.Debug("Gemini activity comparison", "original_activity_timezone", activityTimezone, "gemini_response", timezone, "gemini_location", location)
-	}
+	d.logger.Debug("Gemini unified response", "extracted_timezone", timezone, "extracted_location", location, "confidence", confidence)
 	
 	if timezone == "" {
 		return "", "", 0, fmt.Errorf("Gemini did not provide a timezone")
@@ -1808,16 +1872,6 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 		confidenceFloat = 0.6
 	}
 	
-	// Boost confidence if we have strong activity data that matches
-	if hasActivityData {
-		if timezone == activityTimezone {
-			d.logger.Debug("Gemini confirmed activity-based timezone", "timezone", timezone)
-			confidenceFloat = 0.9 // High confidence when activity + context agree
-		} else {
-			d.logger.Debug("Gemini refined activity-based timezone", "original", activityTimezone, "refined", timezone)
-			// Keep Gemini's confidence level since it might have good reasons for the refinement
-		}
-	}
 	
 	return timezone, location, confidenceFloat, nil
 }

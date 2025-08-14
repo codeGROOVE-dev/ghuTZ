@@ -12,6 +12,10 @@ export KO_DOCKER_REPO="gcr.io/${GCP_PROJECT}/${APP_ID}"
 # Publish the code at . to $KO_DOCKER_REPO
 IMAGE="$(ko publish ./cmd/ghutz-server/...)"
 
-# Deploy the newly built binary to Google Cloud Run
-gcloud run deploy "${APP_ID}" --image="${IMAGE}" --region "${GCP_REGION}" --project "${GCP_PROJECT}"
+# Deploy the newly built binary to Google Cloud Run with environment variables for ADC
+gcloud run deploy "${APP_ID}" \
+  --image="${IMAGE}" \
+  --region "${GCP_REGION}" \
+  --project "${GCP_PROJECT}" \
+  --set-env-vars="GCP_PROJECT=${GCP_PROJECT}"
 
