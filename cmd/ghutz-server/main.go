@@ -142,9 +142,7 @@ func securityHeadersMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// SECURITY: Comprehensive security headers for defense in depth
 
 		// Content Security Policy - unified policy for all environments
-		policy := cspPolicy()
-		header := cspHeader()
-		w.Header().Set(header, policy)
+		w.Header().Set("Content-Security-Policy", cspPolicy())
 
 		// Prevent clickjacking attacks
 		w.Header().Set("X-Frame-Options", "DENY")

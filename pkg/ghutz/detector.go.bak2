@@ -1,18 +1,22 @@
 package ghutz
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/codeGROOVE-dev/retry"
@@ -541,6 +545,363 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 	return result
 }
 
+func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Result {
+	// Fetch all activity data in parallel
+	activity := d.fetchAllActivity(ctx, username)
+
+	totalActivity := len(activity.PullRequests) + len(activity.Issues) + len(activity.Comments)
+	if totalActivity < 20 {
+		d.logger.Debug("insufficient activity data", "username", username,
+			"pr_count", len(activity.PullRequests),
+			"issue_count", len(activity.Issues),
+			"comment_count", len(activity.Comments),
+			"total", totalActivity, "minimum_required", 20)
+		return nil
+	}
+
+	d.logger.Debug("analyzing activity patterns", "username", username,
+		"pr_count", len(activity.PullRequests),
+		"issue_count", len(activity.Issues),
+		"comment_count", len(activity.Comments))
+
+	hourCounts := make(map[int]int)
+
+	// Count PRs
+	for _, pr := range activity.PullRequests {
+		hour := pr.CreatedAt.UTC().Hour()
+		hourCounts[hour]++
+	}
+
+	// Count issues
+	for _, issue := range activity.Issues {
+		hour := issue.CreatedAt.UTC().Hour()
+		hourCounts[hour]++
+	}
+
+	// Count comments
+	for _, comment := range activity.Comments {
+		hour := comment.CreatedAt.UTC().Hour()
+		hourCounts[hour]++
+	}
+
+	maxActivity := 0
+	mostActiveHours := []int{}
+	for hour, count := range hourCounts {
+		if count > maxActivity {
+			maxActivity = count
+			mostActiveHours = []int{hour}
+		} else if count == maxActivity {
+			mostActiveHours = append(mostActiveHours, hour)
+		}
+	}
+
+	quietHours := findSleepHours(hourCounts)
+	if len(quietHours) < 4 {
+		d.logger.Debug("insufficient sleep hours", "username", username, "sleep_hours", len(quietHours))
+		return nil
+	}
+
+	d.logger.Debug("activity pattern summary", "username", username,
+		"total_activity", totalActivity,
+		"sleep_hours", quietHours,
+		"most_active_hours", mostActiveHours,
+		"max_activity_count", maxActivity)
+
+	hourlyActivity := make([]int, 24)
+	for hour := 0; hour < 24; hour++ {
+		hourlyActivity[hour] = hourCounts[hour]
+	}
+	d.logger.Debug("hourly activity distribution", "username", username, "hours_utc", hourlyActivity)
+
+	// Find the middle of sleep hours, handling wrap-around
+	start := quietHours[0]
+	end := quietHours[len(quietHours)-1]
+	var midQuiet float64
+
+	// Check if quiet hours wrap around midnight
+	if end < start || (start == 0 && end == 23) {
+		// Wraps around (e.g., 22-3)
+		totalHours := (24 - start) + end + 1
+		midQuiet = float64(start) + float64(totalHours)/2.0
+		if midQuiet >= 24 {
+			midQuiet -= 24
+		}
+	} else {
+		// Normal case (e.g., 3-8)
+		// For a 6-hour window from start to end, the middle is (start + end) / 2
+		midQuiet = (float64(start) + float64(end)) / 2.0
+	}
+
+	// Analyze the activity pattern to determine likely region
+	// European pattern: more activity in hours 6-16 UTC (morning/afternoon in Europe)
+	// American pattern: more activity in hours 12-22 UTC (morning/afternoon in Americas)
+	europeanActivity := 0
+	americanActivity := 0
+	for hour := 6; hour <= 16; hour++ {
+		europeanActivity += hourCounts[hour]
+	}
+	for hour := 12; hour <= 22; hour++ {
+		americanActivity += hourCounts[hour]
+	}
+
+	// Sleep patterns are more reliable than work patterns for timezone detection
+	// The middle of quiet time varies by region:
+	// - Americans tend to sleep later (midpoint ~3:30am)
+	// - Europeans tend to sleep earlier (midpoint ~2:30am)
+	// - Asians vary widely
+	var assumedSleepMidpoint float64
+	if float64(europeanActivity) > float64(americanActivity)*1.2 {
+		// Strong European pattern
+		// Europeans typically have earlier sleep patterns, midpoint around 2am
+		assumedSleepMidpoint = 2.0
+		d.logger.Debug("detected European activity pattern", "username", username,
+			"european_activity", europeanActivity, "american_activity", americanActivity)
+	} else if float64(americanActivity) > float64(europeanActivity)*1.2 {
+		// Strong American pattern
+		// Americans typically sleep midnight-5am, midpoint around 2.5am
+		// Using 2.5 instead of 3.5 to better match Eastern Time patterns
+		assumedSleepMidpoint = 2.5
+		d.logger.Debug("detected American activity pattern", "username", username,
+			"european_activity", europeanActivity, "american_activity", americanActivity)
+	} else {
+		// Unclear or Asian pattern, use default
+		assumedSleepMidpoint = 3.0
+		d.logger.Debug("unclear activity pattern", "username", username,
+			"european_activity", europeanActivity, "american_activity", americanActivity)
+	}
+
+	offsetFromUTC := assumedSleepMidpoint - midQuiet
+
+	d.logger.Debug("offset calculation details", "username", username,
+		"assumedSleepMidpoint", assumedSleepMidpoint,
+		"midQuiet", midQuiet,
+		"rawOffset", offsetFromUTC)
+
+	// For US timezones, check if the pattern matches known US work/activity patterns
+	// US developers often have evening activity (7-11pm local) for open source
+	// This would be roughly 13-17 UTC for Central Time (UTC-6)
+
+	// Count activity in typical US evening hours (converted to UTC for different zones)
+	// For Central Time (UTC-6): 7-11pm local = 1-5am UTC (next day) or 13-17 UTC (same day DST)
+	// For Eastern Time (UTC-5): 7-11pm local = 0-4am UTC (next day) or 12-16 UTC (same day DST)
+	// For Pacific Time (UTC-8): 7-11pm local = 3-7am UTC (next day) or 15-19 UTC (same day DST)
+
+	// Check if this looks like a US pattern based on quiet hours
+	// US timezones typically have quiet hours (midnight-5am local) that map to:
+	// - Eastern (UTC-4 DST): quiet hours 4-9 UTC
+	// - Central (UTC-5 DST): quiet hours 5-10 UTC
+	// - Mountain (UTC-6 DST): quiet hours 6-11 UTC
+	// - Pacific (UTC-7 DST): quiet hours 7-12 UTC
+
+	// If we detected American activity pattern and quiet hours suggest US timezone,
+	// use the calculated offset as-is rather than forcing to Central
+	if americanActivity > europeanActivity && midQuiet >= 4 && midQuiet <= 12 {
+		// This looks like a US pattern, trust the calculated offset
+		d.logger.Debug("detected US timezone pattern", "username", username,
+			"mid_quiet_utc", midQuiet, "calculated_offset", offsetFromUTC)
+		// Keep the calculated offset as-is
+	}
+
+	// Normalize to [-12, 12] range
+	if offsetFromUTC > 12 {
+		offsetFromUTC -= 24
+	} else if offsetFromUTC <= -12 {
+		offsetFromUTC += 24
+	}
+
+	offsetInt := int(math.Round(offsetFromUTC))
+
+	d.logger.Debug("calculated timezone offset", "username", username,
+		"sleep_hours", quietHours,
+		"mid_sleep_utc", midQuiet,
+		"offset_calculated", offsetFromUTC,
+		"offset_rounded", offsetInt)
+
+	timezone := timezoneFromOffset(offsetInt)
+	d.logger.Debug("Activity-based UTC offset", "username", username, "offset", offsetInt, "timezone", timezone)
+
+	// Log the detected offset for verification
+	if timezone != "" {
+		now := time.Now().UTC()
+		// Calculate what the local time would be with this offset
+		localTime := now.Add(time.Duration(offsetInt) * time.Hour)
+		d.logger.Debug("timezone verification", "username", username, "timezone", timezone,
+			"utc_time", now.Format("15:04 MST"),
+			"estimated_local_time", localTime.Format("15:04"),
+			"offset_hours", offsetInt)
+	}
+
+	// Calculate typical active hours in local time (excluding outliers)
+	// We need to convert from UTC to local time
+	activeStart, activeEnd := calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
+
+	// Detect lunch break
+	lunchStart, lunchEnd, lunchConfidence := detectLunchBreak(hourCounts, offsetInt, activeStart, activeEnd)
+	d.logger.Debug("lunch detection attempt", "username", username,
+		"lunch_start", lunchStart, "lunch_end", lunchEnd, "confidence", lunchConfidence,
+		"work_start", activeStart, "work_end", activeEnd, "utc_offset", offsetInt)
+
+	// Use work schedule validation for timezone detection
+	// Most people start work between 8:00am-9:30am and have lunch 11:30am-1:00pm
+	var offsetCorrection int
+	var correctionReason string
+
+	// Check work start time (should be 8:00am-9:30am) - be more strict
+	if float64(activeStart) < 7.5 || float64(activeStart) > 9.5 {
+		expectedWorkStart := 8.5 // 8:30am average
+		workCorrection := int(expectedWorkStart - float64(activeStart))
+		if workCorrection != 0 && workCorrection >= -8 && workCorrection <= 8 {
+			offsetCorrection = workCorrection
+			correctionReason = "work_start"
+			d.logger.Debug("work start timing suggests timezone correction", "username", username,
+				"work_start_local", activeStart, "expected_range", "7:30-9:30",
+				"suggested_correction", workCorrection)
+		}
+	}
+
+	// Check lunch timing (should be 11:30am-12:30pm, much stricter)
+	if lunchStart != -1 && lunchEnd != -1 {
+		// Very strict validation: lunch should start between 11:30am-12:30pm
+		if lunchStart < 11.5 || lunchStart > 12.5 || lunchEnd < 12.5 || lunchEnd > 13.5 {
+			expectedLunchMid := 12.0 // 12:00pm
+			actualLunchMid := (lunchStart + lunchEnd) / 2
+			lunchCorrection := int(expectedLunchMid - actualLunchMid)
+
+			// If we don't have a work start correction, or lunch correction is larger, use lunch correction
+			if offsetCorrection == 0 || (lunchCorrection != 0 && int(math.Abs(float64(lunchCorrection))) > int(math.Abs(float64(offsetCorrection)))) {
+				offsetCorrection = lunchCorrection
+				correctionReason = "lunch_timing"
+			}
+
+			d.logger.Debug("lunch timing suggests timezone correction", "username", username,
+				"lunch_start_local", lunchStart, "lunch_end_local", lunchEnd,
+				"expected_range", "11:30-12:30 start, 12:30-13:30 end", "suggested_correction", lunchCorrection)
+		}
+	}
+
+	// Check evening wind-down time (should be 5:00pm-7:00pm)
+	if float64(activeEnd) < 16.0 || float64(activeEnd) > 19.0 {
+		expectedWorkEnd := 17.0 // 5:00pm average
+		endCorrection := int(expectedWorkEnd - float64(activeEnd))
+		if endCorrection != 0 && endCorrection >= -8 && endCorrection <= 8 {
+			// If we don't have other corrections, or this correction is more significant, use it
+			if offsetCorrection == 0 || (int(math.Abs(float64(endCorrection))) > int(math.Abs(float64(offsetCorrection)))) {
+				offsetCorrection = endCorrection
+				correctionReason = "work_end"
+				d.logger.Debug("work end timing suggests timezone correction", "username", username,
+					"work_end_local", activeEnd, "expected_range", "16:00-19:00",
+					"suggested_correction", endCorrection)
+			}
+		}
+	}
+
+	// Apply timezone correction if we found one
+	if offsetCorrection != 0 && offsetCorrection >= -8 && offsetCorrection <= 8 {
+		correctedOffset := offsetInt + offsetCorrection
+		d.logger.Debug("correcting timezone based on work schedule", "username", username,
+			"original_offset", offsetInt, "correction", offsetCorrection,
+			"corrected_offset", correctedOffset, "reason", correctionReason)
+		offsetInt = correctedOffset
+		timezone = timezoneFromOffset(offsetInt)
+
+		// Recalculate active hours and lunch with corrected offset
+		activeStart, activeEnd = calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
+		lunchStart, lunchEnd, lunchConfidence = detectLunchBreak(hourCounts, offsetInt, activeStart, activeEnd)
+	}
+
+	result := &Result{
+		Username:         username,
+		Timezone:         timezone,
+		ActivityTimezone: timezone, // Pure activity-based result
+		QuietHoursUTC:    quietHours,
+		ActiveHoursLocal: struct {
+			Start float64 `json:"start"`
+			End   float64 `json:"end"`
+		}{
+			Start: float64(activeStart),
+			End:   float64(activeEnd),
+		},
+		Confidence: 0.8,
+		Method:     "activity_patterns",
+	}
+
+	// Always add lunch hours (they're always detected now)
+	result.LunchHoursLocal = struct {
+		Start      float64 `json:"start"`
+		End        float64 `json:"end"`
+		Confidence float64 `json:"confidence"`
+	}{
+		Start:      lunchStart,
+		End:        lunchEnd,
+		Confidence: lunchConfidence,
+	}
+	d.logger.Debug("detected lunch break", "username", username,
+		"lunch_start", lunchStart, "lunch_end", lunchEnd, "confidence", lunchConfidence)
+
+	return result
+}
+
+func (d *Detector) fetchAllActivity(ctx context.Context, username string) *ActivityData {
+	type result struct {
+		prs      []PullRequest
+		issues   []Issue
+		comments []Comment
+	}
+
+	ch := make(chan result, 1)
+
+	go func() {
+		var res result
+
+		// Fetch in parallel using goroutines
+		var wg sync.WaitGroup
+		wg.Add(3)
+
+		// Fetch PRs
+		go func() {
+			defer wg.Done()
+			if prs, err := d.fetchPullRequests(ctx, username); err == nil {
+				res.prs = prs
+			} else {
+				d.logger.Debug("failed to fetch PRs", "username", username, "error", err)
+			}
+		}()
+
+		// Fetch Issues
+		go func() {
+			defer wg.Done()
+			if issues, err := d.fetchIssues(ctx, username); err == nil {
+				res.issues = issues
+			} else {
+				d.logger.Debug("failed to fetch issues", "username", username, "error", err)
+			}
+		}()
+
+		// Fetch Comments via GraphQL
+		go func() {
+			defer wg.Done()
+			if comments, err := d.fetchUserComments(ctx, username); err == nil {
+				res.comments = comments
+			} else {
+				d.logger.Debug("failed to fetch comments", "username", username, "error", err)
+			}
+		}()
+
+		wg.Wait()
+		ch <- res
+	}()
+
+	select {
+	case res := <-ch:
+		return &ActivityData{
+			PullRequests: res.prs,
+			Issues:       res.issues,
+			Comments:     res.comments,
+		}
+	case <-ctx.Done():
+		return &ActivityData{}
+	}
+}
 
 func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Location, error) {
 	if d.mapsAPIKey == "" {
@@ -677,11 +1038,209 @@ func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64)
 
 // calculateTypicalActiveHours determines typical work hours based on activity patterns
 // It uses percentiles to exclude outliers (e.g., occasional early starts or late nights)
+func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOffset int) (start, end int) {
+	// Create a map for easy lookup of quiet hours
+	quietMap := make(map[int]bool)
+	for _, h := range quietHours {
+		quietMap[h] = true
+	}
+
+	// Find hours with meaningful activity (>10% of max activity)
+	maxActivity := 0
+	for _, count := range hourCounts {
+		if count > maxActivity {
+			maxActivity = count
+		}
+	}
+	threshold := maxActivity / 10
+
+	// Collect active hours (not in quiet period and above threshold)
+	var activeHours []int
+	for hour := 0; hour < 24; hour++ {
+		if !quietMap[hour] && hourCounts[hour] > threshold {
+			activeHours = append(activeHours, hour)
+		}
+	}
+
+	if len(activeHours) == 0 {
+		// Default to 9am-5pm if no clear pattern
+		return 9, 17
+	}
+
+	// Find the continuous block of active hours
+	// Handle wrap-around (e.g., activity from 22-02)
+	sort.Ints(activeHours)
+
+	// Find the largest gap to determine where the active period starts/ends
+	maxGap := 0
+	gapStart := activeHours[len(activeHours)-1]
+	for i := 0; i < len(activeHours); i++ {
+		gap := activeHours[i] - gapStart
+		if gap < 0 {
+			gap += 24
+		}
+		if gap > maxGap {
+			maxGap = gap
+			start = activeHours[i]
+		}
+		gapStart = activeHours[i]
+	}
+
+	// Find the end of the active period
+	end = start
+	for i := 0; i < len(activeHours); i++ {
+		hour := activeHours[i]
+		// Check if this hour is part of the continuous block
+		diff := hour - start
+		if diff < 0 {
+			diff += 24
+		}
+		if diff < 16 { // Maximum 16-hour workday
+			end = hour
+		}
+	}
+
+	// Apply smart filtering: use 10th and 90th percentiles to exclude outliers
+	// This prevents occasional early/late activity from skewing the results
+	activityInRange := make([]int, 0)
+	for h := start; ; h = (h + 1) % 24 {
+		if hourCounts[h] > 0 {
+			// Add this hour's count multiple times to weight the calculation
+			for i := 0; i < hourCounts[h]; i++ {
+				activityInRange = append(activityInRange, h)
+			}
+		}
+		if h == end {
+			break
+		}
+	}
+
+	if len(activityInRange) > 10 {
+		sort.Ints(activityInRange)
+		// Use 10th percentile for start (ignore occasional early starts)
+		percentile10 := len(activityInRange) / 10
+		// Use 90th percentile for end (ignore occasional late nights)
+		percentile90 := len(activityInRange) * 9 / 10
+
+		start = activityInRange[percentile10]
+		end = activityInRange[percentile90]
+	}
+
+	// Convert from UTC to local time
+	start = (start + utcOffset + 24) % 24
+	end = (end + utcOffset + 24) % 24
+
+	return start, end
+}
 
 // findSleepHours looks for extended periods of zero or near-zero activity
 // This is more reliable than finding "quiet" hours which might just be evening time
+func findSleepHours(hourCounts map[int]int) []int {
+	// First, find all hours with zero or minimal activity
+	zeroHours := []int{}
+	for hour := 0; hour < 24; hour++ {
+		if hourCounts[hour] <= 1 { // Allow for 1 random event
+			zeroHours = append(zeroHours, hour)
+		}
+	}
 
+	// If we have a good stretch of zero activity, use that
+	if len(zeroHours) >= 5 {
+		// Find the longest consecutive sequence
+		maxLen := 0
+		maxStart := 0
+		currentStart := zeroHours[0]
+		currentLen := 1
 
+		for i := 1; i < len(zeroHours); i++ {
+			if zeroHours[i] == zeroHours[i-1]+1 || (zeroHours[i-1] == 23 && zeroHours[i] == 0) {
+				currentLen++
+			} else {
+				if currentLen > maxLen {
+					maxLen = currentLen
+					maxStart = currentStart
+				}
+				currentStart = zeroHours[i]
+				currentLen = 1
+			}
+		}
+		if currentLen > maxLen {
+			maxLen = currentLen
+			maxStart = currentStart
+		}
+
+		// Extract the core sleep hours from the zero-activity period
+		// Skip early evening hours and wake-up hours to focus on deep sleep
+		result := []int{}
+		sleepStart := maxStart
+		sleepLength := maxLen
+
+		// If we have a long zero period (8+ hours), it likely includes evening time
+		// Skip the first 2-3 hours to avoid evening time, and the last hour for wake-up
+		if maxLen >= 8 {
+			sleepStart = (maxStart + 3) % 24 // Skip first 3 hours (evening)
+			sleepLength = maxLen - 4         // Also skip last hour (wake-up)
+		} else if maxLen >= 6 {
+			sleepStart = (maxStart + 1) % 24 // Skip first hour
+			sleepLength = maxLen - 2         // Also skip last hour
+		}
+
+		// Limit to reasonable sleep duration (4-7 hours)
+		if sleepLength > 7 {
+			sleepLength = 7
+		}
+		if sleepLength < 4 {
+			sleepLength = maxLen // Use original if adjustment made it too short
+			sleepStart = maxStart
+		}
+
+		for i := 0; i < sleepLength; i++ {
+			hour := (sleepStart + i) % 24
+			result = append(result, hour)
+		}
+
+		if len(result) >= 4 {
+			return result
+		}
+	}
+
+	// Fall back to the old method if we don't have clear zero periods
+	return findQuietHours(hourCounts)
+}
+
+func findQuietHours(hourCounts map[int]int) []int {
+	minSum := 999999
+	minStart := 0
+	windowSize := 6
+
+	for start := 0; start < 24; start++ {
+		sum := 0
+		for i := 0; i < windowSize; i++ {
+			hour := (start + i) % 24
+			sum += hourCounts[hour]
+		}
+		if sum < minSum {
+			minSum = sum
+			minStart = start
+		}
+	}
+
+	quietHours := make([]int, windowSize)
+	for i := 0; i < windowSize; i++ {
+		quietHours[i] = (minStart + i) % 24
+	}
+
+	return quietHours
+}
+
+func timezoneFromOffset(offsetHours int) string {
+	// Return generic UTC offset format since we don't know the country at this stage
+	// This is used for activity-only detection where location is unknown
+	if offsetHours >= 0 {
+		return fmt.Sprintf("UTC+%d", offsetHours)
+	}
+	return fmt.Sprintf("UTC%d", offsetHours) // Negative sign is already included
+}
 
 func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]interface{}, verbose bool) (string, string, float64, error) {
 	// Check if we have activity data for confidence scoring later
@@ -952,5 +1511,296 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 	return string(body)
 }
 
+func detectLunchBreak(hourCounts map[int]int, utcOffset int, workStart, workEnd int) (lunchStart, lunchEnd, confidence float64) {
+	// Convert hour counts to 30-minute buckets for better precision
+	bucketCounts := make(map[float64]int)
+	for hour, count := range hourCounts {
+		// Distribute the count evenly between two 30-minute buckets
+		bucketCounts[float64(hour)] += count / 2
+		bucketCounts[float64(hour)+0.5] += count / 2
+		// Handle odd counts
+		if count%2 == 1 {
+			bucketCounts[float64(hour)] += 1
+		}
+	}
+
+	// Look for activity dips during typical lunch hours (10am-3pm local for broader search)
+	typicalLunchStart := 10.0
+	typicalLunchEnd := 15.0
+
+	// Convert local lunch hours to UTC
+	lunchStartUTC := typicalLunchStart - float64(utcOffset)
+	lunchEndUTC := typicalLunchEnd - float64(utcOffset)
+
+	// Normalize to 0-24 range
+	for lunchStartUTC < 0 {
+		lunchStartUTC += 24
+	}
+	for lunchEndUTC < 0 {
+		lunchEndUTC += 24
+	}
+	for lunchStartUTC >= 24 {
+		lunchStartUTC -= 24
+	}
+	for lunchEndUTC >= 24 {
+		lunchEndUTC -= 24
+	}
+
+	// Calculate average activity during work hours for comparison
+	totalActivity := 0
+	bucketCount := 0
+	workHourBuckets := make([]float64, 0)
+	for bucket := float64(workStart); bucket < float64(workEnd); bucket += 0.5 {
+		utcBucket := bucket - float64(utcOffset)
+		for utcBucket < 0 {
+			utcBucket += 24
+		}
+		for utcBucket >= 24 {
+			utcBucket -= 24
+		}
+		totalActivity += bucketCounts[utcBucket]
+		bucketCount++
+		workHourBuckets = append(workHourBuckets, utcBucket)
+	}
+
+	avgActivity := 0.0
+	if bucketCount > 0 {
+		avgActivity = float64(totalActivity) / float64(bucketCount)
+	}
+
+	// Find all candidate lunch periods (30-minute and 1-hour windows)
+	type lunchCandidate struct {
+		start      float64
+		end        float64
+		avgDip     float64
+		distFrom12 float64
+		confidence float64
+	}
+
+	candidates := make([]lunchCandidate, 0)
+
+	// Check all possible 30-minute and 1-hour windows in the lunch timeframe
+	for windowStart := lunchStartUTC; ; windowStart += 0.5 {
+		if windowStart >= 24 {
+			windowStart -= 24
+		}
+
+		// Try both 30-minute (1-bucket) and 60-minute (2-bucket) windows
+		for windowSize := 1; windowSize <= 2; windowSize++ {
+			windowEnd := windowStart + float64(windowSize)*0.5
+			if windowEnd >= 24 {
+				windowEnd -= 24
+			}
+
+			// Calculate average activity in this window
+			windowActivity := 0.0
+			windowBuckets := 0
+			for bucket := windowStart; windowBuckets < windowSize; bucket += 0.5 {
+				if bucket >= 24 {
+					bucket -= 24
+				}
+				windowActivity += float64(bucketCounts[bucket])
+				windowBuckets++
+				if windowBuckets >= windowSize {
+					break
+				}
+			}
+
+			if windowBuckets > 0 {
+				avgWindowActivity := windowActivity / float64(windowBuckets)
+
+				// Calculate the dip relative to average work activity
+				var dipPercentage float64
+				if avgActivity > 0 {
+					dipPercentage = (avgActivity - avgWindowActivity) / avgActivity
+				}
+
+				// Convert window center to local time to check distance from 12pm
+				windowCenter := windowStart + float64(windowSize)*0.25
+				localCenter := windowCenter + float64(utcOffset)
+				for localCenter < 0 {
+					localCenter += 24
+				}
+				for localCenter >= 24 {
+					localCenter -= 24
+				}
+				distanceFrom12 := math.Abs(localCenter - 12.0)
+				if distanceFrom12 > 12 {
+					distanceFrom12 = 24 - distanceFrom12
+				}
+
+				// Calculate confidence based on dip size and proximity to 12pm
+				confidence := 0.1 // Base confidence - always show something
+
+				// Dip size component (max 0.6)
+				dipComponent := 0.0
+				if dipPercentage > 0.1 {
+					dipComponent += 0.2 // Small dip
+				}
+				if dipPercentage > 0.25 {
+					dipComponent += 0.2 // Significant dip
+				}
+				if dipPercentage > 0.5 {
+					dipComponent += 0.2 // Very large dip
+				}
+
+				// Proximity to 12pm component (max 0.2)
+				proximityComponent := 0.0
+				if distanceFrom12 <= 2.0 {
+					proximityComponent = (2.0 - distanceFrom12) / 2.0 * 0.2
+				}
+
+				// Duration appropriateness component (max 0.1)
+				durationComponent := 0.0
+				if windowSize == 1 && dipPercentage > 0.3 {
+					// 30-minute breaks with strong dip pattern
+					durationComponent = 0.1
+				} else if windowSize == 2 && dipPercentage > 0.2 {
+					// 1-hour breaks with reasonable dip pattern
+					durationComponent = 0.1
+				}
+
+				// Combine components and cap at 1.0
+				confidence = confidence + dipComponent + proximityComponent + durationComponent
+				if confidence > 1.0 {
+					confidence = 1.0
+				}
+
+				candidates = append(candidates, lunchCandidate{
+					start:      windowStart + float64(utcOffset),
+					end:        windowEnd + float64(utcOffset),
+					avgDip:     dipPercentage,
+					distFrom12: distanceFrom12,
+					confidence: confidence,
+				})
+			}
+		}
+
+		// Stop when we've covered the lunch window
+		if (lunchEndUTC > lunchStartUTC && windowStart >= lunchEndUTC) ||
+			(lunchEndUTC < lunchStartUTC && windowStart >= lunchEndUTC && windowStart < lunchStartUTC) {
+			break
+		}
+	}
+
+	// Find the best candidate (highest confidence, prefer closer to 12pm for ties)
+	bestCandidate := lunchCandidate{start: 12.0, end: 13.0, confidence: 0.1} // Default fallback
+
+	for _, candidate := range candidates {
+		// Normalize candidate times to 0-24 range
+		for candidate.start < 0 {
+			candidate.start += 24
+		}
+		for candidate.start >= 24 {
+			candidate.start -= 24
+		}
+		for candidate.end < 0 {
+			candidate.end += 24
+		}
+		for candidate.end >= 24 {
+			candidate.end -= 24
+		}
+
+		// Prefer higher confidence, with proximity to 12pm as tiebreaker
+		if candidate.confidence > bestCandidate.confidence ||
+			(candidate.confidence == bestCandidate.confidence && candidate.distFrom12 < bestCandidate.distFrom12) {
+			bestCandidate = candidate
+		}
+	}
+
+	return bestCandidate.start, bestCandidate.end, bestCandidate.confidence
+}
 
 // formatEvidenceForGemini formats contextual data into a readable, structured format for Gemini analysis
+func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) string {
+	var evidence strings.Builder
+
+	// ACTIVITY ANALYSIS SECTION
+	if activityTz, ok := contextData["activity_detected_timezone"].(string); ok {
+		evidence.WriteString("## ACTIVITY ANALYSIS (HIGHLY RELIABLE)\n")
+		evidence.WriteString(fmt.Sprintf("Detected Timezone: %s\n", activityTz))
+
+		if confidence, ok := contextData["activity_confidence"].(float64); ok {
+			evidence.WriteString(fmt.Sprintf("Activity Confidence: %.1f%%\n", confidence*100))
+		}
+
+		if workStart, ok := contextData["work_start_local"].(float64); ok {
+			if workEnd, ok := contextData["work_end_local"].(float64); ok {
+				evidence.WriteString(fmt.Sprintf("Work Hours: %.1f-%.1f local time\n", workStart, workEnd))
+			}
+		}
+
+		if lunchStart, ok := contextData["lunch_start_local"].(float64); ok {
+			if lunchEnd, ok := contextData["lunch_end_local"].(float64); ok {
+				if lunchConf, ok := contextData["lunch_confidence"].(float64); ok {
+					evidence.WriteString(fmt.Sprintf("Lunch Hours: %.1f-%.1f local time (%.1f%% confidence)\n",
+						lunchStart, lunchEnd, lunchConf*100))
+				}
+			}
+		}
+
+		if sleepHours, ok := contextData["sleep_hours_utc"].([]int); ok && len(sleepHours) > 0 {
+			evidence.WriteString(fmt.Sprintf("Sleep Hours UTC: %v\n", sleepHours))
+		}
+
+		if offset, ok := contextData["detected_gmt_offset"].(string); ok {
+			evidence.WriteString(fmt.Sprintf("GMT Offset: %s\n", offset))
+		}
+
+		evidence.WriteString("\n")
+	}
+
+	// GITHUB USER PROFILE SECTION
+	if userJSON, ok := contextData["github_user_json"]; ok {
+		evidence.WriteString("## GITHUB USER PROFILE\n")
+		if userBytes, err := json.MarshalIndent(userJSON, "", "  "); err == nil {
+			evidence.WriteString(string(userBytes))
+		}
+		evidence.WriteString("\n\n")
+	}
+
+	// ORGANIZATIONS SECTION
+	if orgs, ok := contextData["organizations"]; ok {
+		evidence.WriteString("## ORGANIZATION MEMBERSHIPS\n")
+		if orgBytes, err := json.MarshalIndent(orgs, "", "  "); err == nil {
+			evidence.WriteString(string(orgBytes))
+		}
+		evidence.WriteString("\n\n")
+	}
+
+	// PULL REQUESTS SECTION
+	if prs, ok := contextData["pull_requests"]; ok {
+		evidence.WriteString("## RECENT PULL REQUEST TITLES\n")
+		if prBytes, err := json.MarshalIndent(prs, "", "  "); err == nil {
+			evidence.WriteString(string(prBytes))
+		}
+		evidence.WriteString("\n\n")
+	}
+
+	// LONGEST PR/ISSUE CONTENT SECTION (inline, not JSON)
+	if title, ok := contextData["longest_pr_issue_title"].(string); ok && title != "" {
+		evidence.WriteString("## LONGEST PR/ISSUE CONTENT\n")
+		evidence.WriteString(fmt.Sprintf("Title: %s\n\n", title))
+
+		if body, ok := contextData["longest_pr_issue_body"].(string); ok && body != "" {
+			evidence.WriteString("Body:\n")
+			evidence.WriteString(body)
+			evidence.WriteString("\n\n")
+		}
+	}
+
+	// WEBSITE CONTENT SECTION
+	if websiteContent, ok := contextData["website_content"].(string); ok && websiteContent != "" {
+		evidence.WriteString("## WEBSITE/BLOG CONTENT\n")
+		evidence.WriteString(websiteContent)
+		evidence.WriteString("\n\n")
+	}
+
+	// ISSUE COUNT
+	if issueCount, ok := contextData["issue_count"].(int); ok {
+		evidence.WriteString(fmt.Sprintf("## ADDITIONAL METRICS\n"))
+		evidence.WriteString(fmt.Sprintf("Issue Count: %d\n", issueCount))
+	}
+
+	return evidence.String()
+}
