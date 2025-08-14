@@ -95,6 +95,9 @@ type Result struct {
 		End        float64 `json:"end"`        // Detected lunch break end time (supports 30-min increments)
 		Confidence float64 `json:"confidence"` // Confidence level of lunch detection (0.0-1.0)
 	} `json:"lunch_hours_local,omitempty"`
+	
+	// HourlyActivityUTC stores the raw activity counts by UTC hour for histogram generation
+	HourlyActivityUTC map[int]int `json:"-"` // Not included in JSON output
 }
 
 // Location represents geographic coordinates

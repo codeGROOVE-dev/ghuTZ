@@ -10,6 +10,77 @@ import (
 	"time"
 )
 
+// PublicEvent represents a GitHub public event
+type PublicEvent struct {
+	ID        string    `json:"id"`
+	Type      string    `json:"type"`
+	CreatedAt time.Time `json:"created_at"`
+	Repo      struct {
+		Name string `json:"name"`
+		URL  string `json:"url"`
+	} `json:"repo"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+// fetchPublicEvents fetches public events (limited to last 30 days by GitHub API)
+func (d *Detector) fetchPublicEvents(ctx context.Context, username string) ([]PublicEvent, error) {
+	const maxPages = 3 // 100 events per page * 3 = 300 (GitHub's max)
+	const perPage = 100
+	
+	var allEvents []PublicEvent
+	
+	for page := 1; page <= maxPages; page++ {
+		apiURL := fmt.Sprintf("https://api.github.com/users/%s/events/public?per_page=%d&page=%d", username, perPage, page)
+		
+		req, err := http.NewRequestWithContext(ctx, "GET", apiURL, http.NoBody)
+		if err != nil {
+			return allEvents, fmt.Errorf("creating request: %w", err)
+		}
+		
+		// Add GitHub token if available
+		if d.githubToken != "" && d.isValidGitHubToken(d.githubToken) {
+			req.Header.Set("Authorization", "token "+d.githubToken)
+		}
+		
+		resp, err := d.cachedHTTPDo(ctx, req)
+		if err != nil {
+			d.logger.Debug("failed to fetch events page", "page", page, "error", err)
+			break // Return what we have so far
+		}
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				d.logger.Debug("failed to close response body", "error", err)
+			}
+		}()
+		
+		if resp.StatusCode != http.StatusOK {
+			d.logger.Debug("GitHub API returned non-200 status", "status", resp.StatusCode, "page", page)
+			break // Return what we have so far
+		}
+		
+		var events []PublicEvent
+		if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
+			d.logger.Debug("failed to decode events", "page", page, "error", err)
+			break // Return what we have so far
+		}
+		
+		if len(events) == 0 {
+			break // No more events
+		}
+		
+		// Add all events (GitHub API already limits to 30 days)
+		allEvents = append(allEvents, events...)
+		
+		// If we got fewer events than requested, we've reached the end
+		if len(events) < perPage {
+			break
+		}
+	}
+	
+	d.logger.Debug("fetched public events", "username", username, "count", len(allEvents))
+	return allEvents, nil
+}
+
 func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]PullRequest, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:pr&sort=created&order=desc&per_page=100", username)
 

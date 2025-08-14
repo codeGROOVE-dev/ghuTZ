@@ -89,13 +89,21 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 
 	if len(activityInRange) > 10 {
 		sort.Ints(activityInRange)
-		// Use 10th percentile for start (ignore occasional early starts)
-		percentile10 := len(activityInRange) / 10
-		// Use 90th percentile for end (ignore occasional late nights)
-		percentile90 := len(activityInRange) * 9 / 10
+		// Use 5th percentile for start (ignore occasional early starts)
+		percentile5 := len(activityInRange) / 20
+		// Use 95th percentile for end (capture more of the workday, only exclude true outliers)
+		percentile95 := len(activityInRange) * 19 / 20
+		
+		// Ensure we don't have invalid indices
+		if percentile5 < 0 {
+			percentile5 = 0
+		}
+		if percentile95 >= len(activityInRange) {
+			percentile95 = len(activityInRange) - 1
+		}
 
-		start = activityInRange[percentile10]
-		end = activityInRange[percentile90]
+		start = activityInRange[percentile5]
+		end = activityInRange[percentile95]
 	}
 
 	// Convert from UTC to local time
@@ -402,6 +410,17 @@ func detectLunchBreak(hourCounts map[int]int, utcOffset int, workStart, workEnd 
 		}
 		for candidate.end >= 24 {
 			candidate.end -= 24
+		}
+
+		// IMPORTANT: Lunch must be at least 1 hour after work starts
+		// This prevents detecting early morning dips as lunch
+		if candidate.start < float64(workStart)+1.0 {
+			continue // Skip this candidate - too early to be lunch
+		}
+		
+		// Also ensure lunch ends before work ends (with some buffer)
+		if candidate.end > float64(workEnd)-0.5 {
+			continue // Skip this candidate - too late to be lunch
 		}
 
 		// Prefer higher confidence, with proximity to 12pm as tiebreaker

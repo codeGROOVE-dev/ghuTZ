@@ -7,6 +7,8 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/ghutz"
@@ -20,8 +22,8 @@ var (
 	gcpProject   = flag.String("gcp-project", "", "GCP project ID (or set GCP_PROJECT)")
 	cacheDir     = flag.String("cache-dir", "", "Cache directory (or set CACHE_DIR)")
 	verbose      = flag.Bool("verbose", false, "Enable verbose logging")
-	activity     = flag.Bool("activity", false, "Force activity analysis")
 	version      = flag.Bool("version", false, "Show version")
+	histogram    = flag.Bool("histogram", false, "Show activity histogram")
 )
 
 func main() {
@@ -78,7 +80,6 @@ func main() {
 		ghutz.WithGeminiModel(*geminiModel),
 		ghutz.WithMapsAPIKey(*mapsAPIKey),
 		ghutz.WithGCPProject(*gcpProject),
-		ghutz.WithActivityAnalysis(*activity),
 	}
 
 	if *cacheDir != "" {
@@ -97,37 +98,76 @@ func main() {
 
 	// Print results in CLI format
 	printResult(result)
+	
+	// Show histogram by default if activity data is available
+	if result.HourlyActivityUTC != nil {
+		// Calculate UTC offset from timezone string
+		// Try ActivityTimezone first (it has the actual UTC offset), then fall back to Timezone
+		utcOffset := 0
+		offsetSource := result.ActivityTimezone
+		if offsetSource == "" {
+			offsetSource = result.Timezone
+		}
+		
+		if strings.HasPrefix(offsetSource, "UTC") {
+			offsetStr := strings.TrimPrefix(offsetSource, "UTC")
+			if offset, err := strconv.Atoi(offsetStr); err == nil {
+				utcOffset = offset
+			}
+		}
+		
+		histogramOutput := ghutz.GenerateHistogram(result, result.HourlyActivityUTC, utcOffset)
+		fmt.Print(histogramOutput)
+	}
 }
 
 func printResult(result *ghutz.Result) {
-	fmt.Printf("User: %s\n", result.Username)
-	fmt.Printf("Timezone: %s\n", result.Timezone)
-
-	if result.ActivityTimezone != "" && result.ActivityTimezone != result.Timezone {
-		fmt.Printf("Activity TZ: %s\n", result.ActivityTimezone)
-	}
-
-	if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
-		fmt.Printf("Active Hours: %s - %s %s\n",
-			formatHour(result.ActiveHoursLocal.Start), formatHour(result.ActiveHoursLocal.End), result.Timezone)
-	}
-
-	if result.LunchHoursLocal.Confidence > 0 {
-		fmt.Printf("Lunch Break: %s - %s %s (%.0f%% confidence)\n",
-			formatHour(result.LunchHoursLocal.Start), formatHour(result.LunchHoursLocal.End),
-			result.Timezone, result.LunchHoursLocal.Confidence*100)
-	}
-
+	// Modern header with emoji
+	fmt.Printf("\n🌍 GitHub User: %s\n", result.Username)
+	fmt.Println(strings.Repeat("─", 50))
+	
+	// Location and timezone in a cleaner format
+	locationStr := ""
 	if result.GeminiSuggestedLocation != "" {
-		fmt.Printf("Location: %s (AI-suggested)\n", result.GeminiSuggestedLocation)
+		locationStr = result.GeminiSuggestedLocation
 	} else if result.LocationName != "" {
-		fmt.Printf("Location: %s\n", result.LocationName)
+		locationStr = result.LocationName
 	} else if result.Location != nil {
-		fmt.Printf("Location: %.5f, %.5f\n", result.Location.Latitude, result.Location.Longitude)
+		locationStr = fmt.Sprintf("%.3f, %.3f", result.Location.Latitude, result.Location.Longitude)
 	}
-
-	fmt.Printf("Method: %s\n", formatMethodName(result.Method))
-	fmt.Printf("Confidence: %.2f\n", result.Confidence)
+	
+	if locationStr != "" {
+		fmt.Printf("📍 Location: %s\n", locationStr)
+	}
+	
+	fmt.Printf("🕐 Timezone: %s", result.Timezone)
+	if result.ActivityTimezone != "" && result.ActivityTimezone != result.Timezone {
+		fmt.Printf("\n   └─ activity suggests %s", result.ActivityTimezone)
+	}
+	fmt.Println()
+	
+	// Work schedule with visual indicators
+	if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
+		fmt.Printf("💼 Work Hours: %s → %s", 
+			formatHour(result.ActiveHoursLocal.Start), 
+			formatHour(result.ActiveHoursLocal.End))
+		
+		if result.LunchHoursLocal.Confidence > 0 {
+			fmt.Printf("\n🍽️  Lunch Break: %s → %s", 
+				formatHour(result.LunchHoursLocal.Start),
+				formatHour(result.LunchHoursLocal.End))
+			if result.LunchHoursLocal.Confidence < 0.7 {
+				fmt.Printf(" (uncertain)")
+			}
+		}
+		fmt.Println()
+	}
+	
+	// Detection method as a subtle footer
+	fmt.Printf("✨ Detection: %s (%.0f%% confidence)\n", 
+		formatMethodName(result.Method), 
+		result.Confidence*100)
+	fmt.Println()
 }
 
 func formatHour(decimalHour float64) string {

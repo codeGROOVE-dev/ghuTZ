@@ -220,6 +220,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 			result.QuietHoursUTC = activityResult.QuietHoursUTC
 			result.ActiveHoursLocal = activityResult.ActiveHoursLocal
 			result.LunchHoursLocal = activityResult.LunchHoursLocal
+			result.HourlyActivityUTC = activityResult.HourlyActivityUTC
 		}
 		return result, nil
 	}
@@ -235,6 +236,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 			result.QuietHoursUTC = activityResult.QuietHoursUTC
 			result.ActiveHoursLocal = activityResult.ActiveHoursLocal
 			result.LunchHoursLocal = activityResult.LunchHoursLocal
+			result.HourlyActivityUTC = activityResult.HourlyActivityUTC
 		}
 		return result, nil
 	}
@@ -402,43 +404,68 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 		return nil
 	}
 
-	prs, err := d.fetchPullRequests(ctx, username)
+	// Fetch events for context (PRs, issues, etc.)
+	events, err := d.fetchPublicEvents(ctx, username)
 	if err != nil {
-		d.logger.Debug("failed to fetch pull requests", "username", username, "error", err)
-		prs = []PullRequest{}
-	}
-	issues, err := d.fetchIssues(ctx, username)
-	if err != nil {
-		d.logger.Debug("failed to fetch issues", "username", username, "error", err)
-		issues = []Issue{}
+		d.logger.Debug("failed to fetch public events", "username", username, "error", err)
+		events = []PublicEvent{}
 	}
 
-	// Find longest PR/issue body for language analysis
+	// Extract PR and issue information from events for context
+	// We'll keep unique titles (up to 100) for context to send to Gemini
+	var prSummary []map[string]interface{}
+	seenTitles := make(map[string]bool)
 	var longestBody string
 	var longestTitle string
-	for _, pr := range prs {
-		if len(pr.Body) > len(longestBody) {
-			longestBody = pr.Body
-			longestTitle = pr.Title
+	issueCount := 0
+	
+	for _, event := range events {
+		if len(prSummary) >= 100 {
+			break // Limit to 100 items for Gemini context
 		}
-	}
-	for _, issue := range issues {
-		if len(issue.Body) > len(longestBody) {
-			longestBody = issue.Body
-			longestTitle = issue.Title
+		
+		// Extract information based on event type
+		switch event.Type {
+		case "PullRequestEvent", "PullRequestReviewEvent", "PullRequestReviewCommentEvent":
+			// Extract PR title if available in payload
+			var payload map[string]interface{}
+			if err := json.Unmarshal(event.Payload, &payload); err == nil {
+				if pr, ok := payload["pull_request"].(map[string]interface{}); ok {
+					if title, ok := pr["title"].(string); ok {
+						// Only add if we haven't seen this title before
+						if !seenTitles[title] {
+							seenTitles[title] = true
+							prSummary = append(prSummary, map[string]interface{}{
+								"title": title,
+							})
+						}
+						if body, ok := pr["body"].(string); ok && len(body) > len(longestBody) {
+							longestBody = body
+							longestTitle = title
+						}
+					}
+				}
+			}
+		case "IssuesEvent", "IssueCommentEvent":
+			issueCount++
+			// Extract issue information if needed
+			var payload map[string]interface{}
+			if err := json.Unmarshal(event.Payload, &payload); err == nil {
+				if issue, ok := payload["issue"].(map[string]interface{}); ok {
+					if title, ok := issue["title"].(string); ok {
+						if body, ok := issue["body"].(string); ok && len(body) > len(longestBody) {
+							longestBody = body
+							longestTitle = title
+						}
+					}
+				}
+			}
 		}
 	}
 
 	// Limit body to 5000 chars for token efficiency
 	if len(longestBody) > 5000 {
 		longestBody = longestBody[:5000] + "..."
-	}
-
-	prSummary := make([]map[string]interface{}, len(prs))
-	for i, pr := range prs {
-		prSummary[i] = map[string]interface{}{
-			"title": pr.Title,
-		}
 	}
 
 	var websiteContent string
@@ -461,7 +488,7 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 		"organizations":          orgs,
 		"longest_pr_issue_body":  longestBody,
 		"longest_pr_issue_title": longestTitle,
-		"issue_count":            len(issues),
+		"issue_count":            issueCount,
 	}
 
 	var method string
@@ -524,6 +551,15 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 		GeminiSuggestedLocation: location,
 		Confidence:              confidence,
 		Method:                  method,
+	}
+
+	// Preserve activity data from activityResult if available
+	if activityResult != nil {
+		result.HourlyActivityUTC = activityResult.HourlyActivityUTC
+		result.ActiveHoursLocal = activityResult.ActiveHoursLocal
+		result.LunchHoursLocal = activityResult.LunchHoursLocal
+		result.QuietHoursUTC = activityResult.QuietHoursUTC
+		result.ActivityTimezone = activityResult.ActivityTimezone
 	}
 
 	// Try to geocode the AI-suggested location to get coordinates for the map

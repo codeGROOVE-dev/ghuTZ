@@ -2,48 +2,159 @@ package ghutz
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sync"
 	"time"
 )
 
 func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Result {
-	// Fetch all activity data in parallel
-	activity := d.fetchAllActivity(ctx, username)
-
-	totalActivity := len(activity.PullRequests) + len(activity.Issues) + len(activity.Comments)
-	if totalActivity < 20 {
-		d.logger.Debug("insufficient activity data", "username", username,
-			"pr_count", len(activity.PullRequests),
-			"issue_count", len(activity.Issues),
-			"comment_count", len(activity.Comments),
-			"total", totalActivity, "minimum_required", 20)
-		return nil
+	// Start with public events data
+	events, err := d.fetchPublicEvents(ctx, username)
+	if err != nil {
+		d.logger.Debug("failed to fetch public events", "username", username, "error", err)
+		// Don't return nil - try other sources
+		events = []PublicEvent{}
 	}
 
-	d.logger.Debug("analyzing activity patterns", "username", username,
-		"pr_count", len(activity.PullRequests),
-		"issue_count", len(activity.Issues),
-		"comment_count", len(activity.Comments))
+	d.logger.Debug("fetched public events", "username", username, "count", len(events))
 
+	// Use a map of timestamps to deduplicate events
+	uniqueTimestamps := make(map[time.Time]bool)
 	hourCounts := make(map[int]int)
-
-	// Count PRs
-	for _, pr := range activity.PullRequests {
-		hour := pr.CreatedAt.UTC().Hour()
-		hourCounts[hour]++
+	
+	// Track the oldest event to check data coverage
+	var oldestEventTime time.Time
+	twoWeeksAgo := time.Now().AddDate(0, 0, -14)
+	
+	// Add events with deduplication
+	for _, event := range events {
+		if !uniqueTimestamps[event.CreatedAt] {
+			uniqueTimestamps[event.CreatedAt] = true
+			hour := event.CreatedAt.UTC().Hour()
+			hourCounts[hour]++
+			
+			// Track oldest event
+			if oldestEventTime.IsZero() || event.CreatedAt.Before(oldestEventTime) {
+				oldestEventTime = event.CreatedAt
+			}
+		}
 	}
-
-	// Count issues
-	for _, issue := range activity.Issues {
-		hour := issue.CreatedAt.UTC().Hour()
-		hourCounts[hour]++
+	
+	// Decide if we need supplemental data:
+	// 1. If we have less than 300 events, OR
+	// 2. If our oldest event is newer than 2 weeks ago (insufficient time coverage)
+	needSupplemental := len(events) < 300 || oldestEventTime.After(twoWeeksAgo)
+	
+	if needSupplemental {
+		reason := ""
+		if len(events) < 300 {
+			reason = fmt.Sprintf("only %d events", len(events))
+		}
+		if oldestEventTime.After(twoWeeksAgo) {
+			daysCovered := int(time.Since(oldestEventTime).Hours() / 24)
+			if reason != "" {
+				reason += " and "
+			}
+			reason += fmt.Sprintf("only %d days of data", daysCovered)
+		}
+		d.logger.Debug("supplementing with additional API queries", "username", username, 
+			"reason", reason)
+		
+		// Fetch additional data in parallel
+		additionalData := d.fetchSupplementalActivity(ctx, username)
+		
+		// Filter out data older than 6 months
+		sixMonthsAgo := time.Now().AddDate(0, -6, 0)
+		duplicates := 0
+		tooOld := 0
+		
+		// Add PRs with deduplication and age filtering
+		for _, pr := range additionalData.PullRequests {
+			if pr.CreatedAt.Before(sixMonthsAgo) {
+				tooOld++
+				continue // Skip data older than 6 months
+			}
+			if !uniqueTimestamps[pr.CreatedAt] {
+				uniqueTimestamps[pr.CreatedAt] = true
+				hour := pr.CreatedAt.UTC().Hour()
+				hourCounts[hour]++
+			} else {
+				duplicates++
+			}
+		}
+		
+		// Add issues with deduplication and age filtering
+		for _, issue := range additionalData.Issues {
+			if issue.CreatedAt.Before(sixMonthsAgo) {
+				tooOld++
+				continue // Skip data older than 6 months
+			}
+			if !uniqueTimestamps[issue.CreatedAt] {
+				uniqueTimestamps[issue.CreatedAt] = true
+				hour := issue.CreatedAt.UTC().Hour()
+				hourCounts[hour]++
+			} else {
+				duplicates++
+			}
+		}
+		
+		// Add comments with deduplication and age filtering
+		for _, comment := range additionalData.Comments {
+			if comment.CreatedAt.Before(sixMonthsAgo) {
+				tooOld++
+				continue // Skip data older than 6 months
+			}
+			if !uniqueTimestamps[comment.CreatedAt] {
+				uniqueTimestamps[comment.CreatedAt] = true
+				hour := comment.CreatedAt.UTC().Hour()
+				hourCounts[hour]++
+			} else {
+				duplicates++
+			}
+		}
+		
+		if duplicates > 0 || tooOld > 0 {
+			d.logger.Debug("filtered activities", "username", username, 
+				"duplicates", duplicates, "too_old", tooOld)
+		}
+		
+		// Count unique activities
+		totalActivity := len(uniqueTimestamps)
+		
+		d.logger.Debug("total activity after supplementing", "username", username,
+			"events", len(events),
+			"prs", len(additionalData.PullRequests),
+			"issues", len(additionalData.Issues),
+			"comments", len(additionalData.Comments),
+			"duplicates_removed", duplicates,
+			"too_old_removed", tooOld,
+			"unique_total", totalActivity)
+		
+		// Check minimum threshold
+		if totalActivity < 3 {
+			d.logger.Debug("insufficient activity data", "username", username,
+				"total_activity", totalActivity,
+				"minimum_required", 3)
+			return nil
+		}
+		
+		// Warn if we have limited data
+		if totalActivity < 20 {
+			d.logger.Debug("limited activity data - results may be less accurate", "username", username,
+				"total_activity", totalActivity,
+				"recommended", 20)
+		}
+	} else {
+		daysCovered := int(time.Since(oldestEventTime).Hours() / 24)
+		d.logger.Debug("sufficient event coverage, skipping supplemental queries", "username", username,
+			"event_count", len(events), "days_covered", daysCovered)
 	}
-
-	// Count comments
-	for _, comment := range activity.Comments {
-		hour := comment.CreatedAt.UTC().Hour()
-		hourCounts[hour]++
+	
+	// Calculate total activity count for logging
+	totalActivity := 0
+	for _, count := range hourCounts {
+		totalActivity += count
 	}
 
 	maxActivity := 0
@@ -58,9 +169,24 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 	}
 
 	quietHours := findSleepHours(hourCounts)
+	// With limited data, we might not find clear sleep patterns
+	// If we don't have enough quiet hours, make educated guesses based on what we have
 	if len(quietHours) < 4 {
-		d.logger.Debug("insufficient sleep hours", "username", username, "sleep_hours", len(quietHours))
-		return nil
+		d.logger.Debug("limited sleep hour data - making educated guess", "username", username, "sleep_hours", len(quietHours))
+		// If we have very limited data, assume typical sleep hours (2am-6am UTC is common)
+		if len(quietHours) == 0 {
+			// Find the hours with zero activity and use those, or default to typical hours
+			for hour := 0; hour < 24; hour++ {
+				if hourCounts[hour] == 0 {
+					quietHours = append(quietHours, hour)
+				}
+			}
+			// If still no quiet hours, use a reasonable default
+			if len(quietHours) < 4 {
+				quietHours = []int{2, 3, 4, 5, 6} // Default sleep hours
+				d.logger.Debug("using default sleep hours due to limited data", "username", username)
+			}
+		}
 	}
 
 	d.logger.Debug("activity pattern summary", "username", username,
@@ -204,61 +330,68 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 		"work_start", activeStart, "work_end", activeEnd, "utc_offset", offsetInt)
 
 	// Use work schedule validation for timezone detection
-	// Most people start work between 8:00am-9:30am and have lunch 11:30am-1:00pm
+	// Be more flexible - some people work early shifts or late shifts
 	var offsetCorrection int
 	var correctionReason string
 
-	// Check work start time (should be 8:00am-9:30am) - be more strict
-	if float64(activeStart) < 7.5 || float64(activeStart) > 9.5 {
+	// Only correct if work start is VERY unusual (before 6am or after 11am)
+	// Many developers start early (7am) or late (10am)
+	if float64(activeStart) < 6.0 || float64(activeStart) > 11.0 {
+		// Only apply small corrections (max 2 hours)
 		expectedWorkStart := 8.5 // 8:30am average
 		workCorrection := int(expectedWorkStart - float64(activeStart))
-		if workCorrection != 0 && workCorrection >= -8 && workCorrection <= 8 {
+		if workCorrection != 0 && workCorrection >= -2 && workCorrection <= 2 {
 			offsetCorrection = workCorrection
 			correctionReason = "work_start"
 			d.logger.Debug("work start timing suggests timezone correction", "username", username,
-				"work_start_local", activeStart, "expected_range", "7:30-9:30",
+				"work_start_local", activeStart, "expected_range", "6:00-11:00",
 				"suggested_correction", workCorrection)
 		}
 	}
 
-	// Check lunch timing (should be 11:30am-12:30pm, much stricter)
+	// Check lunch timing (be more flexible - lunch can be 11am-2pm)
 	if lunchStart != -1 && lunchEnd != -1 {
-		// Very strict validation: lunch should start between 11:30am-12:30pm
-		if lunchStart < 11.5 || lunchStart > 12.5 || lunchEnd < 12.5 || lunchEnd > 13.5 {
-			expectedLunchMid := 12.0 // 12:00pm
+		// Only correct if lunch is very unusual (before 11am or after 2pm)
+		if lunchStart < 11.0 || lunchStart > 14.0 {
+			expectedLunchMid := 12.5 // 12:30pm average
 			actualLunchMid := (lunchStart + lunchEnd) / 2
 			lunchCorrection := int(expectedLunchMid - actualLunchMid)
-
-			// If we don't have a work start correction, or lunch correction is larger, use lunch correction
-			if offsetCorrection == 0 || (lunchCorrection != 0 && int(math.Abs(float64(lunchCorrection))) > int(math.Abs(float64(offsetCorrection)))) {
-				offsetCorrection = lunchCorrection
-				correctionReason = "lunch_timing"
+			
+			// Only apply small corrections (max 2 hours)
+			if lunchCorrection != 0 && lunchCorrection >= -2 && lunchCorrection <= 2 {
+				// If we don't have a work start correction, or lunch correction is larger, use lunch correction
+				if offsetCorrection == 0 || (int(math.Abs(float64(lunchCorrection))) > int(math.Abs(float64(offsetCorrection)))) {
+					offsetCorrection = lunchCorrection
+					correctionReason = "lunch_timing"
+				}
 			}
 
 			d.logger.Debug("lunch timing suggests timezone correction", "username", username,
 				"lunch_start_local", lunchStart, "lunch_end_local", lunchEnd,
-				"expected_range", "11:30-12:30 start, 12:30-13:30 end", "suggested_correction", lunchCorrection)
+				"expected_range", "11:00-14:00", "suggested_correction", lunchCorrection)
 		}
 	}
 
-	// Check evening wind-down time (should be 5:00pm-7:00pm)
-	if float64(activeEnd) < 16.0 || float64(activeEnd) > 19.0 {
-		expectedWorkEnd := 17.0 // 5:00pm average
+	// Check evening wind-down time (be more flexible - some work late)
+	// Only correct if work ends very early (before 3pm) or very late (after 10pm)
+	if float64(activeEnd) < 15.0 || float64(activeEnd) > 22.0 {
+		expectedWorkEnd := 17.5 // 5:30pm average
 		endCorrection := int(expectedWorkEnd - float64(activeEnd))
-		if endCorrection != 0 && endCorrection >= -8 && endCorrection <= 8 {
+		// Only apply small corrections (max 2 hours)
+		if endCorrection != 0 && endCorrection >= -2 && endCorrection <= 2 {
 			// If we don't have other corrections, or this correction is more significant, use it
 			if offsetCorrection == 0 || (int(math.Abs(float64(endCorrection))) > int(math.Abs(float64(offsetCorrection)))) {
 				offsetCorrection = endCorrection
 				correctionReason = "work_end"
 				d.logger.Debug("work end timing suggests timezone correction", "username", username,
-					"work_end_local", activeEnd, "expected_range", "16:00-19:00",
+					"work_end_local", activeEnd, "expected_range", "15:00-22:00",
 					"suggested_correction", endCorrection)
 			}
 		}
 	}
 
-	// Apply timezone correction if we found one
-	if offsetCorrection != 0 && offsetCorrection >= -8 && offsetCorrection <= 8 {
+	// Apply timezone correction if we found one (limited to 2 hours)
+	if offsetCorrection != 0 && offsetCorrection >= -2 && offsetCorrection <= 2 {
 		correctedOffset := offsetInt + offsetCorrection
 		d.logger.Debug("correcting timezone based on work schedule", "username", username,
 			"original_offset", offsetInt, "correction", offsetCorrection,
@@ -285,6 +418,7 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 		},
 		Confidence: 0.8,
 		Method:     "activity_patterns",
+		HourlyActivityUTC: hourCounts, // Store for histogram generation
 	}
 
 	// Always add lunch hours (they're always detected now)
@@ -303,7 +437,8 @@ func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Re
 	return result
 }
 
-func (d *Detector) fetchAllActivity(ctx context.Context, username string) *ActivityData {
+// fetchSupplementalActivity fetches additional activity data when events are insufficient
+func (d *Detector) fetchSupplementalActivity(ctx context.Context, username string) *ActivityData {
 	type result struct {
 		prs      []PullRequest
 		issues   []Issue
@@ -364,3 +499,4 @@ func (d *Detector) fetchAllActivity(ctx context.Context, username string) *Activ
 		return &ActivityData{}
 	}
 }
+
