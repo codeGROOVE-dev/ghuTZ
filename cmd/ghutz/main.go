@@ -155,7 +155,7 @@ func printResult(result *ghutz.Result) {
 	}
 
 	if locationStr != "" {
-		fmt.Printf("📍 Location: %s\n", locationStr)
+		fmt.Printf("📍 Location:      %s\n", locationStr)
 	}
 
 	// Timezone with GMT offset and current local time
@@ -174,10 +174,10 @@ func printResult(result *ghutz.Result) {
 			gmtOffset = fmt.Sprintf("GMT%d", offsetHours)
 		}
 		currentLocal = now.Format("15:04")
-		fmt.Printf("🕐 Timezone: %s (%s, now %s)", tzName, gmtOffset, currentLocal)
+		fmt.Printf("🕐 Timezone:      %s (%s, now %s)", tzName, gmtOffset, currentLocal)
 	} else {
 		// Fallback for UTC+/- format
-		fmt.Printf("🕐 Timezone: %s", result.Timezone)
+		fmt.Printf("🕐 Timezone:      %s", result.Timezone)
 	}
 
 	if result.ActivityTimezone != "" && result.ActivityTimezone != result.Timezone {
@@ -194,12 +194,32 @@ func printResult(result *ghutz.Result) {
 				activityTz = "GMT" + offset
 			}
 		}
-		fmt.Printf("\n   └─ activity suggests %s", activityTz)
+		fmt.Printf("\n                  └─ activity suggests %s", activityTz)
 	}
 	fmt.Println()
 
 	// Work schedule with relative time indicators
 	if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
+		// Convert active hours from UTC to final detected timezone for display
+		// Despite the field name "Local", these are stored as UTC values
+		finalOffset := 0
+		if strings.HasPrefix(result.Timezone, "UTC") {
+			offsetStr := strings.TrimPrefix(result.Timezone, "UTC")
+			if offsetStr == "" {
+				finalOffset = 0
+			} else if offset, err := strconv.Atoi(offsetStr); err == nil {
+				finalOffset = offset
+			}
+		} else if loc, err := time.LoadLocation(result.Timezone); err == nil {
+			now := time.Now().In(loc)
+			_, offset := now.Zone()
+			finalOffset = offset / 3600
+		}
+
+		// Convert UTC to local time
+		activeStartLocal := math.Mod(result.ActiveHoursLocal.Start+float64(finalOffset)+24, 24)
+		activeEndLocal := math.Mod(result.ActiveHoursLocal.End+float64(finalOffset)+24, 24)
+
 		workStartRelative := ""
 		workEndRelative := ""
 
@@ -208,8 +228,8 @@ func printResult(result *ghutz.Result) {
 			now := time.Now().In(loc)
 			currentTime := float64(now.Hour()) + float64(now.Minute())/60.0
 
-			// Calculate relative time to work start
-			hoursToStart := result.ActiveHoursLocal.Start - currentTime
+			// Calculate relative time to work start (using converted local times)
+			hoursToStart := activeStartLocal - currentTime
 			if hoursToStart < 0 {
 				hoursToStart += 24 // Handle next day
 			}
@@ -218,9 +238,9 @@ func printResult(result *ghutz.Result) {
 				hoursToStart = hoursToStart - 24
 			}
 
-			// Calculate relative time to work end
-			hoursToEnd := result.ActiveHoursLocal.End - currentTime
-			if hoursToEnd < 0 && result.ActiveHoursLocal.End > result.ActiveHoursLocal.Start {
+			// Calculate relative time to work end (using converted local times)
+			hoursToEnd := activeEndLocal - currentTime
+			if hoursToEnd < 0 && activeEndLocal > activeStartLocal {
 				hoursToEnd += 24 // Handle next day
 			}
 			if hoursToEnd > 12 {
@@ -233,9 +253,9 @@ func printResult(result *ghutz.Result) {
 			workEndRelative = formatRelativeTime(hoursToEnd)
 		}
 
-		fmt.Printf("🏃 Active Time: %s → %s",
-			formatHour(result.ActiveHoursLocal.Start),
-			formatHour(result.ActiveHoursLocal.End))
+		fmt.Printf("🏃 Active Time:   %s → %s",
+			formatHour(activeStartLocal),
+			formatHour(activeEndLocal))
 
 		if workStartRelative != "" && workEndRelative != "" {
 			fmt.Printf(" (%s → %s)", workStartRelative, workEndRelative)
@@ -260,7 +280,7 @@ func printResult(result *ghutz.Result) {
 			lunchStart := math.Mod(result.LunchHoursLocal.Start+float64(finalOffset)+24, 24)
 			lunchEnd := math.Mod(result.LunchHoursLocal.End+float64(finalOffset)+24, 24)
 
-			fmt.Printf("\n🍽️  Lunch Break: %s → %s",
+			fmt.Printf("\n🍽️  Lunch Break:   %s → %s",
 				formatHour(lunchStart),
 				formatHour(lunchEnd))
 			if result.LunchHoursLocal.Confidence < 0.7 {
@@ -364,7 +384,7 @@ func printResult(result *ghutz.Result) {
 						formatHour(float64(r.start)),
 						formatHour(float64(r.end))))
 				}
-				fmt.Printf("\n💤 Quiet Time: %s", strings.Join(rangeStrings, ", "))
+				fmt.Printf("\n💤 Quiet Time:    %s", strings.Join(rangeStrings, ", "))
 			}
 		}
 
@@ -397,28 +417,12 @@ func printResult(result *ghutz.Result) {
 			orgsStr.WriteString(fmt.Sprintf("%s (%s%d\033[0m)", org.Name, color, org.Count))
 		}
 
-		// Format with proper wrapping
-		label := "🏢 Organizations:"
-		content := orgsStr.String()
-
-		// Check if it fits on one line
-		if len(stripANSI(content)) <= 55 {
-			fmt.Printf("%s %s\n", label, content)
-		} else {
-			// Split organizations for multi-line display
-			fmt.Printf("%s\n", label)
-
-			// Wrap organizations with proper indentation
-			const indent = "                 " // 17 spaces to align with other content
-			lines := wrapOrganizationsWithCounts(result.TopOrganizations, colors, grey, 55)
-			for _, line := range lines {
-				fmt.Printf("%s%s\n", indent, line)
-			}
-		}
+		// Always display organizations on a single line
+		fmt.Printf("🏢 Orgs:          %s\n", orgsStr.String())
 	}
 
 	// Detection method as a subtle footer
-	fmt.Printf("✨ Detection: %s (%.0f%% confidence)\n",
+	fmt.Printf("✨ Detection:     %s (%.0f%% confidence)\n",
 		formatMethodName(result.Method),
 		result.Confidence*100)
 	fmt.Println()

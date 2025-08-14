@@ -429,6 +429,20 @@ func TestActivityDetectionWithFixedData(t *testing.T) {
 			expectedTZ:     []string{"UTC-5", "UTC-4"},
 			description:    "Durham, NC developer - clear Eastern Time pattern",
 		},
+		{
+			name: "kevinmdavis_nashville_central_time",
+			// Kevin Davis actual observed UTC activity data: [0 0 0 0 0 0 0 0 0 0 0 0 0 0 7 7 0 15 4 10 11 18 3 2]
+			// Lives in Nashville (Central Time UTC-6)
+			// Gap at UTC 16 = 10 AM Central (reasonable early lunch time)
+			hourlyActivity: []int{
+				0, 0, 0, 0, 0, 0, 0, 0, // 0-7 UTC
+				0, 0, 0, 0, 0, 0, 7, 7, // 8-15 UTC  
+				0, 15, 4, 10, 11, 18, 3, 2, // 16-23 UTC
+			},
+			expectedOffset: []int{-6}, // Central Time (CST/CDT) 
+			expectedTZ:     []string{"UTC-6"},
+			description:    "Nashville developer - Kevin Davis actual data",
+		},
 	}
 
 	for _, tt := range tests {

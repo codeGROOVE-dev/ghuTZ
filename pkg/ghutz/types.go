@@ -91,21 +91,25 @@ type Result struct {
 		TotalDays           int       `json:"total_days,omitempty"`            // Days covered by activity data
 		SpansDSTTransitions bool      `json:"spans_dst_transitions,omitempty"` // Whether data spans DST transitions
 	} `json:"activity_date_range,omitempty"`
-	QuietHoursUTC           []int     `json:"quiet_hours_utc,omitempty"` // Hours when user is typically inactive
+	QuietHoursUTC           []int     `json:"quiet_hours_utc,omitempty"` // Hours when user is typically inactive (UTC)
+	
+	// IMPORTANT: All time fields below store UTC values despite their names
+	// The "Local" suffix is kept for backward compatibility but is misleading
+	// Frontend must convert these UTC values to local timezone for display
 	ActiveHoursLocal        struct {
-		Start float64 `json:"start"` // Expected start time in local time (supports 30-min increments)
-		End   float64 `json:"end"`   // Expected end time in local time (supports 30-min increments)
-	} `json:"active_hours_local,omitempty"`
+		Start float64 `json:"start"` // Work start time in UTC (supports 30-min increments)
+		End   float64 `json:"end"`   // Work end time in UTC (supports 30-min increments)
+	} `json:"active_hours_local,omitempty"` // WARNING: Contains UTC times, not local!
 	LunchHoursLocal struct {
-		Start      float64 `json:"start"`      // Detected lunch break start time (supports 30-min increments)
-		End        float64 `json:"end"`        // Detected lunch break end time (supports 30-min increments)
+		Start      float64 `json:"start"`      // Lunch start time in UTC (supports 30-min increments)
+		End        float64 `json:"end"`        // Lunch end time in UTC (supports 30-min increments)
 		Confidence float64 `json:"confidence"` // Confidence level of lunch detection (0.0-1.0)
-	} `json:"lunch_hours_local,omitempty"`
+	} `json:"lunch_hours_local,omitempty"` // WARNING: Contains UTC times, not local!
 	PeakProductivity struct {
-		Start float64 `json:"start"` // Peak productivity window start (30-min resolution)
-		End   float64 `json:"end"`   // Peak productivity window end (30-min resolution)
+		Start float64 `json:"start"` // Peak productivity start in UTC (30-min resolution)
+		End   float64 `json:"end"`   // Peak productivity end in UTC (30-min resolution)
 		Count int     `json:"count"` // Activity count in this window
-	} `json:"peak_productivity"`
+	} `json:"peak_productivity"` // Stored in UTC
 	TopOrganizations []struct {
 		Name  string `json:"name"`  // Organization name
 		Count int    `json:"count"` // Activity count

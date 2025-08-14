@@ -557,6 +557,57 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 					"selected_timezone", bestTimezone, "evening_activity", bestActivity, "offset", bestOffset,
 					"eastern_evening", eveningActivityEastern, "central_evening", eveningActivityCentral,
 					"mountain_evening", eveningActivityMountain, "pacific_evening", eveningActivityPacific)
+
+				// Validate timezone choice with lunch timing
+				// If lunch timing is unreasonable, consider adjacent timezones with similar evening activity
+				testLunchStart, _, testLunchConfidence := detectLunchBreak(hourCounts, int(bestOffset), 7, 17)
+				lunchReasonable := testLunchStart >= 11.0 && testLunchStart <= 14.0 && testLunchConfidence >= 0.5
+
+				if !lunchReasonable && testLunchConfidence >= 0.3 {
+					d.logger.Debug("lunch timing validation failed for selected timezone", "username", username,
+						"lunch_start", testLunchStart, "lunch_confidence", testLunchConfidence,
+						"selected_timezone", bestTimezone, "selected_offset", bestOffset)
+
+					// Try adjacent timezones if their evening activity is reasonably close (within 50% of best)
+					minReasonableActivity := float64(bestActivity) * 0.5
+
+					// Check if Central Time would give better lunch timing
+					// For users with low evening activity, prioritize Central Time if it's reasonably close
+					centralLunchStart, _, centralLunchConfidence := detectLunchBreak(hourCounts, -6, 7, 17)
+					centralLunchReasonable := centralLunchStart >= 10.5 && centralLunchStart <= 14.0 && centralLunchConfidence >= 0.5
+
+					d.logger.Debug("evaluating Central Time for lunch timing", "username", username,
+						"central_lunch_start", centralLunchStart, "central_lunch_confidence", centralLunchConfidence,
+						"central_evening", eveningActivityCentral, "min_reasonable", int(minReasonableActivity))
+
+					// If Central has reasonable lunch timing and evening activity isn't terrible, prefer it
+					// This is especially important for users without strong evening OSS activity
+					if centralLunchReasonable && eveningActivityCentral >= int(minReasonableActivity) {
+						d.logger.Info("switching to Central Time due to better lunch timing", "username", username,
+							"original_timezone", bestTimezone, "new_timezone", "central",
+							"original_lunch", testLunchStart, "central_lunch", centralLunchStart,
+							"central_evening", eveningActivityCentral, "original_evening", bestActivity)
+						bestTimezone = "central"
+						bestOffset = -6.0
+						offsetFromUTC = bestOffset
+					}
+
+					// Check if Eastern Time would give better lunch timing
+					if eveningActivityEastern >= int(minReasonableActivity) {
+						easternLunchStart, _, easternLunchConfidence := detectLunchBreak(hourCounts, -5, 7, 17)
+						easternLunchReasonable := easternLunchStart >= 11.0 && easternLunchStart <= 14.0 && easternLunchConfidence >= 0.5
+
+						if easternLunchReasonable && bestTimezone != "central" { // Don't override Central if we already chose it
+							d.logger.Info("switching to Eastern Time due to better lunch timing", "username", username,
+								"original_timezone", bestTimezone, "new_timezone", "eastern",
+								"original_lunch", testLunchStart, "eastern_lunch", easternLunchStart,
+								"eastern_evening", eveningActivityEastern, "original_evening", bestActivity)
+							bestTimezone = "eastern"
+							bestOffset = -5.0
+							offsetFromUTC = bestOffset
+						}
+					}
+				}
 			}
 		} else {
 			// Clear sleep pattern, use original logic
@@ -776,9 +827,9 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			// If lunch is at 2pm, shifting 2 hours earlier would make it noon (normal)
 			// If lunch is at 3pm, shifting 3 hours earlier would make it noon
 			if lunchStartLocal >= 14.0 && lunchStartLocal < 15.0 {
-				suggestedOffsetCorrection = -2 // Shift 2 hours west
+				suggestedOffsetCorrection = +2 // Shift 2 hours east (less negative offset)
 			} else if lunchStartLocal >= 15.0 && lunchStartLocal < 16.0 {
-				suggestedOffsetCorrection = -3 // Shift 3 hours west
+				suggestedOffsetCorrection = +3 // Shift 3 hours east (less negative offset)
 			}
 
 			// Apply correction if it results in a valid US timezone
@@ -874,6 +925,11 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			"new_work_start", activeStart, "new_work_end", activeEnd, "new_offset", offsetInt)
 	}
 
+	// Convert active hours from local to UTC for consistent storage
+	// All time fields should be stored in UTC and converted to local only for display
+	activeStartUTC := math.Mod(float64(activeStart)-float64(offsetInt)+24, 24)
+	activeEndUTC := math.Mod(float64(activeEnd)-float64(offsetInt)+24, 24)
+	
 	result := &Result{
 		Username:         username,
 		Timezone:         timezone,
@@ -883,8 +939,8 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			Start float64 `json:"start"`
 			End   float64 `json:"end"`
 		}{
-			Start: float64(activeStart),
-			End:   float64(activeEnd),
+			Start: activeStartUTC,  // NOTE: Despite field name "Local", storing UTC for consistency
+			End:   activeEndUTC,    // Frontend converts to local for display
 		},
 		TopOrganizations:           topOrgs,
 		Confidence:                 confidence,

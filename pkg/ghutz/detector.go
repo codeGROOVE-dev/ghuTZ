@@ -600,6 +600,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 		d.logger.Debug("extracted social URLs from HTML", "username", username, "urls", htmlSocialURLs)
 		
 		// For Mastodon URLs, try to fetch the profile and extract website
+		// For Twitter/X URLs, try to fetch the profile and extract location/bio data
 		for _, url := range htmlSocialURLs {
 			if strings.Contains(url, "/@") || strings.Contains(url, "mastodon") || strings.Contains(url, ".exchange") || strings.Contains(url, ".social") {
 				website := fetchMastodonWebsite(url, d.logger)
@@ -616,6 +617,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	ccTLDs := extractCountryTLDs(socialURLs...)
 	d.logger.Debug("extracted ccTLDs", "username", username, "count", len(ccTLDs), "tlds", ccTLDs)
 
+	// Initialize context data for Gemini analysis
 	contextData := map[string]interface{}{
 		"github_user_json":       user,
 		"pull_requests":          prSummary,
@@ -627,6 +629,23 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 		"longest_pr_issue_body":  longestBody,
 		"longest_pr_issue_title": longestTitle,
 		"issue_count":            issueCount,
+	}
+
+	// Track Twitter/X URLs to inform Gemini they exist
+	twitterURLs := []string{}
+	if profileHTML != "" {
+		htmlSocialURLs := extractSocialMediaFromHTML(profileHTML)
+		for _, url := range htmlSocialURLs {
+			if strings.Contains(url, "twitter.com") || strings.Contains(url, "x.com") {
+				twitterURLs = append(twitterURLs, url)
+				d.logger.Debug("found Twitter/X profile URL", "url", url)
+			}
+		}
+	}
+	
+	// Add Twitter URLs to context for Gemini
+	if len(twitterURLs) > 0 {
+		contextData["twitter_urls"] = twitterURLs
 	}
 
 	var method string

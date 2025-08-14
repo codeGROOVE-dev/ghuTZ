@@ -82,6 +82,7 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 	// Build the histogram with redesigned layout
 	for localHour := 0; localHour < 24; localHour++ {
 		// Convert local hour to UTC
+		// For UTC-6: 10:00 AM local becomes UTC 16:00 (10 - (-6) = 16)
 		utcHour := localHour - utcOffset
 		if utcHour < 0 {
 			utcHour += 24
@@ -98,6 +99,8 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 
 		// Check if it's a quiet/sleep hour
 		for _, qh := range result.QuietHoursUTC {
+			// Convert UTC quiet hour to local time
+			// For UTC-6: UTC hour 2 becomes local hour 20 (2 + (-6) = -4 + 24 = 20)
 			localQuietHour := qh + utcOffset
 			if localQuietHour < 0 {
 				localQuietHour += 24

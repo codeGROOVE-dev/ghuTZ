@@ -115,28 +115,39 @@ function displayResults(data) {
         document.getElementById('activityRow').style.display = 'block';
     }
 
+    // Get UTC offset for timezone conversion
+    const utcOffset = getUTCOffsetFromTimezone(data.timezone, data.activity_timezone);
+    
     if (data.active_hours_local && (data.active_hours_local.start || data.active_hours_local.end)) {
-        const activeHoursText = formatActiveHours(data.active_hours_local.start, data.active_hours_local.end);
+        // Note: Despite the field name "local", these are actually UTC values that need conversion
+        const localStart = (data.active_hours_local.start + utcOffset + 24) % 24;
+        const localEnd = (data.active_hours_local.end + utcOffset + 24) % 24;
+        const activeHoursText = formatActiveHours(localStart, localEnd);
         document.getElementById('activeHours').textContent = activeHoursText;
         document.getElementById('hoursRow').style.display = 'block';
     }
 
     if (data.lunch_hours_local && data.lunch_hours_local.confidence > 0) {
-        const lunchText = formatLunchHours(data.lunch_hours_local.start, data.lunch_hours_local.end);
+        // Note: Despite the field name "local", these are actually UTC values that need conversion
+        const localLunchStart = (data.lunch_hours_local.start + utcOffset + 24) % 24;
+        const localLunchEnd = (data.lunch_hours_local.end + utcOffset + 24) % 24;
+        const lunchText = formatLunchHours(localLunchStart, localLunchEnd);
         const confidenceText = Math.round(data.lunch_hours_local.confidence * 100) + '% confidence';
         document.getElementById('lunchHours').textContent = lunchText + ' (' + confidenceText + ')';
         document.getElementById('lunchRow').style.display = 'block';
     }
 
     if (data.peak_productivity && data.peak_productivity.count > 0) {
-        const peakText = formatHour(data.peak_productivity.start) + '-' + formatHour(data.peak_productivity.end);
+        // Peak productivity is also in UTC and needs conversion
+        const localPeakStart = (data.peak_productivity.start + utcOffset + 24) % 24;
+        const localPeakEnd = (data.peak_productivity.end + utcOffset + 24) % 24;
+        const peakText = formatHour(localPeakStart) + '-' + formatHour(localPeakEnd);
         document.getElementById('peakHours').textContent = peakText;
         document.getElementById('peakRow').style.display = 'block';
     }
 
     if (data.quiet_hours_utc && data.quiet_hours_utc.length > 0) {
-        // Convert UTC quiet hours to local based on timezone
-        const utcOffset = getUTCOffsetFromTimezone(data.timezone, data.activity_timezone);
+        // Convert UTC quiet hours to local based on timezone (utcOffset already calculated above)
         const quietStart = (data.quiet_hours_utc[0] + utcOffset + 24) % 24;
         const quietEnd = ((data.quiet_hours_utc[data.quiet_hours_utc.length - 1] + 1 + utcOffset) + 24) % 24;
         document.getElementById('quietHours').textContent = formatHour(quietStart) + '-' + formatHour(quietEnd);

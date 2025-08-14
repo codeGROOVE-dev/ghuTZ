@@ -272,8 +272,8 @@ func detectLunchBreak(hourCounts map[int]int, utcOffset int, workStart, workEnd 
 
 		// Check if this hour has zero activity (potential lunch hour)
 		if hourCounts[utcHour] == 0 {
-			// Check if it's in typical lunch time range (11am-2pm)
-			if localHour >= 11 && localHour <= 14 {
+			// Check if it's in typical lunch time range (10am-2pm) - expanded to include early lunch
+			if localHour >= 10 && localHour <= 14 {
 				// Found a clear lunch gap!
 				// Check if the next hour is also empty (1-hour lunch)
 				nextUTCHour := (utcHour + 1) % 24
@@ -677,6 +677,17 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 				evidence.WriteString(fmt.Sprintf("• Created: %s\n", createdAt))
 			}
 		}
+		evidence.WriteString("\n")
+	}
+
+	// SOCIAL MEDIA PROFILES SECTION
+	if twitterURLs, ok := contextData["twitter_urls"].([]string); ok && len(twitterURLs) > 0 {
+		evidence.WriteString("## SOCIAL MEDIA PROFILES\n")
+		evidence.WriteString("Twitter/X profiles that may contain location information:\n")
+		for _, url := range twitterURLs {
+			evidence.WriteString(fmt.Sprintf("• %s\n", url))
+		}
+		evidence.WriteString("Note: Check these profiles manually for location data in bio or profile fields\n")
 		evidence.WriteString("\n")
 	}
 
@@ -1170,6 +1181,7 @@ func fetchMastodonWebsite(mastodonURL string, logger *slog.Logger) string {
 	return ""
 }
 
+
 // isPolishName checks if a name appears to be Polish based on common patterns
 func isPolishName(name string) bool {
 	if name == "" {
@@ -1239,6 +1251,16 @@ func extractSocialMediaFromHTML(html string) []string {
 	altRelMeRegex := regexp.MustCompile(`href="([^"]+)"[^>]*rel="[^"]*\bme\b[^"]*"`)
 	altRelMeMatches := altRelMeRegex.FindAllStringSubmatch(html, -1)
 	for _, match := range altRelMeMatches {
+		if len(match) > 1 {
+			urls = append(urls, match[1])
+		}
+	}
+
+	// Extract Twitter/X links
+	// Look for patterns like: href="https://twitter.com/username" or href="https://x.com/username"
+	twitterRegex := regexp.MustCompile(`href="(https?://(?:twitter\.com|x\.com)/[^"/?]+)"`)
+	twitterMatches := twitterRegex.FindAllStringSubmatch(html, -1)
+	for _, match := range twitterMatches {
 		if len(match) > 1 {
 			urls = append(urls, match[1])
 		}
