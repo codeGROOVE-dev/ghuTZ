@@ -42,8 +42,8 @@ func NewOtterCache(dir string, ttl time.Duration, logger *slog.Logger) (*OtterCa
 
 	// Create otter cache with 100k capacity using v2 API
 	cache := otter.Must(&otter.Options[string, CacheEntry]{
-		MaximumSize:     100_000,
-		InitialCapacity: 10_000,
+		MaximumSize:      100_000,
+		InitialCapacity:  10_000,
 		ExpiryCalculator: otter.ExpiryWriting[string, CacheEntry](ttl),
 	})
 
@@ -72,7 +72,7 @@ func (c *OtterCache) Get(url string) ([]byte, string, bool) {
 	h := sha256.New()
 	h.Write([]byte(url))
 	key := hex.EncodeToString(h.Sum(nil))
-	
+
 	entry, found := c.cache.GetIfPresent(key)
 	if !found {
 		c.logger.Debug("CACHE MISS - not found", "url", url)
@@ -94,7 +94,7 @@ func (c *OtterCache) Set(url string, data []byte, etag string) error {
 	h := sha256.New()
 	h.Write([]byte(url))
 	key := hex.EncodeToString(h.Sum(nil))
-	
+
 	entry := CacheEntry{
 		Data:      data,
 		ExpiresAt: time.Now().Add(c.ttl),
@@ -112,7 +112,7 @@ func (c *OtterCache) SetAPICall(url string, requestBody []byte, data []byte) err
 	h.Write([]byte(url))
 	h.Write(requestBody)
 	key := hex.EncodeToString(h.Sum(nil))
-	
+
 	entry := CacheEntry{
 		Data:      data,
 		ExpiresAt: time.Now().Add(c.ttl),
@@ -124,13 +124,13 @@ func (c *OtterCache) SetAPICall(url string, requestBody []byte, data []byte) err
 	return nil
 }
 
-func (c *OtterCache) GetAPICall(url string, requestBody []byte) ([]byte, bool) {
+func (c *OtterCache) APICall(url string, requestBody []byte) ([]byte, bool) {
 	// Generate cache key from URL and request body
 	h := sha256.New()
 	h.Write([]byte(url))
 	h.Write(requestBody)
 	key := hex.EncodeToString(h.Sum(nil))
-	
+
 	entry, found := c.cache.GetIfPresent(key)
 	if !found {
 		c.logger.Debug("API CACHE MISS - not found", "url", url)
@@ -149,7 +149,7 @@ func (c *OtterCache) GetAPICall(url string, requestBody []byte) ([]byte, bool) {
 
 func (c *OtterCache) loadFromDisk() error {
 	cachePath := filepath.Join(c.dir, "otter-cache.gob")
-	
+
 	file, err := os.Open(cachePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -161,7 +161,7 @@ func (c *OtterCache) loadFromDisk() error {
 	defer file.Close()
 
 	decoder := gob.NewDecoder(file)
-	
+
 	var entries map[string]CacheEntry
 	if err := decoder.Decode(&entries); err != nil {
 		return fmt.Errorf("decoding cache file: %w", err)
@@ -177,9 +177,9 @@ func (c *OtterCache) loadFromDisk() error {
 		}
 	}
 
-	c.logger.Info("successfully loaded cache from disk", 
+	c.logger.Info("successfully loaded cache from disk",
 		"path", cachePath,
-		"total_entries", len(entries), 
+		"total_entries", len(entries),
 		"valid_entries", validEntries,
 		"expired_entries", len(entries)-validEntries)
 
@@ -191,7 +191,7 @@ func (c *OtterCache) saveToDisk() error {
 	defer c.mu.Unlock()
 
 	cachePath := filepath.Join(c.dir, "otter-cache.gob")
-	
+
 	// Create temporary file
 	tempPath := cachePath + ".tmp"
 	file, err := os.Create(tempPath)
@@ -206,7 +206,7 @@ func (c *OtterCache) saveToDisk() error {
 	// Collect all cache entries
 	entries := make(map[string]CacheEntry)
 	now := time.Now()
-	
+
 	// Use iterator to iterate over all entries in otter v2
 	c.cache.All()(func(key string, entry CacheEntry) bool {
 		// Only save non-expired entries
@@ -246,7 +246,7 @@ func (c *OtterCache) startPeriodicSave() {
 	c.saveWg.Add(1)
 	go func() {
 		defer c.saveWg.Done()
-		
+
 		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
 
@@ -277,7 +277,7 @@ func (c *OtterCache) Close() error {
 	}
 
 	// Otter v2 doesn't require explicit closing
-	
+
 	c.logger.Info("cache closed and saved to disk")
 	return nil
 }
@@ -303,14 +303,14 @@ func (d *Detector) cachedHTTPDo(ctx context.Context, req *http.Request) (*http.R
 	if req.Method != "GET" {
 		return d.retryableHTTPDo(ctx, req)
 	}
-	
+
 	// If cache is not available, fall back to non-cached request
 	if d.cache == nil {
 		return d.retryableHTTPDo(ctx, req)
 	}
-	
+
 	url := req.URL.String()
-	
+
 	// Check cache
 	cachedData, etag, found := d.cache.Get(url)
 	if found {
@@ -327,13 +327,13 @@ func (d *Detector) cachedHTTPDo(ctx context.Context, req *http.Request) (*http.R
 		}
 		return resp, nil
 	}
-	
+
 	// Make the actual request
 	resp, err := d.retryableHTTPDo(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Only cache successful responses
 	if resp.StatusCode == http.StatusOK {
 		// Read the response body
@@ -344,16 +344,16 @@ func (d *Detector) cachedHTTPDo(ctx context.Context, req *http.Request) (*http.R
 		if err != nil {
 			return nil, err
 		}
-		
+
 		// Cache the response
 		etag := resp.Header.Get("ETag")
 		if err := d.cache.Set(url, body, etag); err != nil {
 			d.logger.Debug("cache set failed", "url", url, "error", err)
 		}
-		
+
 		// Replace the response body with a new reader
 		resp.Body = io.NopCloser(bytes.NewReader(body))
 	}
-	
+
 	return resp, nil
 }

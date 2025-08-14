@@ -4,7 +4,12 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Developer Timezone Lookup</title>
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+        <link
+            rel="stylesheet"
+            href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+            integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+            crossorigin=""
+        />
         <style>
             * {
                 margin: 0;
@@ -13,7 +18,9 @@
             }
 
             body {
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica,
+                    Arial, sans-serif;
                 font-size: 14px;
                 line-height: 1.5;
                 color: #000;
@@ -165,7 +172,7 @@
                 margin-top: 10px;
                 position: relative;
             }
-            
+
             /* Ensure Leaflet controls display properly */
             .leaflet-container {
                 font-family: inherit;
@@ -198,72 +205,46 @@
             a:hover {
                 text-decoration: underline;
             }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         </style>
     </head>
     <body>
         <div class="header">
-            <img src="/static/logo.png" alt="ghuTZ" class="logo">
+            <img src="/static/logo.png" alt="ghuTZ" class="logo" />
             <h1>Developer Timezone Lookup</h1>
         </div>
-        
-        <p>Detect the location, timezone, and working hours of any GitHub user for better collaboration timing.</p>
+
+        <p>
+            Detect the location, timezone, and working hours of any GitHub user
+            for improved collaboration.
+        </p>
 
         <div class="form-section">
             <form id="detectForm">
-                <input type="text" id="username" placeholder="github username" value="{{.Username}}" autocomplete="off" required>
+                <input
+                    type="text"
+                    id="username"
+                    placeholder="github username"
+                    value="{{.Username}}"
+                    autocomplete="off"
+                    required
+                />
                 <button type="submit" id="submitBtn">Search</button>
             </form>
         </div>
 
         <div id="error" class="error"></div>
 
-        <div id="loading" class="loading">
-            Searching...
-        </div>
+        <div id="loading" class="loading">Searching...</div>
 
         <div id="result" class="results">
             <h2>Results</h2>
-            
+
             <div class="result-row">
                 <span class="result-label">Username:</span>
                 <span class="result-value" id="displayUsername">-</span>
             </div>
 
-            <div class="result-row" id="nameRow" style="display: none;">
+            <div class="result-row" id="nameRow" style="display: none">
                 <span class="result-label">Name:</span>
                 <span class="result-value" id="displayName">-</span>
             </div>
@@ -273,22 +254,22 @@
                 <span class="result-value" id="timezone">-</span>
             </div>
 
-            <div class="result-row" id="locationRow" style="display: none;">
+            <div class="result-row" id="locationRow" style="display: none">
                 <span class="result-label">Location:</span>
                 <span class="result-value" id="location">-</span>
             </div>
 
-            <div class="result-row" id="activityRow" style="display: none;">
+            <div class="result-row" id="activityRow" style="display: none">
                 <span class="result-label">Activity timezone:</span>
                 <span class="result-value" id="activityTz">-</span>
             </div>
 
-            <div class="result-row" id="hoursRow" style="display: none;">
+            <div class="result-row" id="hoursRow" style="display: none">
                 <span class="result-label">Active hours:</span>
                 <span class="result-value" id="activeHours">-</span>
             </div>
 
-            <div class="result-row" id="lunchRow" style="display: none;">
+            <div class="result-row" id="lunchRow" style="display: none">
                 <span class="result-label">Lunch hours:</span>
                 <span class="result-value" id="lunchHours">-</span>
             </div>
@@ -302,11 +283,15 @@
                 <span class="result-label">Confidence:</span>
                 <span class="result-value" id="confidenceText">-</span>
                 <span class="confidence-bar">
-                    <span class="confidence-fill" id="confidenceBar" style="width: 0%"></span>
+                    <span
+                        class="confidence-fill"
+                        id="confidenceBar"
+                        style="width: 0%"
+                    ></span>
                 </span>
             </div>
 
-            <div class="result-row" id="mapRow" style="display: none;">
+            <div class="result-row" id="mapRow" style="display: none">
                 <span class="result-label">Map:</span>
                 <div id="map"></div>
             </div>
@@ -315,10 +300,19 @@
         <div class="footer">
             <a href="https://github.com/codeGROOVE-dev/ghuTZ">GitHub</a>
             <a href="/api/v1/detect?username=octocat">API</a>
-            <span>made with 🪿 by <a href="https://codegroove.dev/" style="margin: 0;">codeGROOVE</a></span>
+            <span
+                >made with 🪿 by
+                <a href="https://codegroove.dev/" style="margin: 0"
+                    >codeGROOVE</a
+                ></span
+            >
         </div>
 
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+        <script
+            src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""
+        ></script>
         <script src="/static/app.js"></script>
     </body>
 </html>

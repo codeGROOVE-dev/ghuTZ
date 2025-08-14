@@ -9,13 +9,13 @@ import (
 	"time"
 )
 
-// TestEasternTimeDetection verifies that users in Eastern Time zones 
+// TestEasternTimeDetection verifies that users in Eastern Time zones
 // are correctly detected, especially during DST when they could be
 // confused with Central Time
 func TestEasternTimeDetection(t *testing.T) {
 	tests := []struct {
 		name           string
-		quietHours     []int // UTC hours when user is typically quiet
+		quietHours     []int  // UTC hours when user is typically quiet
 		expectedOffset int    // Expected UTC offset
 		expectedTZ     string // Expected timezone
 		description    string
@@ -44,22 +44,22 @@ func TestEasternTimeDetection(t *testing.T) {
 		{
 			name:           "Ambiguous Eastern/Central pattern",
 			quietHours:     []int{4, 5, 6, 7, 8, 9, 10}, // Could be either
-			expectedOffset: -4, // Should lean toward Eastern (more populous)
+			expectedOffset: -4,                          // Should lean toward Eastern (more populous)
 			expectedTZ:     "UTC-4",
 			description:    "Ambiguous patterns should prefer Eastern Time",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create hour counts map with quiet hours
 			hourCounts := make(map[int]int)
-			
+
 			// Set quiet hours (low activity)
 			for _, hour := range tt.quietHours {
 				hourCounts[hour] = 1
 			}
-			
+
 			// Set active hours (high activity) - opposite of quiet hours
 			for hour := 0; hour < 24; hour++ {
 				isQuiet := false
@@ -73,51 +73,51 @@ func TestEasternTimeDetection(t *testing.T) {
 					hourCounts[hour] = 10 // High activity during work hours
 				}
 			}
-			
+
 			// Find quiet hours using the function
 			detectedQuietHours := findQuietHours(hourCounts)
-			
+
 			// Log detected quiet hours for debugging
 			t.Logf("Detected quiet hours: %v (expected: %v)", detectedQuietHours, tt.quietHours)
-			
+
 			// Calculate midpoint
 			var sum float64
 			for _, hour := range detectedQuietHours {
 				sum += float64(hour)
 			}
 			midQuiet := sum / float64(len(detectedQuietHours))
-			
+
 			// For US timezones, if quiet hours are early in UTC (like 4-9),
 			// that means it's nighttime in the US (west of UTC)
 			// If midQuiet is 6.5 UTC and that's 2:30am local, then:
 			// 6.5 UTC = 2.5 local → offset = 2.5 - 6.5 = -4
-			
+
 			// Calculate offset: local_sleep_time = UTC_quiet_time + offset
 			// So: offset = local_sleep_time - UTC_quiet_time
 			// Assuming sleep midpoint is 2.5am local (middle of 0-5am)
 			assumedSleepMidpoint := 2.5
 			offsetFromUTC := assumedSleepMidpoint - midQuiet
-			
+
 			// Normalize to [-12, 12] range
 			if offsetFromUTC > 12 {
 				offsetFromUTC -= 24
 			} else if offsetFromUTC <= -12 {
 				offsetFromUTC += 24
 			}
-			
+
 			offsetInt := int(offsetFromUTC)
-			
+
 			// Check offset calculation
 			if offsetInt != tt.expectedOffset {
-				t.Errorf("%s: expected offset %d, got %d (midQuiet=%.1f)", 
+				t.Errorf("%s: expected offset %d, got %d (midQuiet=%.1f)",
 					tt.name, tt.expectedOffset, offsetInt, midQuiet)
 			}
-			
+
 			// Check timezone mapping
 			tz := timezoneFromOffset(offsetInt)
 			t.Logf("Offset %d maps to timezone %s", offsetInt, tz)
 			if tz != tt.expectedTZ {
-				t.Errorf("%s: expected timezone %s, got %s (offset=%d)", 
+				t.Errorf("%s: expected timezone %s, got %s (offset=%d)",
 					tt.name, tt.expectedTZ, tz, offsetInt)
 			}
 		})
@@ -131,7 +131,7 @@ func TestActivityPatternAnalysis(t *testing.T) {
 	if os.Getenv("GEMINI_API_KEY") == "" {
 		t.Skip("Skipping integration test: GEMINI_API_KEY not set")
 	}
-	
+
 	detector := NewWithLogger(
 		slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 			Level: slog.LevelDebug,
@@ -139,10 +139,10 @@ func TestActivityPatternAnalysis(t *testing.T) {
 		WithGeminiAPIKey(os.Getenv("GEMINI_API_KEY")),
 		WithMapsAPIKey(os.Getenv("GOOGLE_MAPS_API_KEY")),
 	)
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	
+
 	tests := []struct {
 		username     string
 		expectedCity string
@@ -154,19 +154,24 @@ func TestActivityPatternAnalysis(t *testing.T) {
 			expectedTZ:   []string{"America/New_York"},
 		},
 		{
-			username:     "andrewsykim", 
+			username:     "andrewsykim",
 			expectedCity: "Toronto",
 			expectedTZ:   []string{"UTC-4"}, // Eastern Time during DST
 		},
+		{
+			username:     "a-crate",
+			expectedCity: "Seattle",
+			expectedTZ:   []string{"UTC-8", "UTC-7", "America/Los_Angeles"}, // Pacific Time (DST varies)
+		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.username, func(t *testing.T) {
 			result, err := detector.Detect(ctx, tt.username)
 			if err != nil {
 				t.Fatalf("Detection failed for %s: %v", tt.username, err)
 			}
-			
+
 			// Check timezone
 			found := false
 			for _, tz := range tt.expectedTZ {
@@ -176,13 +181,13 @@ func TestActivityPatternAnalysis(t *testing.T) {
 				}
 			}
 			if !found {
-				t.Errorf("%s: expected timezone to be one of %v, got %s", 
+				t.Errorf("%s: expected timezone to be one of %v, got %s",
 					tt.username, tt.expectedTZ, result.Timezone)
 			}
-			
+
 			// Log the result for debugging
 			t.Logf("%s detected as: TZ=%s, Location=%s, Method=%s, Confidence=%.2f",
-				tt.username, result.Timezone, result.GeminiSuggestedLocation, 
+				tt.username, result.Timezone, result.GeminiSuggestedLocation,
 				result.Method, result.Confidence)
 		})
 	}
@@ -206,12 +211,12 @@ func TestWorkScheduleCorrection(t *testing.T) {
 		{
 			name:             "amacaskill Seattle case",
 			username:         "amacaskill",
-			initialOffset:    -6, // Initial detection: UTC-6 (Mountain)
-			workStart:        10, // 10am start (late)
-			workEnd:          17, // 5pm end
-			lunchStart:       13.0, // 1pm lunch (late)
-			lunchEnd:         14.0, // 2pm
-			expectedOffset:   -7,   // Corrected to UTC-7 (Pacific)
+			initialOffset:    -6,      // Initial detection: UTC-6 (Mountain)
+			workStart:        10,      // 10am start (late)
+			workEnd:          17,      // 5pm end
+			lunchStart:       13.0,    // 1pm lunch (late)
+			lunchEnd:         14.0,    // 2pm
+			expectedOffset:   -7,      // Corrected to UTC-7 (Pacific)
 			expectedTZ:       "UTC-7", // Pacific Time
 			correctionReason: "work_start",
 			description:      "Late work start (10am) and late lunch (1pm) suggests timezone is 1 hour off",
@@ -219,12 +224,12 @@ func TestWorkScheduleCorrection(t *testing.T) {
 		{
 			name:             "Normal work schedule no correction",
 			username:         "normaluser",
-			initialOffset:    -5, // Initial detection: UTC-5 (Central)
-			workStart:        9,  // 9am start (normal)
-			workEnd:          17, // 5pm end
-			lunchStart:       12.0, // 12pm lunch (normal)
-			lunchEnd:         13.0, // 1pm
-			expectedOffset:   -5,   // No correction needed
+			initialOffset:    -5,      // Initial detection: UTC-5 (Central)
+			workStart:        9,       // 9am start (normal)
+			workEnd:          17,      // 5pm end
+			lunchStart:       12.0,    // 12pm lunch (normal)
+			lunchEnd:         13.0,    // 1pm
+			expectedOffset:   -5,      // No correction needed
 			expectedTZ:       "UTC-5", // Central Time
 			correctionReason: "",
 			description:      "Normal work schedule should not trigger correction",
@@ -232,12 +237,12 @@ func TestWorkScheduleCorrection(t *testing.T) {
 		{
 			name:             "Early work schedule correction",
 			username:         "earlyuser",
-			initialOffset:    -5, // Initial detection: UTC-5 (Central)
-			workStart:        7,  // 7am start (too early)
-			workEnd:          15, // 3pm end
-			lunchStart:       11.0, // 11am lunch (too early)
-			lunchEnd:         12.0, // 12pm
-			expectedOffset:   -6,   // Corrected to UTC-6 (Mountain)
+			initialOffset:    -5,      // Initial detection: UTC-5 (Central)
+			workStart:        7,       // 7am start (too early)
+			workEnd:          15,      // 3pm end
+			lunchStart:       11.0,    // 11am lunch (too early)
+			lunchEnd:         12.0,    // 12pm
+			expectedOffset:   -6,      // Corrected to UTC-6 (Mountain)
 			expectedTZ:       "UTC-6", // Mountain Time
 			correctionReason: "work_start",
 			description:      "Early work start (7am) and early lunch (11am) suggests timezone is 1 hour off eastward",
@@ -245,33 +250,33 @@ func TestWorkScheduleCorrection(t *testing.T) {
 		{
 			name:             "stevebeattie Portland extreme case",
 			username:         "stevebeattie",
-			initialOffset:    -10, // Initial detection: UTC-10 (Hawaii, way off!)
-			workStart:        6,   // 6am start (extremely early)
-			workEnd:          13,  // 1pm end (extremely early)
-			lunchStart:       11.5, // 11:30am lunch (too early)
-			lunchEnd:         12.0, // 12pm
-			expectedOffset:   -7,   // Corrected to UTC-7 (work_start: 8.5-6 = +2.5 → +3, -10+3=-7)
+			initialOffset:    -10,     // Initial detection: UTC-10 (Hawaii, way off!)
+			workStart:        6,       // 6am start (extremely early)
+			workEnd:          13,      // 1pm end (extremely early)
+			lunchStart:       11.5,    // 11:30am lunch (too early)
+			lunchEnd:         12.0,    // 12pm
+			expectedOffset:   -7,      // Corrected to UTC-7 (work_start: 8.5-6 = +2.5 → +3, -10+3=-7)
 			expectedTZ:       "UTC-7", // timezoneFromOffset returns generic UTC-7
 			correctionReason: "work_start",
 			description:      "Extreme case: Initial UTC-10 with 6am start, corrected by work_start +3 hours to UTC-7",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock hour counts that would produce the initial offset
 			hourCounts := make(map[int]int)
-			
+
 			// Calculate what quiet hours would produce the initial offset
 			// offset = assumedSleepMidpoint - midQuiet
 			// So: midQuiet = assumedSleepMidpoint - offset
 			assumedSleepMidpoint := 2.5 // From detector.go
 			targetMidQuiet := assumedSleepMidpoint - float64(tt.initialOffset)
-			
+
 			// Create quiet hours centered around targetMidQuiet
 			quietStart := int(targetMidQuiet - 3.0)
 			quietEnd := int(targetMidQuiet + 3.0)
-			
+
 			// Handle wrap-around for UTC hours
 			for i := 0; i < 24; i++ {
 				if (i >= quietStart && i <= quietEnd) || (quietStart > quietEnd && (i >= quietStart || i <= quietEnd)) {
@@ -280,10 +285,10 @@ func TestWorkScheduleCorrection(t *testing.T) {
 					hourCounts[i] = 10 // High activity
 				}
 			}
-			
+
 			// Find quiet hours
 			quietHours := findQuietHours(hourCounts)
-			
+
 			// Calculate initial offset (mimicking detector logic)
 			var sum float64
 			for _, hour := range quietHours {
@@ -291,16 +296,16 @@ func TestWorkScheduleCorrection(t *testing.T) {
 			}
 			midQuiet := sum / float64(len(quietHours))
 			offsetFromUTC := assumedSleepMidpoint - midQuiet
-			
+
 			// Normalize
 			if offsetFromUTC > 12 {
 				offsetFromUTC -= 24
 			} else if offsetFromUTC <= -12 {
 				offsetFromUTC += 24
 			}
-			
+
 			initialCalcOffset := int(offsetFromUTC)
-			
+
 			// Verify our mock data produces expected initial offset
 			if initialCalcOffset != tt.initialOffset {
 				t.Logf("Mock data produced offset %d, expected %d. midQuiet=%.1f",
@@ -308,28 +313,28 @@ func TestWorkScheduleCorrection(t *testing.T) {
 				// Continue with test using actual calculated offset
 				tt.initialOffset = initialCalcOffset
 			}
-			
+
 			// Now test work schedule correction logic
 			offsetCorrection := 0
 			correctionReason := ""
-			
+
 			// Check work start time (should be 7:30am-9:30am)
 			if float64(tt.workStart) < 7.5 || float64(tt.workStart) > 9.5 {
-				expectedWorkStart := 8.5  // 8:30am average
+				expectedWorkStart := 8.5 // 8:30am average
 				workCorrection := int(expectedWorkStart - float64(tt.workStart))
 				if workCorrection != 0 && workCorrection >= -8 && workCorrection <= 8 {
 					offsetCorrection = workCorrection
 					correctionReason = "work_start"
 				}
 			}
-			
+
 			// Check lunch timing (should be 11:30am-12:30pm start)
 			if tt.lunchStart != -1 && tt.lunchEnd != -1 {
 				if tt.lunchStart < 11.5 || tt.lunchStart > 12.5 || tt.lunchEnd < 12.5 || tt.lunchEnd > 13.5 {
-					expectedLunchMid := 12.0  // 12:00pm
+					expectedLunchMid := 12.0 // 12:00pm
 					actualLunchMid := (tt.lunchStart + tt.lunchEnd) / 2
 					lunchCorrection := int(expectedLunchMid - actualLunchMid)
-					
+
 					// Use lunch correction if we don't have work start correction, or lunch is larger
 					if offsetCorrection == 0 || (lunchCorrection != 0 && int(math.Abs(float64(lunchCorrection))) > int(math.Abs(float64(offsetCorrection)))) {
 						offsetCorrection = lunchCorrection
@@ -337,33 +342,33 @@ func TestWorkScheduleCorrection(t *testing.T) {
 					}
 				}
 			}
-			
+
 			// Apply correction
 			finalOffset := tt.initialOffset
 			if offsetCorrection != 0 && offsetCorrection >= -8 && offsetCorrection <= 8 {
 				finalOffset = tt.initialOffset + offsetCorrection
 			}
-			
+
 			// Test results
 			if finalOffset != tt.expectedOffset {
-				t.Errorf("%s: expected corrected offset %d, got %d (correction: %d, reason: %s)", 
+				t.Errorf("%s: expected corrected offset %d, got %d (correction: %d, reason: %s)",
 					tt.name, tt.expectedOffset, finalOffset, offsetCorrection, correctionReason)
 			}
-			
+
 			if tt.correctionReason != "" && correctionReason != tt.correctionReason {
-				t.Errorf("%s: expected correction reason '%s', got '%s'", 
+				t.Errorf("%s: expected correction reason '%s', got '%s'",
 					tt.name, tt.correctionReason, correctionReason)
 			}
-			
+
 			// Check final timezone mapping
 			finalTZ := timezoneFromOffset(finalOffset)
 			if finalTZ != tt.expectedTZ {
-				t.Errorf("%s: expected final timezone %s, got %s (offset=%d)", 
+				t.Errorf("%s: expected final timezone %s, got %s (offset=%d)",
 					tt.name, tt.expectedTZ, finalTZ, finalOffset)
 			}
-			
+
 			t.Logf("%s: %s → initial_offset=%d, work=%d:00-%d:00, lunch=%.1f-%.1f → correction=%d (%s) → final_offset=%d (%s)",
-				tt.name, tt.description, tt.initialOffset, tt.workStart, tt.workEnd, 
+				tt.name, tt.description, tt.initialOffset, tt.workStart, tt.workEnd,
 				tt.lunchStart, tt.lunchEnd, offsetCorrection, correctionReason, finalOffset, finalTZ)
 		})
 	}
@@ -402,7 +407,7 @@ func TestQuietHoursToTimezone(t *testing.T) {
 			expectedTZ: []string{"UTC-7", "UTC-6"}, // MST/PDT
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Calculate midpoint
@@ -414,20 +419,20 @@ func TestQuietHoursToTimezone(t *testing.T) {
 					midQuiet -= 24
 				}
 			}
-			
+
 			// Calculate offset
 			// Using 2.5am sleep midpoint to match American pattern in detector.go
 			offsetFromUTC := 2.5 - midQuiet
-			
+
 			// Normalize
 			if offsetFromUTC > 12 {
 				offsetFromUTC -= 24
 			} else if offsetFromUTC <= -12 {
 				offsetFromUTC += 24
 			}
-			
+
 			tz := timezoneFromOffset(int(offsetFromUTC))
-			
+
 			// Check if the result is one of the expected options
 			found := false
 			for _, expected := range tt.expectedTZ {
@@ -436,7 +441,7 @@ func TestQuietHoursToTimezone(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if !found {
 				t.Errorf("%s: quiet hours %d-%d UTC (mid=%.1f, offset=%.1f) mapped to %s, expected one of %v",
 					tt.name, tt.quietStart, tt.quietEnd, midQuiet, offsetFromUTC, tz, tt.expectedTZ)

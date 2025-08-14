@@ -24,7 +24,7 @@ func TestNewWithOptions(t *testing.T) {
 		WithGeminiAPIKey("test-gemini-key"),
 		WithGCPProject("test-project"),
 	)
-	
+
 	// Fields are private now, just ensure detector was created
 	if detector == nil {
 		t.Error("detector not created")
@@ -34,12 +34,12 @@ func TestNewWithOptions(t *testing.T) {
 func TestDetectEmptyUsername(t *testing.T) {
 	detector := New()
 	ctx := context.Background()
-	
+
 	_, err := detector.Detect(ctx, "")
 	if err == nil {
 		t.Error("Detect() with empty username should return error")
 	}
-	
+
 	_, err = detector.Detect(ctx, "  ")
 	if err == nil {
 		t.Error("Detect() with whitespace username should return error")
@@ -51,7 +51,7 @@ func TestLocation(t *testing.T) {
 		Latitude:  37.7749,
 		Longitude: -122.4194,
 	}
-	
+
 	if loc.Latitude != 37.7749 {
 		t.Errorf("Latitude = %v, want 37.7749", loc.Latitude)
 	}
@@ -68,7 +68,7 @@ func TestResult(t *testing.T) {
 		Confidence: 0.85,
 		Method:     "location_field",
 	}
-	
+
 	if result.Username != "testuser" {
 		t.Errorf("Username = %v, want testuser", result.Username)
 	}
@@ -92,7 +92,7 @@ func TestFetchGitHubUser(t *testing.T) {
 		if r.Header.Get("Accept") != "application/vnd.github.v3+json" {
 			t.Errorf("Missing or incorrect Accept header")
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		if _, err := w.Write([]byte(`{
@@ -108,7 +108,7 @@ func TestFetchGitHubUser(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	
+
 	// fetchGitHubUser is not exposed - skip this test
 	t.Skip("Skipping GitHub API test - internal method")
 }
@@ -121,7 +121,7 @@ func TestTimezoneFromOffset(t *testing.T) {
 	// - Denver is UTC-6 instead of UTC-7
 	// - Chicago is UTC-5 instead of UTC-6
 	// - New York is UTC-4 instead of UTC-5
-	
+
 	// Test that the function returns generic UTC offsets
 	// since we can't determine the specific location without more context
 	tests := []struct {
@@ -138,7 +138,7 @@ func TestTimezoneFromOffset(t *testing.T) {
 		{2, "UTC+2"},
 		{8, "UTC+8"},
 	}
-	
+
 	for _, tt := range tests {
 		result := timezoneFromOffset(tt.offset)
 		if result != tt.expected {
@@ -148,7 +148,7 @@ func TestTimezoneFromOffset(t *testing.T) {
 }
 
 func TestFindQuietHours(t *testing.T) {
-	
+
 	// Create a pattern with clear quiet hours (midnight to 6am)
 	hourCounts := make(map[int]int)
 	// Quiet hours: 0-5 (minimal activity)
@@ -163,12 +163,12 @@ func TestFindQuietHours(t *testing.T) {
 	for i := 18; i < 24; i++ {
 		hourCounts[i] = 5
 	}
-	
+
 	quietHours := findQuietHours(hourCounts)
 	if len(quietHours) != 6 {
 		t.Errorf("Expected 6 quiet hours, got %d", len(quietHours))
 	}
-	
+
 	// Check that we found some reasonable quiet hours
 	// The algorithm finds the 6 consecutive hours with least activity
 	hasQuietHour := false
@@ -181,20 +181,4 @@ func TestFindQuietHours(t *testing.T) {
 	if !hasQuietHour {
 		t.Errorf("Expected at least one hour in 0-5 range, got %v", quietHours)
 	}
-}
-
-func TestCalculateActivityConfidence(t *testing.T) {
-	t.Skip("calculateActivityConfidence is not implemented")
-	return
-	
-	// Test with clear pattern
-	hourCounts := make(map[int]int)
-	for i := 0; i < 6; i++ {
-		hourCounts[i] = 0 // No activity during quiet hours
-	}
-	for i := 9; i < 18; i++ {
-		hourCounts[i] = 10 // High activity during work hours
-	}
-	
-	// Test removed - calculateActivityConfidence not exposed
 }

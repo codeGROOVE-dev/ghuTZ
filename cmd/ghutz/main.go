@@ -13,15 +13,15 @@ import (
 )
 
 var (
-	githubToken   = flag.String("github-token", "", "GitHub token for API access (or set GITHUB_TOKEN)")
-	geminiAPIKey  = flag.String("gemini-key", "", "Gemini API key (or set GEMINI_API_KEY)")
-	geminiModel   = flag.String("gemini-model", "gemini-2.5-flash-lite", "Gemini model to use (or set GEMINI_MODEL)")
-	mapsAPIKey    = flag.String("maps-key", "", "Google Maps API key (or set GOOGLE_MAPS_API_KEY)")
-	gcpProject    = flag.String("gcp-project", "", "GCP project ID (or set GCP_PROJECT)")
-	cacheDir      = flag.String("cache-dir", "", "Cache directory (or set CACHE_DIR)")
-	verbose       = flag.Bool("verbose", false, "Enable verbose logging")
-	activity      = flag.Bool("activity", false, "Force activity analysis")
-	version       = flag.Bool("version", false, "Show version")
+	githubToken  = flag.String("github-token", "", "GitHub token for API access (or set GITHUB_TOKEN)")
+	geminiAPIKey = flag.String("gemini-key", "", "Gemini API key (or set GEMINI_API_KEY)")
+	geminiModel  = flag.String("gemini-model", "gemini-2.5-flash-lite", "Gemini model to use (or set GEMINI_MODEL)")
+	mapsAPIKey   = flag.String("maps-key", "", "Google Maps API key (or set GOOGLE_MAPS_API_KEY)")
+	gcpProject   = flag.String("gcp-project", "", "GCP project ID (or set GCP_PROJECT)")
+	cacheDir     = flag.String("cache-dir", "", "Cache directory (or set CACHE_DIR)")
+	verbose      = flag.Bool("verbose", false, "Enable verbose logging")
+	activity     = flag.Bool("activity", false, "Force activity analysis")
+	version      = flag.Bool("version", false, "Show version")
 )
 
 func main() {
@@ -80,11 +80,11 @@ func main() {
 		ghutz.WithGCPProject(*gcpProject),
 		ghutz.WithActivityAnalysis(*activity),
 	}
-	
+
 	if *cacheDir != "" {
 		detectorOpts = append(detectorOpts, ghutz.WithCacheDir(*cacheDir))
 	}
-	
+
 	detector := ghutz.NewWithLogger(logger, detectorOpts...)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -102,19 +102,19 @@ func main() {
 func printResult(result *ghutz.Result) {
 	fmt.Printf("User: %s\n", result.Username)
 	fmt.Printf("Timezone: %s\n", result.Timezone)
-	
+
 	if result.ActivityTimezone != "" && result.ActivityTimezone != result.Timezone {
 		fmt.Printf("Activity TZ: %s\n", result.ActivityTimezone)
 	}
 
 	if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
-		fmt.Printf("Active Hours: %s - %s %s\n", 
+		fmt.Printf("Active Hours: %s - %s %s\n",
 			formatHour(result.ActiveHoursLocal.Start), formatHour(result.ActiveHoursLocal.End), result.Timezone)
 	}
 
 	if result.LunchHoursLocal.Confidence > 0 {
 		fmt.Printf("Lunch Break: %s - %s %s (%.0f%% confidence)\n",
-			formatHour(result.LunchHoursLocal.Start), formatHour(result.LunchHoursLocal.End), 
+			formatHour(result.LunchHoursLocal.Start), formatHour(result.LunchHoursLocal.End),
 			result.Timezone, result.LunchHoursLocal.Confidence*100)
 	}
 
@@ -138,15 +138,15 @@ func formatHour(decimalHour float64) string {
 
 func formatMethodName(method string) string {
 	methodNames := map[string]string{
-		"github_profile":         "GitHub Profile Timezone",
-		"location_geocoding":     "Location Field Geocoding",
-		"activity_patterns":      "Activity Pattern Analysis",
+		"github_profile":          "GitHub Profile Timezone",
+		"location_geocoding":      "Location Field Geocoding",
+		"activity_patterns":       "Activity Pattern Analysis",
 		"gemini_refined_activity": "AI-Enhanced Activity Analysis",
-		"company_heuristic":      "Company-based Inference",
-		"email_heuristic":        "Email Domain Analysis",
-		"blog_heuristic":         "Blog Domain Analysis",
+		"company_heuristic":       "Company-based Inference",
+		"email_heuristic":         "Email Domain Analysis",
+		"blog_heuristic":          "Blog Domain Analysis",
 		"website_gemini_analysis": "Website AI Analysis",
-		"gemini_analysis":        "AI Context Analysis",
+		"gemini_analysis":         "AI Context Analysis",
 	}
 	if name, exists := methodNames[method]; exists {
 		return name

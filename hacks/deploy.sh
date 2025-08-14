@@ -16,6 +16,4 @@ IMAGE="$(ko publish ./cmd/ghutz-server/...)"
 gcloud run deploy "${APP_ID}" \
   --image="${IMAGE}" \
   --region "${GCP_REGION}" \
-  --project "${GCP_PROJECT}" \
-  --set-env-vars="GCP_PROJECT=${GCP_PROJECT}"
-
+  --project "${GCP_PROJECT}"

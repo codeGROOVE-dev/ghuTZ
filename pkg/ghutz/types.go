@@ -73,24 +73,24 @@ type OptionHolder struct {
 
 // Result represents timezone detection results
 type Result struct {
-	Username             string    `json:"username"`
-	Name                 string    `json:"name,omitempty"`
-	Timezone             string    `json:"timezone"`
-	ActivityTimezone     string    `json:"activity_timezone,omitempty"` // Pure activity-based timezone
-	Location             *Location `json:"location,omitempty"`
-	LocationName         string    `json:"location_name,omitempty"`
-	GeminiSuggestedLocation string `json:"gemini_suggested_location,omitempty"`
-	Confidence           float64   `json:"confidence"`
-	TimezoneConfidence   float64   `json:"timezone_confidence,omitempty"`
-	LocationConfidence   float64   `json:"location_confidence,omitempty"`
-	Method               string    `json:"method"`
-	DetectionTime        time.Time `json:"detection_time"`
-	QuietHoursUTC        []int     `json:"quiet_hours_utc,omitempty"` // Hours when user is typically inactive
-	ActiveHoursLocal     struct {
+	Username                string    `json:"username"`
+	Name                    string    `json:"name,omitempty"`
+	Timezone                string    `json:"timezone"`
+	ActivityTimezone        string    `json:"activity_timezone,omitempty"` // Pure activity-based timezone
+	Location                *Location `json:"location,omitempty"`
+	LocationName            string    `json:"location_name,omitempty"`
+	GeminiSuggestedLocation string    `json:"gemini_suggested_location,omitempty"`
+	Confidence              float64   `json:"confidence"`
+	TimezoneConfidence      float64   `json:"timezone_confidence,omitempty"`
+	LocationConfidence      float64   `json:"location_confidence,omitempty"`
+	Method                  string    `json:"method"`
+	DetectionTime           time.Time `json:"detection_time"`
+	QuietHoursUTC           []int     `json:"quiet_hours_utc,omitempty"` // Hours when user is typically inactive
+	ActiveHoursLocal        struct {
 		Start float64 `json:"start"` // Expected start time in local time (supports 30-min increments)
 		End   float64 `json:"end"`   // Expected end time in local time (supports 30-min increments)
 	} `json:"active_hours_local,omitempty"`
-	LunchHoursLocal      struct {
+	LunchHoursLocal struct {
 		Start      float64 `json:"start"`      // Detected lunch break start time (supports 30-min increments)
 		End        float64 `json:"end"`        // Detected lunch break end time (supports 30-min increments)
 		Confidence float64 `json:"confidence"` // Confidence level of lunch detection (0.0-1.0)
@@ -117,18 +117,20 @@ type GitHubUser struct {
 
 // PullRequest represents a GitHub pull request
 type PullRequest struct {
-	Title     string    `json:"title"`
-	Body      string    `json:"body"`
-	CreatedAt time.Time `json:"created_at"`
-	HTMLURL   string    `json:"html_url"`
+	Title      string    `json:"title"`
+	Body       string    `json:"body"`
+	CreatedAt  time.Time `json:"created_at"`
+	HTMLURL    string    `json:"html_url"`
+	Repository string    `json:"repository,omitempty"` // owner/repo format
 }
 
 // Issue represents a GitHub issue
 type Issue struct {
-	Title     string    `json:"title"`
-	Body      string    `json:"body"`
-	CreatedAt time.Time `json:"created_at"`
-	HTMLURL   string    `json:"html_url"`
+	Title      string    `json:"title"`
+	Body       string    `json:"body"`
+	CreatedAt  time.Time `json:"created_at"`
+	HTMLURL    string    `json:"html_url"`
+	Repository string    `json:"repository,omitempty"` // owner/repo format
 }
 
 // Comment represents a GitHub comment
