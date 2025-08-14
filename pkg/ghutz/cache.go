@@ -19,24 +19,24 @@ import (
 )
 
 type CacheEntry struct {
-	Data      []byte    `json:"data"`
 	ExpiresAt time.Time `json:"expires_at"`
 	ETag      string    `json:"etag,omitempty"`
+	Data      []byte    `json:"data"`
 }
 
 type OtterCache struct {
 	cache      otter.Cache[string, CacheEntry]
-	dir        string
-	ttl        time.Duration
 	logger     *slog.Logger
-	mu         sync.RWMutex
 	saveCancel context.CancelFunc
+	dir        string
 	saveWg     sync.WaitGroup
+	ttl        time.Duration
+	mu         sync.RWMutex
 }
 
 func NewOtterCache(dir string, ttl time.Duration, logger *slog.Logger) (*OtterCache, error) {
 	// Create cache directory if it doesn't exist
-	if err := os.MkdirAll(dir, 0750); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("creating cache directory: %w", err)
 	}
 
@@ -297,7 +297,7 @@ func (c *OtterCache) Stats() map[string]interface{} {
 	}
 }
 
-// Clean is kept for backward compatibility but is now a no-op since otter handles TTL automatically
+// Clean is kept for backward compatibility but is now a no-op since otter handles TTL automatically.
 func (c *OtterCache) Clean() error {
 	// Otter automatically removes expired entries, so this is a no-op
 	stats := c.Stats()

@@ -10,9 +10,7 @@ import (
 	"time"
 )
 
-
 func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username string, events []PublicEvent) *Result {
-
 	// Collect all timestamps first (we'll deduplicate and limit later)
 	type timestampEntry struct {
 		time   time.Time
@@ -312,7 +310,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		// If we have very limited data, assume typical sleep hours (2am-6am UTC is common)
 		if len(quietHours) == 0 {
 			// Find the hours with zero activity and use those, or default to typical hours
-			for hour := 0; hour < 24; hour++ {
+			for hour := range 24 {
 				if hourCounts[hour] == 0 {
 					quietHours = append(quietHours, hour)
 				}
@@ -332,7 +330,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		"max_activity_count", maxActivity)
 
 	hourlyActivity := make([]int, 24)
-	for hour := 0; hour < 24; hour++ {
+	for hour := range 24 {
 		hourlyActivity[hour] = hourCounts[hour]
 	}
 	d.logger.Debug("hourly activity distribution", "username", username, "hours_utc", hourlyActivity)
@@ -919,7 +917,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// All time fields should be stored in UTC and converted to local only for display
 	activeStartUTC := math.Mod(float64(activeStart)-float64(offsetInt)+24, 24)
 	activeEndUTC := math.Mod(float64(activeEnd)-float64(offsetInt)+24, 24)
-	
+
 	result := &Result{
 		Username:         username,
 		Timezone:         timezone,
@@ -929,8 +927,8 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			Start float64 `json:"start"`
 			End   float64 `json:"end"`
 		}{
-			Start: activeStartUTC,  // NOTE: Despite field name "Local", storing UTC for consistency
-			End:   activeEndUTC,    // Frontend converts to local for display
+			Start: activeStartUTC, // NOTE: Despite field name "Local", storing UTC for consistency
+			End:   activeEndUTC,   // Frontend converts to local for display
 		},
 		TopOrganizations:           topOrgs,
 		Confidence:                 confidence,
@@ -980,7 +978,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	return result
 }
 
-// fetchSupplementalActivity fetches additional activity data when events are insufficient
+// fetchSupplementalActivity fetches additional activity data when events are insufficient.
 func (d *Detector) fetchSupplementalActivity(ctx context.Context, username string) *ActivityData {
 	type result struct {
 		prs      []PullRequest

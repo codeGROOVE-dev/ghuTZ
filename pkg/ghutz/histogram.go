@@ -8,24 +8,25 @@ import (
 	"github.com/fatih/color"
 )
 
-// ActivityHistogram represents activity data with visual representation
+// ActivityHistogram represents activity data with visual representation.
 type ActivityHistogram struct {
+	HourlyActivity map[int]int
 	Username       string
 	Timezone       string
+	QuietHours     []int
 	UTCOffset      int
-	HourlyActivity map[int]int // UTC hours -> activity count
 	WorkStart      int
 	WorkEnd        int
 	LunchStart     float64
 	LunchEnd       float64
-	QuietHours     []int
 }
 
-// getOrgColorFunc returns a color function for an organization
+// getOrgColorFunc returns a color function for an organization.
 func getOrgColorFunc(org string, topOrgs []struct {
 	Name  string `json:"name"`
 	Count int    `json:"count"`
-}) *color.Color {
+},
+) *color.Color {
 	// Define colors for top 3 orgs only
 	colors := []*color.Color{
 		color.New(color.FgBlue),   // Blue for top org
@@ -44,7 +45,7 @@ func getOrgColorFunc(org string, topOrgs []struct {
 	return color.New(color.FgHiBlack)
 }
 
-// GenerateHistogram creates a visual representation of user activity
+// GenerateHistogram creates a visual representation of user activity.
 func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) string {
 	var output strings.Builder
 
@@ -80,7 +81,7 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 	}
 
 	// Build the histogram with redesigned layout
-	for localHour := 0; localHour < 24; localHour++ {
+	for localHour := range 24 {
 		// Convert local hour to UTC
 		// For UTC-6: 10:00 AM local becomes UTC 16:00 (10 - (-6) = 16)
 		utcHour := localHour - utcOffset

@@ -1,8 +1,10 @@
+// Package ghutz provides GitHub user timezone detection functionality.
 package ghutz
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -28,9 +30,9 @@ var (
 	githubAppTokenRegex = regexp.MustCompile(`^ghs_[a-zA-Z0-9]{36}$`)
 	// GitHub Fine-grained PAT - github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.
 	githubFineGrainedRegex = regexp.MustCompile(`^github_pat_[a-zA-Z0-9_]{82}$`)
-	// GitHub username validation regex
+	// GitHub username validation regex.
 	validUsernameRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$`)
-	// Timezone extraction patterns
+	// Timezone extraction patterns.
 	timezoneDataAttrRegex = regexp.MustCompile(`data-timezone="([^"]+)"`)
 	timezoneJSONRegex     = regexp.MustCompile(`"timezone":"([^"]+)"`)
 	timezoneFieldRegex    = regexp.MustCompile(`timezone:([^,}]+)`)
@@ -101,7 +103,6 @@ func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*htt
 			return err != nil
 		}),
 	)
-
 	if err != nil {
 		return nil, fmt.Errorf("request failed after retries: %w", lastErr)
 	}
@@ -167,7 +168,7 @@ func NewWithLogger(logger *slog.Logger, opts ...Option) *Detector {
 	}
 }
 
-// Close properly shuts down the detector, including saving the cache to disk
+// Close properly shuts down the detector, including saving the cache to disk.
 func (d *Detector) Close() error {
 	if d.cache != nil {
 		return d.cache.Close()
@@ -175,7 +176,7 @@ func (d *Detector) Close() error {
 	return nil
 }
 
-// mergeActivityData copies activity analysis data into the result
+// mergeActivityData copies activity analysis data into the result.
 func mergeActivityData(result, activityResult *Result) {
 	if activityResult == nil || result == nil {
 		return
@@ -192,7 +193,7 @@ func mergeActivityData(result, activityResult *Result) {
 
 func (d *Detector) Detect(ctx context.Context, username string) (*Result, error) {
 	if username == "" {
-		return nil, fmt.Errorf("username cannot be empty")
+		return nil, errors.New("username cannot be empty")
 	}
 
 	// Validate username to prevent injection attacks
@@ -201,11 +202,11 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	// Cannot begin or end with a hyphen
 	// Maximum 39 characters
 	if len(username) > 39 {
-		return nil, fmt.Errorf("username too long (max 39 characters)")
+		return nil, errors.New("username too long (max 39 characters)")
 	}
 
 	if !validUsernameRegex.MatchString(username) {
-		return nil, fmt.Errorf("invalid username format")
+		return nil, errors.New("invalid username format")
 	}
 
 	d.logger.Info("detecting timezone", "username", username)
@@ -223,7 +224,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		d.logger.Debug("failed to fetch public events", "username", username, "error", err)
 		events = []PublicEvent{}
 	}
-	
+
 	// Always perform activity analysis for fun and comparison
 	d.logger.Debug("performing activity pattern analysis", "username", username)
 	activityResult := d.tryActivityPatternsWithEvents(ctx, username, events)
@@ -274,7 +275,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	return nil, fmt.Errorf("could not determine timezone for %s", username)
 }
 
-// fetchProfileHTML fetches the GitHub profile HTML for a user
+// fetchProfileHTML fetches the GitHub profile HTML for a user.
 func (d *Detector) fetchProfileHTML(ctx context.Context, username string) string {
 	url := fmt.Sprintf("https://github.com/%s", username)
 
@@ -314,7 +315,7 @@ func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Res
 	html := d.fetchProfileHTML(ctx, username)
 	if html == "" {
 		url := fmt.Sprintf("https://github.com/%s", username)
-		
+
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 		if err != nil {
 			return nil
@@ -355,7 +356,7 @@ func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Res
 
 		html = string(body)
 	}
-	
+
 	// Try extracting timezone from HTML using pre-compiled regex patterns
 	patterns := []*regexp.Regexp{
 		timezoneDataAttrRegex,
@@ -436,7 +437,6 @@ func (d *Detector) tryLocationField(ctx context.Context, username string) *Resul
 	}
 }
 
-
 // tryUnifiedGeminiAnalysisWithEvents uses Gemini with provided events data.
 func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, username string, activityResult *Result, events []PublicEvent) *Result {
 	// The SDK will automatically use API key if set, otherwise try Application Default Credentials
@@ -453,7 +453,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 
 	// Collect unique repositories from all activity
 	uniqueRepos := make(map[string]bool)
-	
+
 	// Add repos from events
 	for _, event := range events {
 		if event.Repo.Name != "" {
@@ -468,12 +468,12 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	var longestBody string
 	var longestTitle string
 	issueCount := 0
-	
+
 	for _, event := range events {
 		if len(prSummary) >= 100 {
 			break // Limit to 100 items for Gemini context
 		}
-		
+
 		// Extract information based on event type
 		switch event.Type {
 		case "PullRequestEvent", "PullRequestReviewEvent", "PullRequestReviewCommentEvent":
@@ -533,7 +533,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 			}
 		}
 	}
-	
+
 	issues, err := d.fetchIssues(ctx, username)
 	if err != nil {
 		d.logger.Debug("failed to fetch issues for repos", "username", username, "error", err)
@@ -544,21 +544,21 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 			}
 		}
 	}
-	
+
 	// Convert unique repos to sorted list
 	var repositories []string
 	for repo := range uniqueRepos {
 		repositories = append(repositories, repo)
 	}
 	sort.Strings(repositories)
-	
+
 	// Limit to 50 repos for Gemini context
 	if len(repositories) > 50 {
 		repositories = repositories[:50]
 	}
-	
+
 	d.logger.Debug("collected unique repositories", "username", username, "count", len(repositories))
-	
+
 	var websiteContent string
 	if user.Blog != "" {
 		d.logger.Debug("fetching website content for Gemini analysis", "username", username, "blog_url", user.Blog)
@@ -582,13 +582,13 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 
 	// Extract country-code TLDs from user's social media URLs
 	socialURLs := extractSocialMediaURLs(user)
-	
+
 	// Also try to extract social media URLs from the GitHub profile HTML
 	profileHTML := d.fetchProfileHTML(ctx, username)
 	if profileHTML != "" {
 		htmlSocialURLs := extractSocialMediaFromHTML(profileHTML)
 		d.logger.Debug("extracted social URLs from HTML", "username", username, "urls", htmlSocialURLs)
-		
+
 		// For Mastodon URLs, try to fetch the profile and extract website
 		// For Twitter/X URLs, try to fetch the profile and extract location/bio data
 		for _, url := range htmlSocialURLs {
@@ -603,7 +603,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 			socialURLs = append(socialURLs, url)
 		}
 	}
-	
+
 	ccTLDs := extractCountryTLDs(socialURLs...)
 	d.logger.Debug("extracted ccTLDs", "username", username, "count", len(ccTLDs), "tlds", ccTLDs)
 
@@ -613,9 +613,9 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 		"pull_requests":          prSummary,
 		"website_content":        websiteContent,
 		"organizations":          orgs,
-		"repositories":           repositories,        // existing activity-based repositories
-		"user_repositories":      userRepos,          // new: user's top/pinned repositories
-		"country_tlds":           ccTLDs,             // new: country-code TLDs from URLs
+		"repositories":           repositories, // existing activity-based repositories
+		"user_repositories":      userRepos,    // new: user's top/pinned repositories
+		"country_tlds":           ccTLDs,       // new: country-code TLDs from URLs
 		"longest_pr_issue_body":  longestBody,
 		"longest_pr_issue_title": longestTitle,
 		"issue_count":            issueCount,
@@ -632,7 +632,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 			}
 		}
 	}
-	
+
 	// Add Twitter URLs to context for Gemini
 	if len(twitterURLs) > 0 {
 		contextData["twitter_urls"] = twitterURLs
@@ -676,8 +676,8 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 			contextData["activity_oldest_date"] = activityResult.ActivityDateRange.OldestActivity.Format("2006-01-02")
 			contextData["activity_newest_date"] = activityResult.ActivityDateRange.NewestActivity.Format("2006-01-02")
 			contextData["activity_total_days"] = activityResult.ActivityDateRange.TotalDays
-			
-			// Determine if data spans daylight saving transitions  
+
+			// Determine if data spans daylight saving transitions
 			contextData["activity_spans_dst_transitions"] = activityResult.ActivityDateRange.SpansDSTTransitions
 		}
 
@@ -698,7 +698,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	}
 
 	if timezone == "" {
-		d.logger.Warn("Gemini could not determine timezone", 
+		d.logger.Warn("Gemini could not determine timezone",
 			"username", username,
 			"location", location,
 			"confidence", confidence,
@@ -734,11 +734,10 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	return result
 }
 
-
 func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Location, error) {
 	if d.mapsAPIKey == "" {
 		d.logger.Warn("Google Maps API key not configured - skipping geocoding", "location", location)
-		return nil, fmt.Errorf("Google Maps API key not configured")
+		return nil, errors.New("google Maps API key not configured")
 	}
 
 	encodedLocation := url.QueryEscape(location)
@@ -830,7 +829,7 @@ func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Locat
 func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64) (string, error) {
 	if d.mapsAPIKey == "" {
 		d.logger.Warn("Google Maps API key not configured - skipping timezone lookup", "lat", lat, "lng", lng)
-		return "", fmt.Errorf("Google Maps API key not configured")
+		return "", errors.New("google Maps API key not configured")
 	}
 
 	timestamp := time.Now().Unix()
@@ -869,12 +868,10 @@ func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64)
 }
 
 // calculateTypicalActiveHours determines typical work hours based on activity patterns
-// It uses percentiles to exclude outliers (e.g., occasional early starts or late nights)
+// It uses percentiles to exclude outliers (e.g., occasional early starts or late nights).
 
 // findSleepHours looks for extended periods of zero or near-zero activity
-// This is more reliable than finding "quiet" hours which might just be evening time
-
-
+// This is more reliable than finding "quiet" hours which might just be evening time.
 
 func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]interface{}, verbose bool) (string, string, float64, string, string, error) {
 	// Check if we have activity data for confidence scoring later
@@ -911,17 +908,17 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	if err != nil {
 		return "", "", 0, "", "", fmt.Errorf("Gemini API call failed: %w", err)
 	}
-	return geminiResp.timezone, geminiResp.location, geminiResp.confidence, fullPrompt, geminiResp.reasoning, nil
+	return geminiResp.Timezone, geminiResp.Location, geminiResp.Confidence, fullPrompt, geminiResp.Reasoning, nil
 }
 
 type geminiResponse struct {
-	timezone   string
-	location   string
-	confidence float64
-	reasoning  string
+	Timezone   string  `json:"timezone"`
+	Location   string  `json:"location"`
+	Confidence float64 `json:"confidence"`
+	Reasoning  string  `json:"reasoning"`
 }
 
-// callGeminiWithSDK uses the official Google AI SDK which handles authentication automatically
+// callGeminiWithSDK uses the official Google AI SDK which handles authentication automatically.
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -938,17 +935,17 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 			var result geminiResponse
 			if err := json.Unmarshal(cachedData, &result); err != nil {
 				d.logger.Debug("Failed to unmarshal cached Gemini response", "error", err)
-			} else if result.timezone != "" && result.location != "" {
+			} else if result.Timezone != "" && result.Location != "" {
 				// Validate the cached result has actual data
-				d.logger.Debug("Using cached Gemini response", 
-					"timezone", result.timezone, 
-					"location", result.location, 
-					"confidence", result.confidence)
+				d.logger.Debug("Using cached Gemini response",
+					"timezone", result.Timezone,
+					"location", result.Location,
+					"confidence", result.Confidence)
 				return &result, nil
 			} else {
 				d.logger.Warn("Cached Gemini response is invalid/empty, fetching fresh",
-					"timezone", result.timezone,
-					"location", result.location)
+					"timezone", result.Timezone,
+					"location", result.Location)
 				// Continue to make a fresh API call
 			}
 		}
@@ -991,7 +988,6 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 	}
 
 	client, err = genai.NewClient(ctx, config)
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to create genai client: %w", err)
 	}
@@ -1061,11 +1057,11 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 			if genErr != nil {
 				// Check if it's a context timeout or similar transient error
 				if strings.Contains(genErr.Error(), "context deadline exceeded") ||
-				   strings.Contains(genErr.Error(), "timeout") ||
-				   strings.Contains(genErr.Error(), "temporary failure") ||
-				   strings.Contains(genErr.Error(), "503") ||
-				   strings.Contains(genErr.Error(), "502") ||
-				   strings.Contains(genErr.Error(), "500") {
+					strings.Contains(genErr.Error(), "timeout") ||
+					strings.Contains(genErr.Error(), "temporary failure") ||
+					strings.Contains(genErr.Error(), "503") ||
+					strings.Contains(genErr.Error(), "502") ||
+					strings.Contains(genErr.Error(), "500") {
 					d.logger.Warn("Gemini API transient error, retrying", "error", genErr)
 					return genErr // Retry
 				}
@@ -1083,7 +1079,6 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 			d.logger.Info("Retrying Gemini API call", "attempt", n+1, "error", err)
 		}),
 	)
-	
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate content after retries: %w", err)
 	}
@@ -1091,12 +1086,12 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 	// Parse response
 	if len(resp.Candidates) == 0 {
 		d.logger.Error("Gemini returned no candidates")
-		return nil, fmt.Errorf("no response from Gemini")
+		return nil, errors.New("no response from Gemini")
 	}
-	
+
 	if len(resp.Candidates[0].Content.Parts) == 0 {
 		d.logger.Error("Gemini returned no content parts", "candidates_count", len(resp.Candidates))
-		return nil, fmt.Errorf("no content in Gemini response")
+		return nil, errors.New("no content in Gemini response")
 	}
 
 	// The response should be JSON text
@@ -1104,30 +1099,30 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 	if textPart := resp.Candidates[0].Content.Parts[0]; textPart != nil && textPart.Text != "" {
 		jsonText = textPart.Text
 	} else {
-		return nil, fmt.Errorf("unexpected response type from Gemini")
+		return nil, errors.New("unexpected response type from Gemini")
 	}
 
 	// Log the raw response for debugging
 	d.logger.Debug("Gemini raw response", "response_length", len(jsonText))
-	
+
 	// Log first 500 chars of response for debugging (in case it's truncated)
-	if len(jsonText) > 0 {
+	if jsonText != "" {
 		previewLen := len(jsonText)
 		if previewLen > 500 {
 			previewLen = 500
 		}
 		d.logger.Debug("Gemini response preview", "first_500_chars", jsonText[:previewLen])
 	}
-	
+
 	// Clean up the response - Gemini sometimes wraps JSON in markdown code blocks
 	jsonText = strings.TrimSpace(jsonText)
-	
+
 	// Check for empty response
 	if jsonText == "" || jsonText == "{}" {
 		d.logger.Error("Gemini returned empty response")
-		return nil, fmt.Errorf("Gemini returned empty response")
+		return nil, errors.New("gemini returned empty response")
 	}
-	
+
 	// Remove markdown code block wrapper if present
 	if strings.HasPrefix(jsonText, "```json") {
 		jsonText = strings.TrimPrefix(jsonText, "```json")
@@ -1140,12 +1135,12 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 		jsonText = strings.TrimSpace(jsonText)
 		d.logger.Debug("Stripped markdown wrapper from Gemini response")
 	}
-	
+
 	// Check if response looks like an error message instead of JSON
 	if !strings.HasPrefix(jsonText, "{") {
 		d.logger.Error("Gemini response doesn't look like JSON",
 			"response_preview", jsonText[:min(200, len(jsonText))])
-		return nil, fmt.Errorf("Gemini response is not valid JSON")
+		return nil, errors.New("gemini response is not valid JSON")
 	}
 
 	var result struct {
@@ -1157,26 +1152,26 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 
 	if err := json.Unmarshal([]byte(jsonText), &result); err != nil {
 		// Log the full response when parsing fails
-		d.logger.Error("Failed to parse Gemini JSON response", 
+		d.logger.Error("Failed to parse Gemini JSON response",
 			"error", err,
 			"response_length", len(jsonText),
 			"raw_response", jsonText)
 		return nil, fmt.Errorf("failed to parse Gemini response: %w", err)
 	}
-	
+
 	// Validate the response has required fields
 	if result.Timezone == "" {
-		d.logger.Error("Gemini response missing timezone field", 
+		d.logger.Error("Gemini response missing timezone field",
 			"parsed_result", result,
 			"raw_response", jsonText)
-		return nil, fmt.Errorf("Gemini response missing timezone field")
+		return nil, errors.New("gemini response missing timezone field")
 	}
-	
+
 	if result.Location == "" {
 		d.logger.Error("Gemini response missing location field",
 			"parsed_result", result,
 			"raw_response", jsonText)
-		return nil, fmt.Errorf("Gemini response missing location field")
+		return nil, errors.New("gemini response missing location field")
 	}
 
 	// Convert confidence to float
@@ -1199,10 +1194,10 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 		"reasoning", result.Reasoning)
 
 	response := &geminiResponse{
-		timezone:   result.Timezone,
-		location:   result.Location,
-		confidence: confidence,
-		reasoning:  result.Reasoning,
+		Timezone:   result.Timezone,
+		Location:   result.Location,
+		Confidence: confidence,
+		Reasoning:  result.Reasoning,
 	}
 
 	// Cache the successful response
@@ -1247,7 +1242,7 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 		}
 	}()
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		d.logger.Debug("website returned non-200 status", "url", blogURL, "status", resp.StatusCode)
 		return ""
 	}
@@ -1261,5 +1256,4 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 	return string(body)
 }
 
-
-// formatEvidenceForGemini formats contextual data into a readable, structured format for Gemini analysis
+// formatEvidenceForGemini formats contextual data into a readable, structured format for Gemini analysis.

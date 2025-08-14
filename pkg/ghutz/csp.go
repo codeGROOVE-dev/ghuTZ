@@ -9,30 +9,21 @@ import (
 	"strings"
 )
 
-// CSPConfig holds Content Security Policy configuration
+// CSPConfig holds Content Security Policy configuration.
 type CSPConfig struct {
-	// Mode can be "enforce" or "report" (for testing)
-	Mode string
-
-	// Nonce for inline scripts/styles (regenerated per request)
-	Nonce string
-
-	// Development mode - more permissive for debugging
-	DevMode bool
-
-	// Trusted domains for various resource types
+	Mode               string
+	Nonce              string
+	ReportURI          string
 	TrustedScriptSrcs  []string
 	TrustedStyleSrcs   []string
 	TrustedImageSrcs   []string
 	TrustedFontSrcs    []string
 	TrustedConnectSrcs []string
 	TrustedFrameSrcs   []string
-
-	// Report URI for CSP violations
-	ReportURI string
+	DevMode            bool
 }
 
-// NewCSPConfig creates a new CSP configuration with secure defaults
+// NewCSPConfig creates a new CSP configuration with secure defaults.
 func NewCSPConfig(devMode bool) *CSPConfig {
 	return &CSPConfig{
 		Mode:    "enforce",
@@ -65,7 +56,7 @@ func NewCSPConfig(devMode bool) *CSPConfig {
 	}
 }
 
-// GenerateNonce creates a cryptographically secure nonce for this request
+// GenerateNonce creates a cryptographically secure nonce for this request.
 func (c *CSPConfig) GenerateNonce() error {
 	nonceBytes := make([]byte, 16)
 	if _, err := rand.Read(nonceBytes); err != nil {
@@ -75,7 +66,7 @@ func (c *CSPConfig) GenerateNonce() error {
 	return nil
 }
 
-// BuildPolicy constructs the CSP header value
+// BuildPolicy constructs the CSP header value.
 func (c *CSPConfig) BuildPolicy() string {
 	var directives []string
 
@@ -103,8 +94,9 @@ func (c *CSPConfig) BuildPolicy() string {
 	// We can gradually move away from this by using nonces where possible
 	styleSrcs = append(styleSrcs, "'unsafe-inline'")
 	styleSrcs = append(styleSrcs, c.TrustedStyleSrcs...)
-	directives = append(directives, fmt.Sprintf("style-src %s", strings.Join(styleSrcs, " ")))
-	directives = append(directives, fmt.Sprintf("style-src-elem %s", strings.Join(styleSrcs, " ")))
+	directives = append(directives,
+		fmt.Sprintf("style-src %s", strings.Join(styleSrcs, " ")),
+		fmt.Sprintf("style-src-elem %s", strings.Join(styleSrcs, " ")))
 
 	// Image sources
 	imgSrcs := append([]string{"'self'"}, c.TrustedImageSrcs...)
@@ -127,9 +119,10 @@ func (c *CSPConfig) BuildPolicy() string {
 	}
 
 	// Security restrictions
-	directives = append(directives, "object-src 'none'")
-	directives = append(directives, "base-uri 'self'")
-	directives = append(directives, "form-action 'self'")
+	directives = append(directives,
+		"object-src 'none'",
+		"base-uri 'self'",
+		"form-action 'self'")
 
 	// Upgrade insecure requests in production
 	if !c.DevMode {
@@ -144,7 +137,7 @@ func (c *CSPConfig) BuildPolicy() string {
 	return strings.Join(directives, "; ")
 }
 
-// HeaderName returns the appropriate CSP header name based on mode
+// HeaderName returns the appropriate CSP header name based on mode.
 func (c *CSPConfig) HeaderName() string {
 	if c.Mode == "report" {
 		return "Content-Security-Policy-Report-Only"
@@ -152,7 +145,7 @@ func (c *CSPConfig) HeaderName() string {
 	return "Content-Security-Policy"
 }
 
-// CSPMiddleware creates a middleware that applies CSP headers
+// CSPMiddleware creates a middleware that applies CSP headers.
 func CSPMiddleware(config *CSPConfig) func(http.HandlerFunc) http.HandlerFunc {
 	return func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +171,7 @@ func CSPMiddleware(config *CSPConfig) func(http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// NonceFromContext extracts the CSP nonce from the request context
+// NonceFromContext extracts the CSP nonce from the request context.
 func NonceFromContext(ctx context.Context) string {
 	if nonce, ok := ctx.Value("csp-nonce").(string); ok {
 		return nonce

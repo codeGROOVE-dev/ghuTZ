@@ -1,3 +1,4 @@
+// Package main implements the ghutz CLI tool for GitHub user timezone detection.
 package main
 
 import (
@@ -99,7 +100,7 @@ func main() {
 	if err != nil {
 		cancel() // Ensure context is cancelled before exit
 		logger.Error("Detection failed", "error", err)
-		os.Exit(1)
+		return
 	}
 
 	// When verbose, show Gemini prompt and reasoning before results
@@ -149,11 +150,12 @@ func printResult(result *ghutz.Result) {
 
 	// Location and timezone in a cleaner format
 	locationStr := ""
-	if result.GeminiSuggestedLocation != "" {
+	switch {
+	case result.GeminiSuggestedLocation != "":
 		locationStr = result.GeminiSuggestedLocation
-	} else if result.LocationName != "" {
+	case result.LocationName != "":
 		locationStr = result.LocationName
-	} else if result.Location != nil {
+	case result.Location != nil:
 		locationStr = fmt.Sprintf("%.3f, %.3f", result.Location.Latitude, result.Location.Longitude)
 	}
 
@@ -188,11 +190,12 @@ func printResult(result *ghutz.Result) {
 		activityTz := result.ActivityTimezone
 		if strings.HasPrefix(activityTz, "UTC") {
 			offset := strings.TrimPrefix(activityTz, "UTC")
-			if offset == "" {
+			switch {
+			case offset == "":
 				activityTz = "GMT"
-			} else if strings.HasPrefix(offset, "+") {
+			case strings.HasPrefix(offset, "+"):
 				activityTz = "GMT" + offset
-			} else {
+			default:
 				// Negative offset already has minus sign
 				activityTz = "GMT" + offset
 			}
@@ -387,7 +390,7 @@ func formatHour(decimalHour float64) string {
 	return fmt.Sprintf("%d:%02d", hour, minutes)
 }
 
-// calculateTimezoneOffset calculates the UTC offset in hours for a given timezone
+// calculateTimezoneOffset calculates the UTC offset in hours for a given timezone.
 func calculateTimezoneOffset(timezone string) int {
 	if strings.HasPrefix(timezone, "UTC") {
 		offsetStr := strings.TrimPrefix(timezone, "UTC")
@@ -423,20 +426,22 @@ func formatRelativeTime(hours float64) string {
 	// Format tersely
 	if hours < 0 {
 		// In the past
-		if h == 0 {
+		switch {
+		case h == 0:
 			return fmt.Sprintf("%dm ago", m)
-		} else if m == 0 {
+		case m == 0:
 			return fmt.Sprintf("%dh ago", h)
-		} else {
+		default:
 			return fmt.Sprintf("%dh%dm ago", h, m)
 		}
 	} else {
 		// In the future
-		if h == 0 {
+		switch {
+		case h == 0:
 			return fmt.Sprintf("in %dm", m)
-		} else if m == 0 {
+		case m == 0:
 			return fmt.Sprintf("in %dh", h)
-		} else {
+		default:
 			// For future times, keep it simple
 			return fmt.Sprintf("in %dh", h+(m+29)/60) // Round to nearest hour
 		}
@@ -460,4 +465,3 @@ func formatMethodName(method string) string {
 	}
 	return method
 }
-

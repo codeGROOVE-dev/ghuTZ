@@ -1,3 +1,4 @@
+// Package main implements the ghutz web server for GitHub user timezone detection.
 package main
 
 import (
@@ -43,11 +44,11 @@ var (
 
 // Simple rate limiter for QPS control with memory protection.
 type rateLimiter struct {
-	mu       sync.Mutex
 	requests map[string][]time.Time
-	window   time.Duration // time window
-	limit    int           // requests per window
-	maxKeys  int           // maximum number of IPs to track (prevents memory exhaustion)
+	window   time.Duration
+	limit    int
+	maxKeys  int
+	mu       sync.Mutex
 }
 
 func newRateLimiter(limit int, window time.Duration) *rateLimiter {
@@ -96,7 +97,7 @@ func (rl *rateLimiter) allow(key string) bool {
 	return true
 }
 
-// cleanupOldEntries removes expired entries to prevent memory exhaustion
+// cleanupOldEntries removes expired entries to prevent memory exhaustion.
 func (rl *rateLimiter) cleanupOldEntries(cutoff time.Time) {
 	for key, timestamps := range rl.requests {
 		var filtered []time.Time
@@ -115,10 +116,10 @@ func (rl *rateLimiter) cleanupOldEntries(cutoff time.Time) {
 
 var apiLimiter = newRateLimiter(5, time.Minute) // 5 requests per minute per IP - defense against abuse
 
-// SECURITY: Username validation regex - GitHub usernames can only contain alphanumeric characters and hyphens
+// SECURITY: Username validation regex - GitHub usernames can only contain alphanumeric characters and hyphens.
 var validUsernameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]{0,38}$`)
 
-// sanitizeUsername validates and sanitizes username input to prevent XSS and injection
+// sanitizeUsername validates and sanitizes username input to prevent XSS and injection.
 func sanitizeUsername(username string) string {
 	// Trim whitespace
 	username = strings.TrimSpace(username)
@@ -137,7 +138,7 @@ func sanitizeUsername(username string) string {
 	return html.EscapeString(username)
 }
 
-// securityHeadersMiddleware adds comprehensive security headers
+// securityHeadersMiddleware adds comprehensive security headers.
 func securityHeadersMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// SECURITY: Comprehensive security headers for defense in depth
@@ -173,7 +174,7 @@ func securityHeadersMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// panicRecoveryMiddleware prevents crashes from panics - critical for nation-state attack resilience
+// panicRecoveryMiddleware prevents crashes from panics - critical for nation-state attack resilience.
 func panicRecoveryMiddleware(logger *slog.Logger, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Generate request ID for tracing
@@ -271,13 +272,14 @@ func runServer(detector *ghutz.Detector, logger *slog.Logger) {
 	staticHandler := http.StripPrefix("/static/", fileServer)
 	mux.Handle("/static/", panicRecoveryMiddleware(logger, securityHeadersMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		// Set proper MIME types for static files
-		if strings.HasSuffix(r.URL.Path, ".js") {
+		switch {
+		case strings.HasSuffix(r.URL.Path, ".js"):
 			w.Header().Set("Content-Type", "application/javascript")
-		} else if strings.HasSuffix(r.URL.Path, ".css") {
+		case strings.HasSuffix(r.URL.Path, ".css"):
 			w.Header().Set("Content-Type", "text/css")
-		} else if strings.HasSuffix(r.URL.Path, ".png") {
+		case strings.HasSuffix(r.URL.Path, ".png"):
 			w.Header().Set("Content-Type", "image/png")
-		} else if strings.HasSuffix(r.URL.Path, ".jpg") || strings.HasSuffix(r.URL.Path, ".jpeg") {
+		case strings.HasSuffix(r.URL.Path, ".jpg"), strings.HasSuffix(r.URL.Path, ".jpeg"):
 			w.Header().Set("Content-Type", "image/jpeg")
 		}
 

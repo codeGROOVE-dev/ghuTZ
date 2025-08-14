@@ -1,3 +1,4 @@
+// Package main implements the ghutz web server for GitHub user timezone detection.
 package main
 
 import (
@@ -6,7 +7,7 @@ import (
 	"strings"
 )
 
-// cspPolicy returns a unified Content Security Policy for all environments
+// cspPolicy returns a unified Content Security Policy for all environments.
 func cspPolicy() string {
 	var directives []string
 
@@ -32,8 +33,9 @@ func cspPolicy() string {
 		"https://cdn.jsdelivr.net",
 		"https://fonts.googleapis.com",
 	}
-	directives = append(directives, fmt.Sprintf("style-src %s", strings.Join(styleSrcs, " ")))
-	directives = append(directives, fmt.Sprintf("style-src-elem %s", strings.Join(styleSrcs, " ")))
+	directives = append(directives,
+		fmt.Sprintf("style-src %s", strings.Join(styleSrcs, " ")),
+		fmt.Sprintf("style-src-elem %s", strings.Join(styleSrcs, " ")))
 
 	// Image sources
 	imgSrcs := []string{

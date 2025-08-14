@@ -1,7 +1,7 @@
 package ghutz
 
 // unifiedGeminiPrompt returns the single consolidated prompt for all Gemini queries
-// This replaces the previous 4 different prompts (verbose/non-verbose × hasActivity/no-activity)
+// This replaces the previous 4 different prompts (verbose/non-verbose × hasActivity/no-activity).
 func unifiedGeminiPrompt() string {
 	return `You are a world-class private investigator specializing in timezone and location detection. Your mission: determine where this GitHub user is physically located based on their digital footprints. YOU MUST ALWAYS PROVIDE A LOCATION GUESS - even if confidence is low.
 

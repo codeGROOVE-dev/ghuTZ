@@ -151,7 +151,7 @@ func TestFindQuietHours(t *testing.T) {
 	// Create a pattern with clear quiet hours (midnight to 6am)
 	hourCounts := make(map[int]int)
 	// Quiet hours: 0-5 (minimal activity)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		hourCounts[i] = 1
 	}
 	// Active hours: 9-17 (high activity)
@@ -194,13 +194,13 @@ func TestLunchDetection(t *testing.T) {
 		{
 			name: "Kevin Davis Nashville - clear gap at 10:00 AM",
 			// Kevin's actual UTC activity data: [0 0 0 0 0 0 0 0 0 0 0 0 0 0 7 7 0 15 4 10 11 18 3 2]
-			// UTC 16 (index 16) = 10:00 AM Central Time (UTC-6) = 0 activities = CLEAR LUNCH GAP  
+			// UTC 16 (index 16) = 10:00 AM Central Time (UTC-6) = 0 activities = CLEAR LUNCH GAP
 			// UTC 18 (index 18) = 12:00 PM Central Time (UTC-6) = 4 activities = smaller dip
 			// Algorithm should detect 10:00 AM gap, but currently detects 12:00 PM dip instead
 			hourlyActivity: []int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 0, 15, 4, 10, 11, 18, 3, 2},
-			utcOffset:      -6, // Central Time
+			utcOffset:      -6,   // Central Time
 			expectedStart:  10.0, // Should detect 10:00 AM gap, NOT 12:00 PM dip
-			expectedEnd:    10.5, // 30-minute gap  
+			expectedEnd:    10.5, // 30-minute gap
 			minConfidence:  0.8,
 		},
 		{
@@ -209,14 +209,14 @@ func TestLunchDetection(t *testing.T) {
 			// Noon Pacific = 20:00 UTC (UTC-8)
 			// Create a clear gap at hour 20 (index 20) for noon Pacific
 			hourlyActivity: []int{
-				2, 1, 1, 1, 2, 2, 3, 4,     // 0-7 UTC: nighttime/early morning
+				2, 1, 1, 1, 2, 2, 3, 4, // 0-7 UTC: nighttime/early morning
 				5, 8, 10, 12, 14, 15, 16, 14, // 8-15 UTC: morning work (0-7 AM Pacific)
-				12, 10, 8, 6, 0, 8, 10, 6,    // 16-23 UTC: hour 20 = 0 for lunch gap
+				12, 10, 8, 6, 0, 8, 10, 6, // 16-23 UTC: hour 20 = 0 for lunch gap
 			},
-			utcOffset:      -8, // Pacific Time
-			expectedStart:  12.0, // Should detect noon lunch (20:00 UTC converted to 12:00 Pacific)
-			expectedEnd:    13.0, // 1-hour gap
-			minConfidence:  0.8,
+			utcOffset:     -8,   // Pacific Time
+			expectedStart: 12.0, // Should detect noon lunch (20:00 UTC converted to 12:00 Pacific)
+			expectedEnd:   13.0, // 1-hour gap
+			minConfidence: 0.8,
 		},
 	}
 

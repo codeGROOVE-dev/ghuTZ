@@ -13,7 +13,7 @@ import (
 )
 
 // calculateTypicalActiveHours determines typical work hours based on activity patterns
-// It finds the longest continuous block of substantial activity, ignoring gaps > 2 hours
+// It finds the longest continuous block of substantial activity, ignoring gaps > 2 hours.
 func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOffset int) (start, end int) {
 	// Create a map for easy lookup of quiet hours
 	quietMap := make(map[int]bool)
@@ -45,7 +45,7 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 	var blocks []workBlock
 	currentBlock := workBlock{start: -1}
 
-	for hour := 0; hour < 24; hour++ {
+	for hour := range 24 {
 		hasActivity := !quietMap[hour] && hourCounts[hour] > threshold
 
 		if hasActivity {
@@ -124,7 +124,7 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 }
 
 // findSleepHours looks for continuous quiet periods of at least 3 hours
-// Only returns quiet periods that are 3+ hours continuous
+// Only returns quiet periods that are 3+ hours continuous.
 func findSleepHours(hourCounts map[int]int) []int {
 	// Find threshold for quiet hours (≤5% of max activity or ≤1 event)
 	maxActivity := 0
@@ -141,7 +141,7 @@ func findSleepHours(hourCounts map[int]int) []int {
 
 	// Find all quiet hours
 	quietHours := make([]bool, 24)
-	for hour := 0; hour < 24; hour++ {
+	for hour := range 24 {
 		quietHours[hour] = hourCounts[hour] <= threshold
 	}
 
@@ -155,7 +155,7 @@ func findSleepHours(hourCounts map[int]int) []int {
 
 	if totalQuietHours < 4 {
 		// Be more strict - only use hours with zero activity
-		for hour := 0; hour < 24; hour++ {
+		for hour := range 24 {
 			quietHours[hour] = hourCounts[hour] == 0
 		}
 	}
@@ -166,7 +166,7 @@ func findSleepHours(hourCounts map[int]int) []int {
 
 	// First pass: Find all continuous blocks
 	var currentBlock []int
-	for hour := 0; hour < 24; hour++ {
+	for hour := range 24 {
 		if quietHours[hour] {
 			currentBlock = append(currentBlock, hour)
 		} else {
@@ -192,11 +192,9 @@ func findSleepHours(hourCounts map[int]int) []int {
 				// Replace the first block with the combined block
 				blocks[0] = combined
 			}
-		} else {
+		} else if len(lastBlock) >= 3 {
 			// They can't be combined, add the last block if it's long enough
-			if len(lastBlock) >= 3 {
-				blocks = append(blocks, lastBlock)
-			}
+			blocks = append(blocks, lastBlock)
 		}
 	} else if len(currentBlock) >= 3 {
 		// No existing blocks, just add the current one if it's long enough
@@ -221,9 +219,9 @@ func findQuietHours(hourCounts map[int]int) []int {
 	minStart := 0
 	windowSize := 6
 
-	for start := 0; start < 24; start++ {
+	for start := range 24 {
 		sum := 0
-		for i := 0; i < windowSize; i++ {
+		for i := range windowSize {
 			hour := (start + i) % 24
 			sum += hourCounts[hour]
 		}
@@ -234,7 +232,7 @@ func findQuietHours(hourCounts map[int]int) []int {
 	}
 
 	quietHours := make([]int, windowSize)
-	for i := 0; i < windowSize; i++ {
+	for i := range windowSize {
 		quietHours[i] = (minStart + i) % 24
 	}
 
@@ -505,7 +503,7 @@ func detectLunchBreak(hourCounts map[int]int, utcOffset int, workStart, workEnd 
 	return bestCandidate.start, bestCandidate.end, bestCandidate.confidence
 }
 
-// formatEvidenceForGemini formats contextual data into a readable, structured format for Gemini analysis
+// formatEvidenceForGemini formats contextual data into a readable, structured format for Gemini analysis.
 func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) string {
 	var evidence strings.Builder
 
@@ -811,14 +809,14 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 
 	// ISSUE COUNT
 	if issueCount, ok := contextData["issue_count"].(int); ok {
-		evidence.WriteString(fmt.Sprintf("## ADDITIONAL METRICS\n"))
+		evidence.WriteString("## ADDITIONAL METRICS\n")
 		evidence.WriteString(fmt.Sprintf("Issue Count: %d\n", issueCount))
 	}
 
 	return evidence.String()
 }
 
-// generateAlternativeTimezones creates 2-3 plausible alternative timezone candidates
+// generateAlternativeTimezones creates 2-3 plausible alternative timezone candidates.
 func generateAlternativeTimezones(primaryTz string, workStart float64) []TimezoneCandidate {
 	var candidates []TimezoneCandidate
 
@@ -848,16 +846,17 @@ func generateAlternativeTimezones(primaryTz string, workStart float64) []Timezon
 			})
 		}
 	case "UTC+2":
-		candidates = append(candidates, TimezoneCandidate{
-			Timezone:   "UTC+1",
-			Confidence: 0.25,
-			Evidence:   []string{"One hour west (Central Europe) possibility"},
-		})
-		candidates = append(candidates, TimezoneCandidate{
-			Timezone:   "UTC+3",
-			Confidence: 0.20,
-			Evidence:   []string{"One hour east (Eastern Europe/Middle East) possibility"},
-		})
+		candidates = append(candidates,
+			TimezoneCandidate{
+				Timezone:   "UTC+1",
+				Confidence: 0.25,
+				Evidence:   []string{"One hour west (Central Europe) possibility"},
+			},
+			TimezoneCandidate{
+				Timezone:   "UTC+3",
+				Confidence: 0.20,
+				Evidence:   []string{"One hour east (Eastern Europe/Middle East) possibility"},
+			})
 	case "UTC-5":
 		candidates = append(candidates, TimezoneCandidate{
 			Timezone:   "UTC-6",
@@ -936,7 +935,7 @@ func generateAlternativeTimezones(primaryTz string, workStart float64) []Timezon
 	return candidates
 }
 
-// detectPeakProductivity finds the single most productive 30-minute slot
+// detectPeakProductivity finds the single most productive 30-minute slot.
 func detectPeakProductivity(hourCounts map[int]int, utcOffset int) (start, end float64, count int) {
 	// Convert hour counts to 30-minute buckets in local time
 	bucketCounts := make(map[float64]int)
@@ -972,14 +971,14 @@ func detectPeakProductivity(hourCounts map[int]int, utcOffset int) (start, end f
 	return 0, 0, 0
 }
 
-// CountryTLD represents a country-code top-level domain with metadata
+// CountryTLD represents a country-code top-level domain with metadata.
 type CountryTLD struct {
 	TLD     string `json:"tld"`
 	Country string `json:"country"`
 	Region  string `json:"region"`
 }
 
-// extractCountryTLDs extracts country-code top-level domains from URLs
+// extractCountryTLDs extracts country-code top-level domains from URLs.
 func extractCountryTLDs(urls ...string) []CountryTLD {
 	// Map of ccTLDs to countries and regions for location hints
 	ccTLDMap := map[string]CountryTLD{
@@ -1059,7 +1058,7 @@ func extractCountryTLDs(urls ...string) []CountryTLD {
 	return foundTLDs
 }
 
-// extractSocialMediaURLs extracts URLs from various social media fields in user profile
+// extractSocialMediaURLs extracts URLs from various social media fields in user profile.
 func extractSocialMediaURLs(user *GitHubUser) []string {
 	var urls []string
 
@@ -1095,7 +1094,7 @@ func extractSocialMediaURLs(user *GitHubUser) []string {
 	return urls
 }
 
-// fetchMastodonWebsite fetches a Mastodon profile and extracts the website URL
+// fetchMastodonWebsite fetches a Mastodon profile and extracts the website URL.
 func (d *Detector) fetchMastodonWebsite(ctx context.Context, mastodonURL string) string {
 	// Parse the Mastodon URL to extract instance and username
 	// Format: https://instance.domain/@username
@@ -1115,7 +1114,7 @@ func (d *Detector) fetchMastodonWebsite(ctx context.Context, mastodonURL string)
 		d.logger.Debug("failed to create request for Mastodon profile", "url", mastodonURL, "error", err)
 		return ""
 	}
-	
+
 	resp, err := d.retryableHTTPDo(ctx, req)
 	if err != nil {
 		d.logger.Debug("failed to fetch Mastodon profile", "url", mastodonURL, "error", err)
@@ -1201,8 +1200,7 @@ func (d *Detector) fetchMastodonWebsite(ctx context.Context, mastodonURL string)
 	return ""
 }
 
-
-// isPolishName checks if a name appears to be Polish based on common patterns
+// isPolishName checks if a name appears to be Polish based on common patterns.
 func isPolishName(name string) bool {
 	if name == "" {
 		return false
@@ -1227,10 +1225,12 @@ func isPolishName(name string) bool {
 	}
 
 	// Check for common Polish first names
-	polishFirstNames := []string{"łukasz", "paweł", "michał", "piotr", "wojciech",
+	polishFirstNames := []string{
+		"łukasz", "paweł", "michał", "piotr", "wojciech",
 		"krzysztof", "andrzej", "marek", "tomasz", "jan", "stanisław", "zbigniew",
 		"anna", "maria", "katarzyna", "małgorzata", "agnieszka", "barbara", "ewa",
-		"elżbieta", "zofia", "teresa", "magdalena", "joanna", "aleksandra"}
+		"elżbieta", "zofia", "teresa", "magdalena", "joanna", "aleksandra",
+	}
 
 	nameWords := strings.Fields(nameLower)
 	for _, word := range nameWords {
@@ -1244,7 +1244,7 @@ func isPolishName(name string) bool {
 	return false
 }
 
-// extractSocialMediaFromHTML extracts social media links from GitHub profile HTML
+// extractSocialMediaFromHTML extracts social media links from GitHub profile HTML.
 func extractSocialMediaFromHTML(html string) []string {
 	var urls []string
 

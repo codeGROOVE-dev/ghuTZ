@@ -25,7 +25,7 @@ func TestPolishNameDetection(t *testing.T) {
 		{"Name with ą", "Błażej Kąkol", true},
 		{"Name with ż", "Grażyna Żukowska", true},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := isPolishName(tt.input)
@@ -40,70 +40,70 @@ func TestPolishNameDetection(t *testing.T) {
 // for distinguishing US timezones, specifically dlorenc (EST) and IdlePhysicist (MST)
 func TestEveningActivityDetection(t *testing.T) {
 	tests := []struct {
-		name               string
-		quietHours         []int  // UTC sleep hours
-		eveningActivityEastern  int // Activity during Eastern evening hours (0-4, 12-16 UTC)
-		eveningActivityCentral  int // Activity during Central evening hours (1-5, 13-17 UTC)
-		eveningActivityMountain int // Activity during Mountain evening hours (2-6, 14-18 UTC)  
-		eveningActivityPacific  int // Activity during Pacific evening hours (3-7, 15-19 UTC)
-		expectedOffset     int    // Expected UTC offset
-		expectedTimezone   string
-		description        string
+		name                    string
+		quietHours              []int // UTC sleep hours
+		eveningActivityEastern  int   // Activity during Eastern evening hours (0-4, 12-16 UTC)
+		eveningActivityCentral  int   // Activity during Central evening hours (1-5, 13-17 UTC)
+		eveningActivityMountain int   // Activity during Mountain evening hours (2-6, 14-18 UTC)
+		eveningActivityPacific  int   // Activity during Pacific evening hours (3-7, 15-19 UTC)
+		expectedOffset          int   // Expected UTC offset
+		expectedTimezone        string
+		description             string
 	}{
 		{
-			name:               "dlorenc case - East Coast developer",
-			quietHours:         []int{6, 7, 8, 9},        // Sleep 6-9 UTC (2-5am Eastern)
-			eveningActivityEastern:  131,                  // Higher eastern evening activity 
-			eveningActivityCentral:  116,                  // Medium central evening activity
-			eveningActivityMountain: 85,                   // Lower mountain evening activity
-			eveningActivityPacific:  80,                   // Lowest pacific evening activity
-			expectedOffset:     -5,                       // Eastern Time (UTC-5)
-			expectedTimezone:   "UTC-5",
-			description:        "Higher eastern evening activity should select Eastern Time",
+			name:                    "dlorenc case - East Coast developer",
+			quietHours:              []int{6, 7, 8, 9}, // Sleep 6-9 UTC (2-5am Eastern)
+			eveningActivityEastern:  131,               // Higher eastern evening activity
+			eveningActivityCentral:  116,               // Medium central evening activity
+			eveningActivityMountain: 85,                // Lower mountain evening activity
+			eveningActivityPacific:  80,                // Lowest pacific evening activity
+			expectedOffset:          -5,                // Eastern Time (UTC-5)
+			expectedTimezone:        "UTC-5",
+			description:             "Higher eastern evening activity should select Eastern Time",
 		},
 		{
-			name:               "IdlePhysicist case - Mountain Time developer", 
-			quietHours:         []int{5, 6, 7, 8, 9, 10}, // Sleep 5-10 UTC (10pm-3am Mountain)
-			eveningActivityEastern:  120,                  // Lower eastern evening activity
-			eveningActivityCentral:  125,                  // Medium central evening activity  
-			eveningActivityMountain: 145,                  // Higher mountain evening activity
-			eveningActivityPacific:  115,                  // Lower pacific evening activity
-			expectedOffset:     -7,                       // Mountain Time (UTC-7)
-			expectedTimezone:   "UTC-7",
-			description:        "Higher mountain evening activity should select Mountain Time",
+			name:                    "IdlePhysicist case - Mountain Time developer",
+			quietHours:              []int{5, 6, 7, 8, 9, 10}, // Sleep 5-10 UTC (10pm-3am Mountain)
+			eveningActivityEastern:  120,                      // Lower eastern evening activity
+			eveningActivityCentral:  125,                      // Medium central evening activity
+			eveningActivityMountain: 145,                      // Higher mountain evening activity
+			eveningActivityPacific:  115,                      // Lower pacific evening activity
+			expectedOffset:          -7,                       // Mountain Time (UTC-7)
+			expectedTimezone:        "UTC-7",
+			description:             "Higher mountain evening activity should select Mountain Time",
 		},
 		{
-			name:               "Central Time case - balanced activity",
-			quietHours:         []int{6, 7, 8, 9, 10},    // Sleep 6-10 UTC (1-5am Central)
-			eveningActivityEastern:  105,                  // Lower eastern evening activity
-			eveningActivityCentral:  140,                  // Highest central evening activity
-			eveningActivityMountain: 100,                  // Lower mountain evening activity
-			eveningActivityPacific:  95,                   // Lowest pacific evening activity
-			expectedOffset:     -6,                       // Central Time (UTC-6)
-			expectedTimezone:   "UTC-6", 
-			description:        "Highest central evening activity should select Central Time",
+			name:                    "Central Time case - balanced activity",
+			quietHours:              []int{6, 7, 8, 9, 10}, // Sleep 6-10 UTC (1-5am Central)
+			eveningActivityEastern:  105,                   // Lower eastern evening activity
+			eveningActivityCentral:  140,                   // Highest central evening activity
+			eveningActivityMountain: 100,                   // Lower mountain evening activity
+			eveningActivityPacific:  95,                    // Lowest pacific evening activity
+			expectedOffset:          -6,                    // Central Time (UTC-6)
+			expectedTimezone:        "UTC-6",
+			description:             "Highest central evening activity should select Central Time",
 		},
 		{
-			name:               "a-crate case - Pacific Time developer",
-			quietHours:         []int{8, 9, 10, 11, 12, 13}, // Sleep 8-13 UTC (12am-5am Pacific)
-			eveningActivityEastern:  85,                     // Lower eastern evening activity  
-			eveningActivityCentral:  95,                     // Medium central evening activity
-			eveningActivityMountain: 90,                     // Lower mountain evening activity
-			eveningActivityPacific:  160,                    // Highest pacific evening activity
-			expectedOffset:     -8,                        // Pacific Time (UTC-8)
-			expectedTimezone:   "UTC-8",
-			description:        "Pacific developer with late sleep pattern should get Pacific Time",
+			name:                    "a-crate case - Pacific Time developer",
+			quietHours:              []int{8, 9, 10, 11, 12, 13}, // Sleep 8-13 UTC (12am-5am Pacific)
+			eveningActivityEastern:  85,                          // Lower eastern evening activity
+			eveningActivityCentral:  95,                          // Medium central evening activity
+			eveningActivityMountain: 90,                          // Lower mountain evening activity
+			eveningActivityPacific:  160,                         // Highest pacific evening activity
+			expectedOffset:          -8,                          // Pacific Time (UTC-8)
+			expectedTimezone:        "UTC-8",
+			description:             "Pacific developer with late sleep pattern should get Pacific Time",
 		},
 		{
-			name:               "tstromberg case - Eastern Time developer",
-			quietHours:         []int{5, 6, 7, 8, 9},       // Sleep 5-9 UTC (1-5am Eastern)
-			eveningActivityEastern:  150,                   // Higher eastern evening activity
-			eveningActivityCentral:  110,                   // Medium central evening activity  
-			eveningActivityMountain: 95,                    // Lower mountain evening activity
-			eveningActivityPacific:  85,                    // Lowest pacific evening activity
-			expectedOffset:     -5,                        // Eastern Time (UTC-5)
-			expectedTimezone:   "UTC-5",
-			description:        "Strong Eastern evening activity should select Eastern Time",
+			name:                    "tstromberg case - Eastern Time developer",
+			quietHours:              []int{5, 6, 7, 8, 9}, // Sleep 5-9 UTC (1-5am Eastern)
+			eveningActivityEastern:  150,                  // Higher eastern evening activity
+			eveningActivityCentral:  110,                  // Medium central evening activity
+			eveningActivityMountain: 95,                   // Lower mountain evening activity
+			eveningActivityPacific:  85,                   // Lowest pacific evening activity
+			expectedOffset:          -5,                   // Eastern Time (UTC-5)
+			expectedTimezone:        "UTC-5",
+			description:             "Strong Eastern evening activity should select Eastern Time",
 		},
 	}
 
@@ -111,21 +111,21 @@ func TestEveningActivityDetection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create hour counts map with quiet hours
 			hourCounts := make(map[int]int)
-			
-			// Set quiet hours (low activity)  
+
+			// Set quiet hours (low activity)
 			for _, hour := range tt.quietHours {
 				hourCounts[hour] = 1
 			}
-			
+
 			// Set up evening activity patterns based on test data
-			// Eastern evening: 0-4 UTC (7-11pm EST) + 12-16 UTC (7-11pm EDT) 
+			// Eastern evening: 0-4 UTC (7-11pm EST) + 12-16 UTC (7-11pm EDT)
 			easternHours := []int{0, 1, 2, 3, 12, 13, 14, 15}
 			totalEasternHours := len(easternHours)
 			avgEasternActivity := tt.eveningActivityEastern / totalEasternHours
 			for _, hour := range easternHours {
 				hourCounts[hour] = avgEasternActivity
 			}
-			
+
 			// Central evening: 1-5 UTC (7-11pm CST) + 13-17 UTC (7-11pm CDT)
 			centralHours := []int{1, 2, 3, 4, 13, 14, 15, 16}
 			totalCentralHours := len(centralHours)
@@ -135,7 +135,7 @@ func TestEveningActivityDetection(t *testing.T) {
 					hourCounts[hour] = avgCentralActivity
 				}
 			}
-			
+
 			// Mountain evening: 2-6 UTC (7-11pm MST) + 14-18 UTC (7-11pm MDT)
 			mountainHours := []int{2, 3, 4, 5, 14, 15, 16, 17}
 			totalMountainHours := len(mountainHours)
@@ -145,7 +145,7 @@ func TestEveningActivityDetection(t *testing.T) {
 					hourCounts[hour] = avgMountainActivity
 				}
 			}
-			
+
 			// Pacific evening: 3-7 UTC (7-11pm PST) + 15-19 UTC (7-11pm PDT)
 			pacificHours := []int{3, 4, 5, 6, 15, 16, 17, 18}
 			totalPacificHours := len(pacificHours)
@@ -155,9 +155,9 @@ func TestEveningActivityDetection(t *testing.T) {
 					hourCounts[hour] = avgPacificActivity
 				}
 			}
-			
+
 			// Fill in remaining hours with moderate activity
-			for hour := 0; hour < 24; hour++ {
+			for hour := range 24 {
 				if hourCounts[hour] == 0 {
 					hourCounts[hour] = 5 // Moderate baseline activity
 				}
@@ -165,51 +165,51 @@ func TestEveningActivityDetection(t *testing.T) {
 
 			// Calculate timezone using the improved logic from activity.go
 			midQuiet := float64(tt.quietHours[0]+tt.quietHours[len(tt.quietHours)-1]) / 2.0
-			
+
 			// Test the evening activity comparison logic
 			bestOffset := -5.0 // Default to Eastern
 			bestTimezone := "eastern"
 			bestActivity := tt.eveningActivityEastern
-			
+
 			if tt.eveningActivityCentral > bestActivity {
-				bestTimezone = "central"  
+				bestTimezone = "central"
 				bestActivity = tt.eveningActivityCentral
 				bestOffset = -6.0
 			}
-			
+
 			if tt.eveningActivityMountain > bestActivity {
 				bestTimezone = "mountain"
 				bestActivity = tt.eveningActivityMountain
 				bestOffset = -7.0
 			}
-			
+
 			if tt.eveningActivityPacific > bestActivity {
 				bestTimezone = "pacific"
 				bestActivity = tt.eveningActivityPacific
 				bestOffset = -8.0
 			}
-			
+
 			// Apply sleep pattern validation (from the improved logic)
 			offsetFromUTC := bestOffset
 			if bestTimezone == "eastern" && midQuiet > 8.0 {
 				// Eastern time but very late sleep pattern - might actually be Central
-				if float64(tt.eveningActivityCentral) > float64(tt.eveningActivityEastern) * 0.7 {
+				if float64(tt.eveningActivityCentral) > float64(tt.eveningActivityEastern)*0.7 {
 					offsetFromUTC = -6.0 // Central Time
 				}
 			} else if bestTimezone == "mountain" && midQuiet < 6.0 {
-				// Mountain time but very early sleep pattern - might actually be Eastern  
-				if float64(tt.eveningActivityEastern) > float64(tt.eveningActivityMountain) * 0.7 {
+				// Mountain time but very early sleep pattern - might actually be Eastern
+				if float64(tt.eveningActivityEastern) > float64(tt.eveningActivityMountain)*0.7 {
 					offsetFromUTC = -5.0 // Eastern Time
 				}
 			} else if bestTimezone == "pacific" && midQuiet < 8.0 {
 				// Pacific time but earlier sleep pattern - might actually be Mountain
-				if float64(tt.eveningActivityMountain) > float64(tt.eveningActivityPacific) * 0.7 {
+				if float64(tt.eveningActivityMountain) > float64(tt.eveningActivityPacific)*0.7 {
 					offsetFromUTC = -7.0 // Mountain Time
 				}
 			}
-			
+
 			offsetInt := int(offsetFromUTC)
-			
+
 			// Verify the offset matches expected
 			if offsetInt != tt.expectedOffset {
 				t.Errorf("%s: expected offset %d, got %d\nEvening activity - Eastern: %d, Central: %d, Mountain: %d, Pacific: %d\nSelected: %s (activity: %d)\nSleep midpoint: %.1f",
@@ -217,14 +217,14 @@ func TestEveningActivityDetection(t *testing.T) {
 					tt.eveningActivityEastern, tt.eveningActivityCentral, tt.eveningActivityMountain, tt.eveningActivityPacific,
 					bestTimezone, bestActivity, midQuiet)
 			}
-			
+
 			// Check timezone mapping
 			tz := timezoneFromOffset(offsetInt)
 			if tz != tt.expectedTimezone {
 				t.Errorf("%s: expected timezone %s, got %s (offset=%d)",
 					tt.name, tt.expectedTimezone, tz, offsetInt)
 			}
-			
+
 			t.Logf("%s: evening activity Eastern=%d, Central=%d, Mountain=%d, Pacific=%d → selected %s (offset=%d, tz=%s)",
 				tt.name, tt.eveningActivityEastern, tt.eveningActivityCentral, tt.eveningActivityMountain, tt.eveningActivityPacific,
 				bestTimezone, offsetInt, tz)
@@ -319,7 +319,7 @@ func TestActivityDetectionWithFixedData(t *testing.T) {
 				0, 0, 0, 1, 7, 12, 15, 14, // 8-15 UTC: Quiet 8-10, then work starts
 				16, 18, 14, 10, 8, 6, 4, 2, // 16-23 UTC: Work day then wind down
 			},
-			expectedOffset: []int{-6, -5}, // Central Time (CST/CDT) 
+			expectedOffset: []int{-6, -5}, // Central Time (CST/CDT)
 			expectedTZ:     []string{"UTC-6", "UTC-5"},
 			description:    "Nashville developer - Central Time pattern",
 		},
@@ -335,7 +335,7 @@ func TestActivityDetectionWithFixedData(t *testing.T) {
 
 			// Find quiet hours using the actual sleep detection algorithm
 			quietHours := findSleepHours(hourCounts)
-			
+
 			// Calculate midpoint
 			var sum float64
 			for _, hour := range quietHours {
@@ -356,20 +356,20 @@ func TestActivityDetectionWithFixedData(t *testing.T) {
 			for hour := 13; hour <= 23; hour++ {
 				americanActivity += hourCounts[hour]
 			}
-			for hour := 0; hour <= 3; hour++ {
+			for hour := range 4 {
 				americanActivity += hourCounts[hour]
 			}
 
 			// If American pattern and ambiguous sleep, use evening activity
 			if americanActivity > europeanActivity && midQuiet >= 4.5 && midQuiet <= 8.5 {
 				// Calculate evening activity for each US timezone
-				eveningActivityEastern := hourCounts[0] + hourCounts[1] + hourCounts[2] + hourCounts[3] + 
+				eveningActivityEastern := hourCounts[0] + hourCounts[1] + hourCounts[2] + hourCounts[3] +
 					hourCounts[12] + hourCounts[13] + hourCounts[14] + hourCounts[15]
-				eveningActivityCentral := hourCounts[1] + hourCounts[2] + hourCounts[3] + hourCounts[4] + 
+				eveningActivityCentral := hourCounts[1] + hourCounts[2] + hourCounts[3] + hourCounts[4] +
 					hourCounts[13] + hourCounts[14] + hourCounts[15] + hourCounts[16]
-				eveningActivityMountain := hourCounts[2] + hourCounts[3] + hourCounts[4] + hourCounts[5] + 
+				eveningActivityMountain := hourCounts[2] + hourCounts[3] + hourCounts[4] + hourCounts[5] +
 					hourCounts[14] + hourCounts[15] + hourCounts[16] + hourCounts[17]
-				eveningActivityPacific := hourCounts[3] + hourCounts[4] + hourCounts[5] + hourCounts[6] + 
+				eveningActivityPacific := hourCounts[3] + hourCounts[4] + hourCounts[5] + hourCounts[6] +
 					hourCounts[15] + hourCounts[16] + hourCounts[17] + hourCounts[18]
 
 				// Select timezone with highest evening activity
@@ -392,7 +392,7 @@ func TestActivityDetectionWithFixedData(t *testing.T) {
 				offsetFromUTC = bestOffset
 
 				t.Logf("%s: Evening activity - Eastern=%d, Central=%d, Mountain=%d, Pacific=%d → offset=%.0f",
-					tt.name, eveningActivityEastern, eveningActivityCentral, 
+					tt.name, eveningActivityEastern, eveningActivityCentral,
 					eveningActivityMountain, eveningActivityPacific, offsetFromUTC)
 			}
 
@@ -524,7 +524,7 @@ func TestWorkScheduleCorrection(t *testing.T) {
 			quietEnd := int(targetMidQuiet + 3.0)
 
 			// Handle wrap-around for UTC hours
-			for i := 0; i < 24; i++ {
+			for i := range 24 {
 				if (i >= quietStart && i <= quietEnd) || (quietStart > quietEnd && (i >= quietStart || i <= quietEnd)) {
 					hourCounts[i] = 1 // Low activity (quiet)
 				} else {

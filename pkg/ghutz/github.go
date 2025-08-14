@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,7 +12,7 @@ import (
 	"time"
 )
 
-// PublicEvent represents a GitHub public event
+// PublicEvent represents a GitHub public event.
 type PublicEvent struct {
 	ID        string    `json:"id"`
 	Type      string    `json:"type"`
@@ -23,26 +24,26 @@ type PublicEvent struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-// fetchPublicEvents fetches public events (limited to last 30 days by GitHub API)
+// fetchPublicEvents fetches public events (limited to last 30 days by GitHub API).
 func (d *Detector) fetchPublicEvents(ctx context.Context, username string) ([]PublicEvent, error) {
 	const maxPages = 3 // 100 events per page * 3 = 300 (GitHub's max)
 	const perPage = 100
-	
+
 	var allEvents []PublicEvent
-	
+
 	for page := 1; page <= maxPages; page++ {
 		apiURL := fmt.Sprintf("https://api.github.com/users/%s/events/public?per_page=%d&page=%d", username, perPage, page)
-		
+
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 		if err != nil {
 			return allEvents, fmt.Errorf("creating request: %w", err)
 		}
-		
+
 		// Add GitHub token if available
 		if d.githubToken != "" && d.isValidGitHubToken(d.githubToken) {
 			req.Header.Set("Authorization", "token "+d.githubToken)
 		}
-		
+
 		resp, err := d.cachedHTTPDo(ctx, req)
 		if err != nil {
 			d.logger.Debug("failed to fetch events page", "page", page, "error", err)
@@ -53,31 +54,31 @@ func (d *Detector) fetchPublicEvents(ctx context.Context, username string) ([]Pu
 				d.logger.Debug("failed to close response body", "error", err)
 			}
 		}()
-		
+
 		if resp.StatusCode != http.StatusOK {
 			d.logger.Debug("GitHub API returned non-200 status", "status", resp.StatusCode, "page", page)
 			break // Return what we have so far
 		}
-		
+
 		var events []PublicEvent
 		if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
 			d.logger.Debug("failed to decode events", "page", page, "error", err)
 			break // Return what we have so far
 		}
-		
+
 		if len(events) == 0 {
 			break // No more events
 		}
-		
+
 		// Add all events (GitHub API already limits to 30 days)
 		allEvents = append(allEvents, events...)
-		
+
 		// If we got fewer events than requested, we've reached the end
 		if len(events) < perPage {
 			break
 		}
 	}
-	
+
 	d.logger.Debug("fetched public events", "username", username, "count", len(allEvents))
 	return allEvents, nil
 }
@@ -118,14 +119,14 @@ func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]Pu
 	}
 
 	var result struct {
-		TotalCount int `json:"total_count"`
-		Items      []struct {
+		Items []struct {
 			Title         string    `json:"title"`
 			Body          string    `json:"body"`
 			CreatedAt     time.Time `json:"created_at"`
 			HTMLURL       string    `json:"html_url"`
-			RepositoryURL string    `json:"repository_url"` // This is just a URL string
+			RepositoryURL string    `json:"repository_url"`
 		} `json:"items"`
+		TotalCount int `json:"total_count"` // This is just a URL string
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -194,13 +195,13 @@ func (d *Detector) fetchIssues(ctx context.Context, username string) ([]Issue, e
 	}
 
 	var result struct {
-		TotalCount int `json:"total_count"`
-		Items      []struct {
+		Items []struct {
 			Title     string    `json:"title"`
 			Body      string    `json:"body"`
 			CreatedAt time.Time `json:"created_at"`
 			HTMLURL   string    `json:"html_url"`
 		} `json:"items"`
+		TotalCount int `json:"total_count"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -236,7 +237,7 @@ func (d *Detector) fetchIssues(ctx context.Context, username string) ([]Issue, e
 func (d *Detector) fetchUserComments(ctx context.Context, username string) ([]Comment, error) {
 	if d.githubToken == "" {
 		d.logger.Debug("GitHub token required for GraphQL API", "username", username)
-		return nil, fmt.Errorf("GitHub token required for GraphQL API")
+		return nil, errors.New("GitHub token required for GraphQL API")
 	}
 
 	query := fmt.Sprintf(`{
@@ -429,20 +430,20 @@ func (d *Detector) fetchUserRepositories(ctx context.Context, username string) (
 	if err != nil {
 		d.logger.Debug("failed to fetch pinned repositories, falling back to popular repos", "username", username, "error", err)
 	}
-	
+
 	// If we have pinned repos, use those
 	if len(pinnedRepos) > 0 {
 		d.logger.Debug("using pinned repositories", "username", username, "count", len(pinnedRepos))
 		return pinnedRepos, nil
 	}
-	
+
 	// Fall back to most starred repositories
 	popularRepos, err := d.fetchPopularRepositories(ctx, username)
 	if err != nil {
 		d.logger.Debug("failed to fetch popular repositories", "username", username, "error", err)
 		return []Repository{}, err
 	}
-	
+
 	d.logger.Debug("using popular repositories", "username", username, "count", len(popularRepos))
 	return popularRepos, nil
 }
@@ -450,7 +451,7 @@ func (d *Detector) fetchUserRepositories(ctx context.Context, username string) (
 func (d *Detector) fetchPinnedRepositories(ctx context.Context, username string) ([]Repository, error) {
 	if d.githubToken == "" {
 		d.logger.Debug("GitHub token required for GraphQL API", "username", username)
-		return nil, fmt.Errorf("GitHub token required for GraphQL API")
+		return nil, errors.New("GitHub token required for GraphQL API")
 	}
 
 	query := fmt.Sprintf(`{
@@ -512,14 +513,14 @@ func (d *Detector) fetchPinnedRepositories(ctx context.Context, username string)
 			User struct {
 				PinnedItems struct {
 					Nodes []struct {
-						Name         string `json:"name"`
-						NameWithOwner string `json:"nameWithOwner"`
-						Description  string `json:"description"`
+						Name            string `json:"name"`
+						NameWithOwner   string `json:"nameWithOwner"`
+						Description     string `json:"description"`
 						PrimaryLanguage struct {
 							Name string `json:"name"`
 						} `json:"primaryLanguage"`
-						StargazerCount int    `json:"stargazerCount"`
 						URL            string `json:"url"`
+						StargazerCount int    `json:"stargazerCount"`
 					} `json:"nodes"`
 				} `json:"pinnedItems"`
 			} `json:"user"`
@@ -596,8 +597,8 @@ func (d *Detector) fetchPopularRepositories(ctx context.Context, username string
 		FullName        string `json:"full_name"`
 		Description     string `json:"description"`
 		Language        string `json:"language"`
-		StargazersCount int    `json:"stargazers_count"`
 		HTMLURL         string `json:"html_url"`
+		StargazersCount int    `json:"stargazers_count"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&apiRepos); err != nil {
