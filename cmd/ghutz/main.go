@@ -7,6 +7,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -95,6 +96,19 @@ func main() {
 	result, err := detector.Detect(ctx, username)
 	if err != nil {
 		log.Fatalf("Detection failed: %v", err)
+	}
+
+	// When verbose, show Gemini prompt and reasoning before results
+	if *verbose && result.GeminiPrompt != "" {
+		fmt.Printf("\n🤖 Gemini Prompt:\n")
+		fmt.Println(strings.Repeat("─", 50))
+		fmt.Printf("%s\n\n", result.GeminiPrompt)
+		
+		if result.GeminiReasoning != "" {
+			fmt.Printf("🧠 Gemini Reasoning:\n")
+			fmt.Println(strings.Repeat("─", 50))
+			fmt.Printf("%s\n\n", result.GeminiReasoning)
+		}
 	}
 
 	// Print results in CLI format
@@ -250,7 +264,14 @@ func printResult(result *ghutz.Result) {
 			if len(result.QuietHoursUTC) > 0 {
 				// Calculate UTC offset from timezone
 				utcOffset := 0
-				if loc, err := time.LoadLocation(tzName); err == nil {
+				
+				// First try to extract offset from UTC+X format
+				if strings.HasPrefix(tzName, "UTC") {
+					offsetStr := strings.TrimPrefix(tzName, "UTC")
+					if offset, err := strconv.Atoi(offsetStr); err == nil {
+						utcOffset = offset
+					}
+				} else if loc, err := time.LoadLocation(tzName); err == nil {
 					now := time.Now().In(loc)
 					_, offset := now.Zone()
 					utcOffset = offset / 3600
@@ -274,16 +295,50 @@ func printResult(result *ghutz.Result) {
 		fmt.Println()
 	}
 	
-	// Show top organizations if available
+	// Show all organizations with color-coded counts
 	if len(result.TopOrganizations) > 0 {
-		fmt.Print("🏢 Organizations: ")
+		colors := []string{
+			"\033[34m", // Blue for 1st
+			"\033[33m", // Yellow for 2nd
+			"\033[31m", // Red for 3rd
+		}
+		grey := "\033[90m" // Grey for others
+		
+		// Build the organizations string with colors and counts
+		var orgsStr strings.Builder
 		for i, org := range result.TopOrganizations {
 			if i > 0 {
-				fmt.Print(", ")
+				orgsStr.WriteString(", ")
 			}
-			fmt.Printf("%s (%d)", org.Name, org.Count)
+			
+			// Choose color based on rank
+			color := grey
+			if i < 3 {
+				color = colors[i]
+			}
+			
+			// Format: name (colorized count)
+			orgsStr.WriteString(fmt.Sprintf("%s (%s%d\033[0m)", org.Name, color, org.Count))
 		}
-		fmt.Println()
+		
+		// Format with proper wrapping
+		label := "🏢 Organizations:"
+		content := orgsStr.String()
+		
+		// Check if it fits on one line
+		if len(stripANSI(content)) <= 55 {
+			fmt.Printf("%s %s\n", label, content)
+		} else {
+			// Split organizations for multi-line display
+			fmt.Printf("%s\n", label)
+			
+			// Wrap organizations with proper indentation
+			const indent = "                 " // 17 spaces to align with other content
+			lines := wrapOrganizationsWithCounts(result.TopOrganizations, colors, grey, 55)
+			for _, line := range lines {
+				fmt.Printf("%s%s\n", indent, line)
+			}
+		}
 	}
 	
 	// Detection method as a subtle footer
@@ -353,4 +408,63 @@ func formatMethodName(method string) string {
 		return name
 	}
 	return method
+}
+
+// stripANSI removes ANSI color codes from a string
+func stripANSI(s string) string {
+	// Simple regex to remove ANSI escape sequences
+	ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	return ansiRegex.ReplaceAllString(s, "")
+}
+
+// wrapOrganizationsWithCounts creates wrapped lines of organizations with color-coded counts
+func wrapOrganizationsWithCounts(orgs []struct{ Name string `json:"name"`; Count int `json:"count"` }, 
+	colors []string, grey string, maxWidth int) []string {
+	var lines []string
+	var currentLine strings.Builder
+	currentLength := 0
+	
+	for i, org := range orgs {
+		// Choose color based on rank
+		color := grey
+		if i < 3 {
+			color = colors[i]
+		}
+		
+		// Build the formatted org string: name (colorized count)
+		orgStr := fmt.Sprintf("%s (%s%d\033[0m)", org.Name, color, org.Count)
+		
+		// Add comma if not first item on line
+		if currentLine.Len() > 0 {
+			orgStr = ", " + orgStr
+		}
+		
+		// Calculate visual length: name + " (" + count digits + ")"
+		countStr := fmt.Sprintf("%d", org.Count)
+		orgLength := len(org.Name) + len(countStr) + 3 // " (123)"
+		if currentLine.Len() > 0 {
+			orgLength += 2 // ", " separator
+		}
+		
+		if currentLength > 0 && currentLength + orgLength > maxWidth {
+			// Start a new line
+			lines = append(lines, currentLine.String())
+			currentLine.Reset()
+			currentLength = 0
+			
+			// Don't add comma at start of new line
+			orgStr = fmt.Sprintf("%s (%s%d\033[0m)", org.Name, color, org.Count)
+			orgLength = len(org.Name) + len(countStr) + 3
+		}
+		
+		currentLine.WriteString(orgStr)
+		currentLength += orgLength
+	}
+	
+	// Add the last line if not empty
+	if currentLine.Len() > 0 {
+		lines = append(lines, currentLine.String())
+	}
+	
+	return lines
 }

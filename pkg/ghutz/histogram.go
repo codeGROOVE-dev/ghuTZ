@@ -3,6 +3,8 @@ package ghutz
 import (
 	"fmt"
 	"strings"
+	
+	"github.com/fatih/color"
 )
 
 // ActivityHistogram represents activity data with visual representation
@@ -18,9 +20,32 @@ type ActivityHistogram struct {
 	QuietHours   []int
 }
 
+// getOrgColorFunc returns a color function for an organization
+func getOrgColorFunc(org string, topOrgs []struct{ Name string `json:"name"`; Count int `json:"count"` }) *color.Color {
+	// Define colors for top 3 orgs only
+	colors := []*color.Color{
+		color.New(color.FgBlue),   // Blue for top org
+		color.New(color.FgYellow), // Yellow for 2nd
+		color.New(color.FgRed),    // Red for 3rd
+	}
+	
+	// Find org position in top orgs
+	for i, topOrg := range topOrgs {
+		if i < 3 && topOrg.Name == org {
+			return colors[i]
+		}
+	}
+	
+	// Grey for all other orgs (4th, 5th, etc.)
+	return color.New(color.FgHiBlack)
+}
+
 // GenerateHistogram creates a visual representation of user activity
 func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) string {
 	var output strings.Builder
+	
+	// Check if we have organization data
+	hasOrgData := result.HourlyOrganizationActivity != nil && len(result.HourlyOrganizationActivity) > 0
 	
 	// Modern, clean header
 	output.WriteString("📊 Activity Pattern\n")
@@ -50,7 +75,7 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 		return output.String() + "No activity data available\n"
 	}
 	
-	// Build the histogram  
+	// Build the histogram with redesigned layout
 	for localHour := 0; localHour < 24; localHour++ {
 		// Convert local hour to UTC
 		utcHour := localHour - utcOffset
@@ -63,25 +88,9 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 		
 		count := hourCounts[utcHour]
 		
-		// Create visual bar with proper scaling
-		barLength := 0
-		if maxActivity > 0 {
-			// Scale to max 25 characters for better fit
-			barLength = (count * 25) / maxActivity
-		}
-		
-		bar := ""
-		if count > 0 {
-			if barLength == 0 {
-				bar = "·" // Minimal activity indicator
-			} else {
-				// Use simple ASCII for better alignment
-				bar = strings.Repeat("█", barLength)
-			}
-		}
-		
-		// Determine what type of hour this is
-		emoji := ""
+		// Determine what type of hour this is first
+		hourType := ""
+		hourColor := color.New(color.Reset) // Default no color
 		
 		// Check if it's a quiet/sleep hour
 		for _, qh := range result.QuietHoursUTC {
@@ -93,13 +102,14 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 				localQuietHour -= 24
 			}
 			if localHour == localQuietHour {
-				emoji = " 💤"
+				hourType = "z"
+				hourColor = color.New(color.FgBlue)
 				break
 			}
 		}
 		
 		// Check for peak time first (highest priority)
-		if emoji == "" && result.PeakProductivity.Count > 0 {
+		if hourType == "" && result.PeakProductivity.Count > 0 {
 			peakStart := result.PeakProductivity.Start
 			peakEnd := result.PeakProductivity.End
 			localHourFloat := float64(localHour)
@@ -110,57 +120,97 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 			
 			// Check for overlap between [hourStart, hourEnd) and [peakStart, peakEnd)
 			if hourEnd > peakStart && hourStart < peakEnd {
-				emoji = " 🔥"
+				hourType = "^"
+				hourColor = color.New(color.FgYellow)
 			}
 		}
 		
-		// Check if it's within work hours (but not lunch or peak)
-		if emoji == "" && (result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0) {
+		// Check for lunch hour
+		if hourType == "" && (result.LunchHoursLocal.Start != 0 || result.LunchHoursLocal.End != 0) {
 			localHourFloat := float64(localHour)
+			lunchStartHour := result.LunchHoursLocal.Start
+			lunchEndHour := result.LunchHoursLocal.End
 			
-			// Check for lunch hour with proper half-hour handling
-			if result.LunchHoursLocal.Start != 0 || result.LunchHoursLocal.End != 0 {
-				lunchStartHour := result.LunchHoursLocal.Start
-				lunchEndHour := result.LunchHoursLocal.End
-				
-				// Check if the current hour block overlaps with lunch time
-				hourStart := localHourFloat
-				hourEnd := localHourFloat + 1.0
-				
-				// Check for overlap between [hourStart, hourEnd) and [lunchStart, lunchEnd)
-				if hourEnd > lunchStartHour && hourStart < lunchEndHour {
-					emoji = " 🍽️"
-				}
+			// Check if the current hour block overlaps with lunch time
+			hourStart := localHourFloat
+			hourEnd := localHourFloat + 1.0
+			
+			// Check for overlap between [hourStart, hourEnd) and [lunchStart, lunchEnd)
+			if hourEnd > lunchStartHour && hourStart < lunchEndHour {
+				hourType = "L"
+				hourColor = color.New(color.FgGreen)
+			}
+		}
+		
+		// Start building the line
+		line := fmt.Sprintf("%02d:00 ", localHour)
+		
+		// Add hour type indicator with fixed width (single character + space)
+		if hourType != "" {
+			line += hourColor.Sprint(hourType) + " " // Colored character + 1 space
+		} else {
+			line += "  " // 2 spaces to match character + space width
+		}
+		
+		// Add count with consistent width
+		if count > 0 {
+			line += fmt.Sprintf("(%2d) ", count)
+		} else {
+			line += "     " // 5 spaces to match "(nn) "
+		}
+		
+		// Create visual bar
+		if count > 0 {
+			// Scale to max 20 characters for the bar
+			barLength := (count * 20) / maxActivity
+			if barLength == 0 {
+				barLength = 1 // Ensure at least one character for any activity
 			}
 			
-			// If not lunch, check if it's work time
-			if emoji == "" {
-				workStart := result.ActiveHoursLocal.Start
-				workEnd := result.ActiveHoursLocal.End
+			if hasOrgData && result.HourlyOrganizationActivity[utcHour] != nil {
+				// Build color-coded bar based on organization activity
+				orgActivity := result.HourlyOrganizationActivity[utcHour]
 				
-				if workStart <= workEnd {
-					if localHourFloat >= workStart && localHourFloat < workEnd {
-						// Don't add emoji for work hours - it's clear from the graph
+				bar := ""
+				remaining := barLength
+				
+				// Add segments for each top organization
+				for _, topOrg := range result.TopOrganizations {
+					if orgCount, exists := orgActivity[topOrg.Name]; exists && remaining > 0 {
+						// Calculate this org's proportion
+						segmentLength := (orgCount * barLength) / count
+						if segmentLength == 0 && orgCount > 0 {
+							segmentLength = 1
+						}
+						if segmentLength > remaining {
+							segmentLength = remaining
+						}
+						
+						colorFunc := getOrgColorFunc(topOrg.Name, result.TopOrganizations)
+						bar += colorFunc.Sprint(strings.Repeat("█", segmentLength))
+						remaining -= segmentLength
 					}
+				}
+				
+				// Add any remaining as "other" activity
+				if remaining > 0 {
+					greyColor := color.New(color.FgHiBlack)
+					bar += greyColor.Sprint(strings.Repeat("█", remaining))
+				}
+				
+				line += bar
+			} else {
+				// No org data, use simple grey bar
+				greyColor := color.New(color.FgHiBlack)
+				if barLength == 1 {
+					line += greyColor.Sprint("·")
 				} else {
-					// Wrap around midnight
-					if localHourFloat >= workStart || localHourFloat < workEnd {
-						// Don't add emoji for work hours - it's clear from the graph
-					}
+					line += greyColor.Sprint(strings.Repeat("█", barLength))
 				}
 			}
 		}
 		
-		// Format with consistent spacing - emoji goes at the end
-		output.WriteString(fmt.Sprintf("%02d:00  ", localHour))
-		output.WriteString(fmt.Sprintf("%-28s", bar))
-		if count > 0 {
-			output.WriteString(fmt.Sprintf(" %3d", count))
-		} else {
-			output.WriteString("    ")
-		}
-		output.WriteString(emoji)
-		output.WriteString("\n")
+		output.WriteString(line + "\n")
 	}
 	
 	return output.String()

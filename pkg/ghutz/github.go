@@ -422,3 +422,202 @@ func (d *Detector) fetchUser(ctx context.Context, username string) *GitHubUser {
 
 	return &user
 }
+
+func (d *Detector) fetchUserRepositories(ctx context.Context, username string) ([]Repository, error) {
+	// First try to get pinned repositories using GraphQL
+	pinnedRepos, err := d.fetchPinnedRepositories(ctx, username)
+	if err != nil {
+		d.logger.Debug("failed to fetch pinned repositories, falling back to popular repos", "username", username, "error", err)
+	}
+	
+	// If we have pinned repos, use those
+	if len(pinnedRepos) > 0 {
+		d.logger.Debug("using pinned repositories", "username", username, "count", len(pinnedRepos))
+		return pinnedRepos, nil
+	}
+	
+	// Fall back to most starred repositories
+	popularRepos, err := d.fetchPopularRepositories(ctx, username)
+	if err != nil {
+		d.logger.Debug("failed to fetch popular repositories", "username", username, "error", err)
+		return []Repository{}, err
+	}
+	
+	d.logger.Debug("using popular repositories", "username", username, "count", len(popularRepos))
+	return popularRepos, nil
+}
+
+func (d *Detector) fetchPinnedRepositories(ctx context.Context, username string) ([]Repository, error) {
+	if d.githubToken == "" {
+		d.logger.Debug("GitHub token required for GraphQL API", "username", username)
+		return nil, fmt.Errorf("GitHub token required for GraphQL API")
+	}
+
+	query := fmt.Sprintf(`{
+		user(login: "%s") {
+			pinnedItems(first: 6, types: [REPOSITORY]) {
+				nodes {
+					... on Repository {
+						name
+						nameWithOwner
+						description
+						primaryLanguage {
+							name
+						}
+						stargazerCount
+						url
+					}
+				}
+			}
+		}
+	}`, username)
+
+	reqBody := map[string]string{
+		"query": query,
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling GraphQL query: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.github.com/graphql", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "bearer "+d.githubToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := d.cachedHTTPDo(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("fetching pinned repositories: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			d.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("GitHub GraphQL API returned status %d (failed to read response)", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("GitHub GraphQL API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Data struct {
+			User struct {
+				PinnedItems struct {
+					Nodes []struct {
+						Name         string `json:"name"`
+						NameWithOwner string `json:"nameWithOwner"`
+						Description  string `json:"description"`
+						PrimaryLanguage struct {
+							Name string `json:"name"`
+						} `json:"primaryLanguage"`
+						StargazerCount int    `json:"stargazerCount"`
+						URL            string `json:"url"`
+					} `json:"nodes"`
+				} `json:"pinnedItems"`
+			} `json:"user"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+
+	if len(result.Errors) > 0 {
+		d.logger.Debug("GitHub GraphQL errors", "username", username, "errors", result.Errors)
+		return nil, fmt.Errorf("GraphQL errors: %v", result.Errors[0].Message)
+	}
+
+	var repositories []Repository
+	for _, node := range result.Data.User.PinnedItems.Nodes {
+		repo := Repository{
+			Name:            node.Name,
+			FullName:        node.NameWithOwner,
+			Description:     node.Description,
+			Language:        node.PrimaryLanguage.Name,
+			StargazersCount: node.StargazerCount,
+			IsPinned:        true,
+			HTMLURL:         node.URL,
+		}
+		repositories = append(repositories, repo)
+	}
+
+	d.logger.Debug("fetched pinned repositories", "username", username, "count", len(repositories))
+	return repositories, nil
+}
+
+func (d *Detector) fetchPopularRepositories(ctx context.Context, username string) ([]Repository, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/users/%s/repos?sort=stars&direction=desc&per_page=6", username)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	// SECURITY: Validate and sanitize GitHub token before use
+	if d.githubToken != "" {
+		token := d.githubToken
+		// Validate token format to prevent injection attacks
+		if d.isValidGitHubToken(token) {
+			req.Header.Set("Authorization", "token "+token)
+		}
+	}
+
+	resp, err := d.cachedHTTPDo(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("fetching popular repositories: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			d.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("GitHub API returned status %d (failed to read response)", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var apiRepos []struct {
+		Name            string `json:"name"`
+		FullName        string `json:"full_name"`
+		Description     string `json:"description"`
+		Language        string `json:"language"`
+		StargazersCount int    `json:"stargazers_count"`
+		HTMLURL         string `json:"html_url"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&apiRepos); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+
+	var repositories []Repository
+	for _, apiRepo := range apiRepos {
+		repo := Repository{
+			Name:            apiRepo.Name,
+			FullName:        apiRepo.FullName,
+			Description:     apiRepo.Description,
+			Language:        apiRepo.Language,
+			StargazersCount: apiRepo.StargazersCount,
+			IsPinned:        false,
+			HTMLURL:         apiRepo.HTMLURL,
+		}
+		repositories = append(repositories, repo)
+	}
+
+	d.logger.Debug("fetched popular repositories", "username", username, "count", len(repositories))
+	return repositories, nil
+}

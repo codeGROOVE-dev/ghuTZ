@@ -191,6 +191,7 @@ func mergeActivityData(result, activityResult *Result) {
 	result.PeakProductivity = activityResult.PeakProductivity
 	result.TopOrganizations = activityResult.TopOrganizations
 	result.HourlyActivityUTC = activityResult.HourlyActivityUTC
+	result.HourlyOrganizationActivity = activityResult.HourlyOrganizationActivity
 }
 
 func (d *Detector) Detect(ctx context.Context, username string) (*Result, error) {
@@ -277,12 +278,13 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	return nil, fmt.Errorf("could not determine timezone for %s", username)
 }
 
-func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Result {
+// fetchProfileHTML fetches the GitHub profile HTML for a user
+func (d *Detector) fetchProfileHTML(ctx context.Context, username string) string {
 	url := fmt.Sprintf("https://github.com/%s", username)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
-		return nil
+		return ""
 	}
 
 	// SECURITY: Validate and sanitize GitHub token before use
@@ -292,7 +294,7 @@ func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Res
 
 	resp, err := d.cachedHTTPDo(ctx, req)
 	if err != nil {
-		return nil
+		return ""
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
@@ -300,25 +302,63 @@ func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Res
 		}
 	}()
 
-	// Check if user exists - GitHub returns 404 for non-existent users
-	if resp.StatusCode == http.StatusNotFound {
-		d.logger.Info("GitHub user not found", "username", username)
-		// Return a special result indicating user doesn't exist
-		// This will be cached to avoid repeated lookups
-		return &Result{
-			Username:   username,
-			Timezone:   "UTC", // Default timezone for non-existent users
-			Confidence: 0,     // Zero confidence indicates non-existent user
-			Method:     "user_not_found",
-		}
+	if resp.StatusCode != http.StatusOK {
+		return ""
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil
+		return ""
 	}
 
-	html := string(body)
+	return string(body)
+}
+
+func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Result {
+	html := d.fetchProfileHTML(ctx, username)
+	if html == "" {
+		url := fmt.Sprintf("https://github.com/%s", username)
+		
+		req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
+		if err != nil {
+			return nil
+		}
+
+		// SECURITY: Validate and sanitize GitHub token before use
+		if d.githubToken != "" && d.isValidGitHubToken(d.githubToken) {
+			req.Header.Set("Authorization", "token "+d.githubToken)
+		}
+
+		resp, err := d.cachedHTTPDo(ctx, req)
+		if err != nil {
+			return nil
+		}
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				d.logger.Debug("failed to close response body", "error", err)
+			}
+		}()
+
+		// Check if user exists - GitHub returns 404 for non-existent users
+		if resp.StatusCode == http.StatusNotFound {
+			d.logger.Info("GitHub user not found", "username", username)
+			// Return a special result indicating user doesn't exist
+			// This will be cached to avoid repeated lookups
+			return &Result{
+				Username:   username,
+				Timezone:   "UTC", // Default timezone for non-existent users
+				Confidence: 0,     // Zero confidence indicates non-existent user
+				Method:     "user_not_found",
+			}
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil
+		}
+
+		html = string(body)
+	}
 	
 	// Try extracting timezone from HTML using pre-compiled regex patterns
 	patterns := []*regexp.Regexp{
@@ -542,12 +582,48 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	}
 	d.logger.Debug("fetched organization data", "username", username, "org_count", len(orgs))
 
+	// Fetch user's top repositories (pinned or popular)
+	userRepos, err := d.fetchUserRepositories(ctx, username)
+	if err != nil {
+		d.logger.Debug("failed to fetch user repositories", "username", username, "error", err)
+		userRepos = []Repository{}
+	}
+	d.logger.Debug("fetched user repositories", "username", username, "count", len(userRepos))
+
+	// Extract country-code TLDs from user's social media URLs
+	socialURLs := extractSocialMediaURLs(user)
+	
+	// Also try to extract social media URLs from the GitHub profile HTML
+	profileHTML := d.fetchProfileHTML(ctx, username)
+	if profileHTML != "" {
+		htmlSocialURLs := extractSocialMediaFromHTML(profileHTML)
+		d.logger.Debug("extracted social URLs from HTML", "username", username, "urls", htmlSocialURLs)
+		
+		// For Mastodon URLs, try to fetch the profile and extract website
+		for _, url := range htmlSocialURLs {
+			if strings.Contains(url, "/@") || strings.Contains(url, "mastodon") || strings.Contains(url, ".exchange") || strings.Contains(url, ".social") {
+				website := fetchMastodonWebsite(url, d.logger)
+				if website != "" {
+					d.logger.Info("extracted website from Mastodon profile", "mastodon", url, "website", website)
+					socialURLs = append(socialURLs, website)
+				}
+			}
+			// Add the social URL itself
+			socialURLs = append(socialURLs, url)
+		}
+	}
+	
+	ccTLDs := extractCountryTLDs(socialURLs...)
+	d.logger.Debug("extracted ccTLDs", "username", username, "count", len(ccTLDs), "tlds", ccTLDs)
+
 	contextData := map[string]interface{}{
 		"github_user_json":       user,
 		"pull_requests":          prSummary,
 		"website_content":        websiteContent,
 		"organizations":          orgs,
-		"repositories":           repositories,
+		"repositories":           repositories,        // existing activity-based repositories
+		"user_repositories":      userRepos,          // new: user's top/pinned repositories
+		"country_tlds":           ccTLDs,             // new: country-code TLDs from URLs
 		"longest_pr_issue_body":  longestBody,
 		"longest_pr_issue_title": longestTitle,
 		"issue_count":            issueCount,
@@ -586,6 +662,16 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 			}
 		}
 
+		// Add activity date range information for daylight saving context
+		if !activityResult.ActivityDateRange.OldestActivity.IsZero() && !activityResult.ActivityDateRange.NewestActivity.IsZero() {
+			contextData["activity_oldest_date"] = activityResult.ActivityDateRange.OldestActivity.Format("2006-01-02")
+			contextData["activity_newest_date"] = activityResult.ActivityDateRange.NewestActivity.Format("2006-01-02")
+			contextData["activity_total_days"] = activityResult.ActivityDateRange.TotalDays
+			
+			// Determine if data spans daylight saving transitions  
+			contextData["activity_spans_dst_transitions"] = activityResult.ActivityDateRange.SpansDSTTransitions
+		}
+
 		method = "gemini_refined_activity"
 		d.logger.Debug("analyzing with Gemini + activity data", "username", username,
 			"activity_timezone", activityResult.Timezone, "profile_location", user.Location,
@@ -596,14 +682,18 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 			"profile_location", user.Location, "company", user.Company, "website_available", websiteContent != "")
 	}
 
-	timezone, location, confidence, err := d.queryUnifiedGeminiForTimezone(ctx, contextData, true)
+	timezone, location, confidence, prompt, reasoning, err := d.queryUnifiedGeminiForTimezone(ctx, contextData, true)
 	if err != nil {
-		d.logger.Debug("Gemini analysis failed", "username", username, "error", err)
+		d.logger.Warn("Gemini analysis failed", "username", username, "error", err)
 		return nil
 	}
 
 	if timezone == "" {
-		d.logger.Debug("Gemini could not determine timezone", "username", username)
+		d.logger.Warn("Gemini could not determine timezone", 
+			"username", username,
+			"location", location,
+			"confidence", confidence,
+			"reason", "empty timezone in response")
 		return nil
 	}
 
@@ -613,6 +703,8 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 		GeminiSuggestedLocation: location,
 		Confidence:              confidence,
 		Method:                  method,
+		GeminiPrompt:            prompt,
+		GeminiReasoning:         reasoning,
 	}
 
 	// Preserve activity data from activityResult if available
@@ -775,7 +867,7 @@ func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64)
 
 
 
-func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]interface{}, verbose bool) (string, string, float64, error) {
+func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]interface{}, verbose bool) (string, string, float64, string, string, error) {
 	// Check if we have activity data for confidence scoring later
 	activityTimezone := ""
 	hasActivityData := false
@@ -808,9 +900,9 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	// Use the official genai SDK (handles both API key and ADC)
 	geminiResp, err := d.callGeminiWithSDK(ctx, fullPrompt, verbose)
 	if err != nil {
-		return "", "", 0, fmt.Errorf("Gemini API call failed: %w", err)
+		return "", "", 0, "", "", fmt.Errorf("Gemini API call failed: %w", err)
 	}
-	return geminiResp.timezone, geminiResp.location, geminiResp.confidence, nil
+	return geminiResp.timezone, geminiResp.location, geminiResp.confidence, fullPrompt, geminiResp.reasoning, nil
 }
 
 type geminiResponse struct {
@@ -821,15 +913,39 @@ type geminiResponse struct {
 }
 
 // callGeminiWithSDK uses the official Google AI SDK which handles authentication automatically
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose bool) (*geminiResponse, error) {
 	// Check cache first if available
 	cacheKey := fmt.Sprintf("genai:%s:%s", d.geminiModel, prompt)
 	if d.cache != nil {
 		if cachedData, found := d.cache.APICall(cacheKey, []byte(prompt)); found {
-			d.logger.Debug("Gemini SDK cache hit")
+			d.logger.Debug("Gemini SDK cache hit", "cache_data_length", len(cachedData))
 			var result geminiResponse
 			if err := json.Unmarshal(cachedData, &result); err == nil {
-				return &result, nil
+				// Validate the cached result has actual data
+				if result.timezone != "" && result.location != "" {
+					d.logger.Debug("Using cached Gemini response", 
+						"timezone", result.timezone, 
+						"location", result.location, 
+						"confidence", result.confidence)
+					return &result, nil
+				} else {
+					d.logger.Warn("Cached Gemini response is invalid/empty, fetching fresh",
+						"timezone", result.timezone,
+						"location", result.location)
+					// Continue to make a fresh API call
+				}
+			} else {
+				d.logger.Warn("Failed to unmarshal cached Gemini response, fetching fresh",
+					"error", err,
+					"cache_data_preview", string(cachedData[:min(200, len(cachedData))]))
+				// Continue to make a fresh API call
 			}
 		}
 	}
@@ -932,10 +1048,40 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 		},
 	}
 
-	// Generate content
-	resp, err := client.Models.GenerateContent(ctx, modelName, contents, genConfig)
+	// Generate content with retry logic for transient errors
+	var resp *genai.GenerateContentResponse
+	err = retry.Do(
+		func() error {
+			var genErr error
+			resp, genErr = client.Models.GenerateContent(ctx, modelName, contents, genConfig)
+			if genErr != nil {
+				// Check if it's a context timeout or similar transient error
+				if strings.Contains(genErr.Error(), "context deadline exceeded") ||
+				   strings.Contains(genErr.Error(), "timeout") ||
+				   strings.Contains(genErr.Error(), "temporary failure") ||
+				   strings.Contains(genErr.Error(), "503") ||
+				   strings.Contains(genErr.Error(), "502") ||
+				   strings.Contains(genErr.Error(), "500") {
+					d.logger.Warn("Gemini API transient error, retrying", "error", genErr)
+					return genErr // Retry
+				}
+				// For non-transient errors, don't retry
+				d.logger.Error("Gemini API non-transient error", "error", genErr)
+				return retry.Unrecoverable(genErr)
+			}
+			return nil
+		},
+		retry.Attempts(3),
+		retry.Delay(time.Second*2),
+		retry.MaxDelay(time.Second*10),
+		retry.DelayType(retry.BackOffDelay),
+		retry.OnRetry(func(n uint, err error) {
+			d.logger.Info("Retrying Gemini API call", "attempt", n+1, "error", err)
+		}),
+	)
+	
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate content: %w", err)
+		return nil, fmt.Errorf("failed to generate content after retries: %w", err)
 	}
 
 	// Parse response

@@ -85,6 +85,12 @@ type Result struct {
 	LocationConfidence      float64   `json:"location_confidence,omitempty"`
 	Method                  string    `json:"method"`
 	DetectionTime           time.Time `json:"detection_time"`
+	ActivityDateRange       struct {
+		OldestActivity      time.Time `json:"oldest_activity,omitempty"`       // Oldest activity timestamp
+		NewestActivity      time.Time `json:"newest_activity,omitempty"`       // Newest activity timestamp
+		TotalDays           int       `json:"total_days,omitempty"`            // Days covered by activity data
+		SpansDSTTransitions bool      `json:"spans_dst_transitions,omitempty"` // Whether data spans DST transitions
+	} `json:"activity_date_range,omitempty"`
 	QuietHoursUTC           []int     `json:"quiet_hours_utc,omitempty"` // Hours when user is typically inactive
 	ActiveHoursLocal        struct {
 		Start float64 `json:"start"` // Expected start time in local time (supports 30-min increments)
@@ -99,14 +105,21 @@ type Result struct {
 		Start float64 `json:"start"` // Peak productivity window start (30-min resolution)
 		End   float64 `json:"end"`   // Peak productivity window end (30-min resolution)
 		Count int     `json:"count"` // Activity count in this window
-	} `json:"peak_productivity,omitempty"`
+	} `json:"peak_productivity"`
 	TopOrganizations []struct {
 		Name  string `json:"name"`  // Organization name
 		Count int    `json:"count"` // Activity count
-	} `json:"top_organizations,omitempty"`
+	} `json:"top_organizations"`
+	
+	// Gemini AI Analysis Details
+	GeminiPrompt    string `json:"gemini_prompt,omitempty"`    // The prompt sent to Gemini (for debugging)
+	GeminiReasoning string `json:"gemini_reasoning,omitempty"` // Gemini's reasoning for its decision
 	
 	// HourlyActivityUTC stores the raw activity counts by UTC hour for histogram generation
-	HourlyActivityUTC map[int]int `json:"-"` // Not included in JSON output
+	HourlyActivityUTC map[int]int `json:"hourly_activity_utc"` // Raw activity counts by UTC hour
+	
+	// HourlyOrganizationActivity stores organization-specific activity by UTC hour
+	HourlyOrganizationActivity map[int]map[string]int `json:"hourly_organization_activity,omitempty"` // UTC hour -> org -> count
 }
 
 // Location represents geographic coordinates
@@ -117,14 +130,15 @@ type Location struct {
 
 // GitHubUser represents basic GitHub user info
 type GitHubUser struct {
-	Login     string `json:"login"`
-	Name      string `json:"name"`
-	Location  string `json:"location"`
-	Company   string `json:"company"`
-	Blog      string `json:"blog"`
-	Email     string `json:"email"`
-	Bio       string `json:"bio"`
-	CreatedAt string `json:"created_at"`
+	Login           string `json:"login"`
+	Name            string `json:"name"`
+	Location        string `json:"location"`
+	Company         string `json:"company"`
+	Blog            string `json:"blog"`
+	Email           string `json:"email"`
+	Bio             string `json:"bio"`
+	TwitterUsername string `json:"twitter_username"`
+	CreatedAt       string `json:"created_at"`
 }
 
 // PullRequest represents a GitHub pull request
@@ -156,6 +170,17 @@ type Organization struct {
 	Login       string `json:"login"`
 	Description string `json:"description"`
 	Location    string `json:"location"`
+}
+
+// Repository represents a GitHub repository with location indicators
+type Repository struct {
+	Name            string `json:"name"`             // Repository name
+	FullName        string `json:"full_name"`        // owner/repo format
+	Description     string `json:"description"`      // Repository description
+	Language        string `json:"language"`         // Primary language
+	StargazersCount int    `json:"stargazers_count"` // Number of stars
+	IsPinned        bool   `json:"is_pinned"`        // Whether this is a pinned repo
+	HTMLURL         string `json:"html_url"`         // GitHub URL
 }
 
 // ActivityData holds all activity data for timezone detection

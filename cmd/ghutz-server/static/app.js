@@ -81,6 +81,10 @@ function displayResults(data) {
     document.getElementById('activityRow').style.display = 'none';
     document.getElementById('hoursRow').style.display = 'none';
     document.getElementById('lunchRow').style.display = 'none';
+    document.getElementById('peakRow').style.display = 'none';
+    document.getElementById('quietRow').style.display = 'none';
+    document.getElementById('orgsRow').style.display = 'none';
+    document.getElementById('histogramRow').style.display = 'none';
     document.getElementById('locationRow').style.display = 'none';
     document.getElementById('mapRow').style.display = 'none';
     
@@ -119,8 +123,66 @@ function displayResults(data) {
 
     if (data.lunch_hours_local && data.lunch_hours_local.confidence > 0) {
         const lunchText = formatLunchHours(data.lunch_hours_local.start, data.lunch_hours_local.end);
-        document.getElementById('lunchHours').textContent = lunchText + ' (' + Math.round(data.lunch_hours_local.confidence * 100) + '%)';
+        const confidenceText = Math.round(data.lunch_hours_local.confidence * 100) + '% confidence';
+        document.getElementById('lunchHours').textContent = lunchText + ' (' + confidenceText + ')';
         document.getElementById('lunchRow').style.display = 'block';
+    }
+
+    if (data.peak_productivity && data.peak_productivity.count > 0) {
+        const peakText = formatHour(data.peak_productivity.start) + '-' + formatHour(data.peak_productivity.end);
+        document.getElementById('peakHours').textContent = peakText;
+        document.getElementById('peakRow').style.display = 'block';
+    }
+
+    if (data.quiet_hours_utc && data.quiet_hours_utc.length > 0) {
+        // Convert UTC quiet hours to local based on timezone
+        const utcOffset = getUTCOffsetFromTimezone(data.timezone, data.activity_timezone);
+        const quietStart = (data.quiet_hours_utc[0] + utcOffset + 24) % 24;
+        const quietEnd = ((data.quiet_hours_utc[data.quiet_hours_utc.length - 1] + 1 + utcOffset) + 24) % 24;
+        document.getElementById('quietHours').textContent = formatHour(quietStart) + '-' + formatHour(quietEnd);
+        document.getElementById('quietRow').style.display = 'block';
+    }
+
+    if (data.top_organizations && data.top_organizations.length > 0) {
+        // Create organization list with color-coded counts
+        const orgsContainer = document.getElementById('organizations');
+        orgsContainer.innerHTML = ''; // Clear existing content
+        
+        // Colors for top 3 only
+        const colors = [
+            '#4285F4', // Google Blue for 1st
+            '#FBBC04', // Google Yellow for 2nd
+            '#EA4335', // Google Red for 3rd
+        ];
+        const greyColor = '#999999'; // Grey for all others
+        
+        // Show all organizations with color-coded counts
+        data.top_organizations.forEach((org, i) => {
+            if (i > 0) {
+                const separator = document.createTextNode(', ');
+                orgsContainer.appendChild(separator);
+            }
+            
+            const orgSpan = document.createElement('span');
+            orgSpan.textContent = org.name + ' ';
+            
+            // Create colored count in parentheses
+            const countSpan = document.createElement('span');
+            countSpan.style.color = i < 3 ? colors[i] : greyColor;
+            countSpan.style.fontWeight = 'bold';
+            countSpan.textContent = `(${org.count})`;
+            
+            orgSpan.appendChild(countSpan);
+            orgsContainer.appendChild(orgSpan);
+        });
+        
+        document.getElementById('orgsRow').style.display = 'block';
+    }
+
+    // Draw histogram if activity data is available
+    if (data.hourly_activity_utc) {
+        drawHistogram(data);
+        document.getElementById('histogramRow').style.display = 'block';
     }
 
     let locationText = '';
@@ -138,7 +200,31 @@ function displayResults(data) {
     }
 
     const methodName = formatMethodName(data.method);
-    document.getElementById('method').textContent = methodName;
+    const methodElement = document.getElementById('method');
+    
+    // Clear any existing content
+    methodElement.innerHTML = '';
+    
+    if (data.gemini_reasoning && data.gemini_reasoning.trim()) {
+        // Create tooltip container for method with reasoning
+        const tooltipContainer = document.createElement('span');
+        tooltipContainer.className = 'tooltip-container';
+        
+        const methodSpan = document.createElement('span');
+        methodSpan.className = 'method-with-reasoning';
+        methodSpan.textContent = methodName;
+        
+        const tooltip = document.createElement('span');
+        tooltip.className = 'tooltip';
+        tooltip.textContent = data.gemini_reasoning;
+        
+        tooltipContainer.appendChild(methodSpan);
+        tooltipContainer.appendChild(tooltip);
+        methodElement.appendChild(tooltipContainer);
+    } else {
+        // No reasoning available, just show method name
+        methodElement.textContent = methodName;
+    }
 
     // Show results first so map container has proper dimensions
     document.getElementById('result').classList.add('show');
@@ -184,6 +270,201 @@ function formatHour(decimalHour) {
     const minuteStr = minutes === 0 ? '00' : minutes.toString().padStart(2, '0');
     return displayHour + ':' + minuteStr + period;
 }
+
+function getUTCOffsetFromTimezone(timezone, activityTimezone) {
+    // Try to extract UTC offset from timezone string
+    if (activityTimezone && activityTimezone.startsWith('UTC')) {
+        const offsetStr = activityTimezone.replace('UTC', '').replace('GMT', '');
+        const offset = parseInt(offsetStr) || 0;
+        return offset;
+    }
+    
+    // Try standard timezone
+    if (timezone) {
+        try {
+            const now = new Date();
+            const tzDate = new Date(now.toLocaleString("en-US", {timeZone: timezone}));
+            const utcDate = new Date(now.toLocaleString("en-US", {timeZone: "UTC"}));
+            return Math.round((tzDate - utcDate) / (1000 * 60 * 60));
+        } catch (e) {
+            // Fallback for UTC+X format
+            if (timezone.startsWith('UTC')) {
+                const offsetStr = timezone.replace('UTC', '').replace('GMT', '');
+                return parseInt(offsetStr) || 0;
+            }
+        }
+    }
+    
+    return 0;
+}
+
+let activityChart = null; // Global chart instance
+
+function drawHistogram(data) {
+    const canvas = document.getElementById('activityChart');
+    if (!canvas) {
+        console.warn('Canvas element not found');
+        return;
+    }
+    
+    // Destroy existing chart if it exists
+    if (activityChart) {
+        activityChart.destroy();
+    }
+    
+    const hourlyData = data.hourly_activity_utc || {};
+    const hourlyOrgData = data.hourly_organization_activity || {};
+    const utcOffset = getUTCOffsetFromTimezone(data.timezone, data.activity_timezone);
+    const topOrgs = data.top_organizations || [];
+    
+    // Define organization colors - only top 3 get colors
+    const orgColors = [
+        '#4285F4', // Google Blue for 1st
+        '#FBBC04', // Google Yellow for 2nd
+        '#EA4335', // Google Red for 3rd
+    ];
+    const otherColor = '#999999'; // Grey for all others
+    
+    // Create datasets for stacked bar chart
+    const datasets = [];
+    
+    // Create a dataset for each top organization (colors for top 3, grey for rest)
+    for (let i = 0; i < topOrgs.length; i++) {
+        const orgName = topOrgs[i].name;
+        const orgData = [];
+        
+        for (let localHour = 0; localHour < 24; localHour++) {
+            const utcHour = (localHour - utcOffset + 24) % 24;
+            const hourOrgs = hourlyOrgData[utcHour] || {};
+            orgData.push(hourOrgs[orgName] || 0);
+        }
+        
+        datasets.push({
+            label: orgName,
+            data: orgData,
+            backgroundColor: i < 3 ? orgColors[i] : otherColor,
+            borderColor: i < 3 ? orgColors[i] : otherColor,
+            borderWidth: 1
+        });
+    }
+    
+    // We don't need a separate "Other" dataset since all orgs beyond top 3 are already grey
+    // But we do need to handle any unattributed activity
+    if (topOrgs.length > 0) {
+        const otherData = [];
+        const topOrgNames = topOrgs.map(org => org.name);
+        
+        for (let localHour = 0; localHour < 24; localHour++) {
+            const utcHour = (localHour - utcOffset + 24) % 24;
+            const hourOrgs = hourlyOrgData[utcHour] || {};
+            let otherCount = 0;
+            
+            // Only count unattributed activity (not already in any org)
+            const totalHourCount = hourlyData[utcHour] || 0;
+            const attributedCount = Object.values(hourOrgs).reduce((sum, count) => sum + count, 0);
+            const unattributedCount = Math.max(0, totalHourCount - attributedCount);
+            
+            otherData.push(unattributedCount);
+        }
+        
+        // Only add "Unattributed" dataset if there's data
+        if (otherData.some(count => count > 0)) {
+            datasets.push({
+                label: 'Unattributed',
+                data: otherData,
+                backgroundColor: otherColor,
+                borderColor: otherColor,
+                borderWidth: 1
+            });
+        }
+    }
+    
+    // If no organization data, fall back to simple display
+    if (datasets.length === 0) {
+        const chartData = [];
+        for (let localHour = 0; localHour < 24; localHour++) {
+            const utcHour = (localHour - utcOffset + 24) % 24;
+            chartData.push(hourlyData[utcHour] || 0);
+        }
+        
+        datasets.push({
+            label: 'Activity',
+            data: chartData,
+            backgroundColor: '#999999',
+            borderColor: '#999999',
+            borderWidth: 1
+        });
+    }
+    
+    // Create chart labels
+    const chartLabels = [];
+    for (let localHour = 0; localHour < 24; localHour++) {
+        const hourLabel = String(localHour).padStart(2, '0') + ':00';
+        chartLabels.push(hourLabel);
+    }
+    
+    // Create Chart.js bar chart
+    const ctx = canvas.getContext('2d');
+    activityChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: chartLabels,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false // Legend is shown in the organizations row
+                },
+                title: {
+                    display: true,
+                    text: `Daily Activity Pattern (${data.timezone})`,
+                    font: {
+                        size: 14
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    stacked: true,
+                    title: {
+                        display: true,
+                        text: 'Activity Count'
+                    },
+                    ticks: {
+                        precision: 0 // Show whole numbers only
+                    }
+                },
+                x: {
+                    stacked: true,
+                    title: {
+                        display: true,
+                        text: 'Hour (Local Time)'
+                    },
+                    ticks: {
+                        maxRotation: 45,
+                        minRotation: 0
+                    }
+                }
+            },
+            animation: {
+                duration: 500 // Smooth animation
+            },
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            },
+            onHover: (event, elements) => {
+                canvas.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+            }
+        }
+    });
+    
+}
+
 
 function initMapWhenReady(lat, lng, username) {
     // Ensure DOM updates are complete and Leaflet is ready

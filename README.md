@@ -152,12 +152,17 @@ cmd/
 
 1. **Profile Scraping**: Checks GitHub profile HTML for timezone data
 2. **Location Geocoding**: Converts location field to coordinates → timezone
-3. **Activity Analysis**: Analyzes PR/issue/comment timestamps for patterns
+3. **Activity Analysis**: Analyzes PR/issue/comment timestamps for behavioral patterns
+   - **Evening Activity Priority**: 7-11pm local time is the strongest timezone signal (personal coding time)
+   - **DST Awareness**: Handles daylight saving transitions across spring/fall months
+   - **US Timezone Disambiguation**: Differentiates Eastern/Central/Mountain based on activity peaks
 4. **Lunch Detection**: Identifies midday activity gaps (12-1pm typical)
 5. **Sleep Pattern**: Finds consistent quiet hours (midnight-6am typical)
 6. **AI Context**: Gemini analyzes all available data with detective reasoning
 7. **Organization Hints**: Checks org locations and descriptions
 8. **Website Scanning**: Extracts location clues from personal sites
+
+> **Key Insight**: Evening activity (7-11pm local) is more reliable than work hours for timezone detection, as it reflects genuine personal coding time regardless of remote work arrangements.
 
 ## 🐳 Docker Deployment
 
