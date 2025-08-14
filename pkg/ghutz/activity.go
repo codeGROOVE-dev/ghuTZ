@@ -285,7 +285,59 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			"european_activity", europeanActivity, "american_activity", americanActivity)
 	}
 
-	offsetFromUTC := assumedSleepMidpoint - midQuiet
+	// For European timezones (UTC+X), the UTC sleep time is EARLIER than local sleep time
+	// For American timezones (UTC-X), the UTC sleep time is LATER than local sleep time
+	// If someone sleeps at 2 AM local in Europe/Warsaw (UTC+1), that's 1 AM UTC
+	// So: UTC_offset = local_time - utc_time
+	// But we have UTC sleep time and want to find offset
+	// So: UTC_offset = assumed_local_sleep - observed_utc_sleep
+	
+	// However, we need to think about this differently:
+	// If midQuiet (UTC) is 2.5 and we expect local sleep at 2.0 (Europe)
+	// That means UTC is AHEAD of local, which would be UTC-0.5
+	// But that's wrong for Europe!
+	
+	// The correct logic: 
+	// For positive UTC offsets (east of Greenwich): local_time = utc_time + offset
+	// So if they sleep at 2.5 UTC and we expect 3.5 local (typical for UTC+1)
+	// Then offset = 3.5 - 2.5 = +1
+	
+	// We need to adjust assumed sleep midpoints based on patterns
+	var offsetFromUTC float64
+	if float64(europeanActivity) > float64(americanActivity)*1.2 {
+		// European/Asian pattern - need to distinguish between them
+		// Asian timezones (UTC+8/+9) have sleep around 15-20 UTC (midnight-5am local)
+		// European timezones (UTC+0/+1/+2) have sleep around 0-5 UTC (midnight-5am local)
+		
+		if midQuiet >= 14 && midQuiet <= 20 {
+			// Asian pattern - sleep hours in the afternoon/evening UTC
+			// If they sleep at 17 UTC and expect 2am local, offset = 2 + 24 - 17 = 9
+			assumedSleepMidpoint = 2.0 // 2am local sleep time
+			offsetFromUTC = assumedSleepMidpoint + 24 - midQuiet
+			if offsetFromUTC >= 24 {
+				offsetFromUTC -= 24
+			}
+			d.logger.Debug("Asian timezone detection", "username", username,
+				"midQuiet", midQuiet, "calculated_offset", offsetFromUTC)
+		} else {
+			// European pattern - sleep hours in early morning UTC
+			assumedSleepMidpoint = midQuiet + 1.0 // Assume UTC+1 for Europe
+			offsetFromUTC = 1.0 // Default to CET
+			
+			// Fine-tune based on exact sleep timing
+			if midQuiet < 2.0 {
+				offsetFromUTC = 2.0 // Eastern Europe (UTC+2)
+			} else if midQuiet > 3.0 && midQuiet < 14 {
+				offsetFromUTC = 0.0 // UK/Portugal (UTC+0)
+			}
+			
+			d.logger.Debug("European timezone detection", "username", username,
+				"midQuiet", midQuiet, "assumed_offset", offsetFromUTC)
+		}
+	} else {
+		// American pattern - original logic works
+		offsetFromUTC = assumedSleepMidpoint - midQuiet
+	}
 
 	d.logger.Debug("offset calculation details", "username", username,
 		"assumedSleepMidpoint", assumedSleepMidpoint,
@@ -361,81 +413,19 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	d.logger.Debug("peak productivity detected", "username", username,
 		"peak_start", peakStart, "peak_end", peakEnd, "activity_count", peakCount)
 
-	// Use work schedule validation for timezone detection
-	// Be more flexible - some people work early shifts or late shifts
-	var offsetCorrection int
-	var correctionReason string
-
-	// Only correct if work start is VERY unusual (before 6am or after 11am)
-	// Many developers start early (7am) or late (10am)
-	if float64(activeStart) < 6.0 || float64(activeStart) > 11.0 {
-		// Only apply small corrections (max 2 hours)
-		expectedWorkStart := 8.5 // 8:30am average
-		workCorrection := int(expectedWorkStart - float64(activeStart))
-		if workCorrection != 0 && workCorrection >= -2 && workCorrection <= 2 {
-			offsetCorrection = workCorrection
-			correctionReason = "work_start"
-			d.logger.Debug("work start timing suggests timezone correction", "username", username,
-				"work_start_local", activeStart, "expected_range", "6:00-11:00",
-				"suggested_correction", workCorrection)
-		}
-	}
-
-	// Check lunch timing (be more flexible - lunch can be 11am-2pm)
-	if lunchStart != -1 && lunchEnd != -1 {
-		// Only correct if lunch is very unusual (before 11am or after 2pm)
-		if lunchStart < 11.0 || lunchStart > 14.0 {
-			expectedLunchMid := 12.5 // 12:30pm average
-			actualLunchMid := (lunchStart + lunchEnd) / 2
-			lunchCorrection := int(expectedLunchMid - actualLunchMid)
-			
-			// Only apply small corrections (max 2 hours)
-			if lunchCorrection != 0 && lunchCorrection >= -2 && lunchCorrection <= 2 {
-				// If we don't have a work start correction, or lunch correction is larger, use lunch correction
-				if offsetCorrection == 0 || (int(math.Abs(float64(lunchCorrection))) > int(math.Abs(float64(offsetCorrection)))) {
-					offsetCorrection = lunchCorrection
-					correctionReason = "lunch_timing"
-				}
-			}
-
-			d.logger.Debug("lunch timing suggests timezone correction", "username", username,
-				"lunch_start_local", lunchStart, "lunch_end_local", lunchEnd,
-				"expected_range", "11:00-14:00", "suggested_correction", lunchCorrection)
-		}
-	}
-
-	// Check evening wind-down time (be more flexible - some work late)
-	// Only correct if work ends very early (before 3pm) or very late (after 10pm)
-	if float64(activeEnd) < 15.0 || float64(activeEnd) > 22.0 {
-		expectedWorkEnd := 17.5 // 5:30pm average
-		endCorrection := int(expectedWorkEnd - float64(activeEnd))
-		// Only apply small corrections (max 2 hours)
-		if endCorrection != 0 && endCorrection >= -2 && endCorrection <= 2 {
-			// If we don't have other corrections, or this correction is more significant, use it
-			if offsetCorrection == 0 || (int(math.Abs(float64(endCorrection))) > int(math.Abs(float64(offsetCorrection)))) {
-				offsetCorrection = endCorrection
-				correctionReason = "work_end"
-				d.logger.Debug("work end timing suggests timezone correction", "username", username,
-					"work_end_local", activeEnd, "expected_range", "15:00-22:00",
-					"suggested_correction", endCorrection)
-			}
-		}
-	}
-
-	// Apply timezone correction if we found one (limited to 2 hours)
-	if offsetCorrection != 0 && offsetCorrection >= -2 && offsetCorrection <= 2 {
-		correctedOffset := offsetInt + offsetCorrection
-		d.logger.Debug("correcting timezone based on work schedule", "username", username,
-			"original_offset", offsetInt, "correction", offsetCorrection,
-			"corrected_offset", correctedOffset, "reason", correctionReason)
-		offsetInt = correctedOffset
-		timezone = timezoneFromOffset(offsetInt)
-
-		// Recalculate active hours, lunch, and peak productivity with corrected offset
-		activeStart, activeEnd = calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
-		lunchStart, lunchEnd, lunchConfidence = detectLunchBreak(hourCounts, offsetInt, activeStart, activeEnd)
-		peakStart, peakEnd, peakCount = detectPeakProductivity(hourCounts, offsetInt)
-	}
+	// DISABLED: Work schedule validation corrections were causing more harm than good
+	// The corrections were sometimes moving people further from their actual timezone
+	// For example, egibs in Kansas (UTC-6) was being detected as UTC-7 (close!)
+	// but then "corrected" to UTC-9 based on lunch timing, which is worse.
+	// 
+	// The sleep-based detection is generally more reliable than trying to correct
+	// based on work/lunch schedules, as people have varying work patterns.
+	//
+	// Log the work schedule for debugging but don't apply corrections
+	d.logger.Debug("work schedule detected", "username", username,
+		"work_start", activeStart, "work_end", activeEnd,
+		"lunch_start", lunchStart, "lunch_end", lunchEnd,
+		"detected_offset", offsetInt)
 	
 	// Process top organizations
 	type orgActivity struct {

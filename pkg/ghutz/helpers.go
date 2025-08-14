@@ -256,6 +256,36 @@ func timezoneFromOffset(offsetHours int) string {
 }
 
 func detectLunchBreak(hourCounts map[int]int, utcOffset int, workStart, workEnd int) (lunchStart, lunchEnd, confidence float64) {
+	// First, check for clear gaps (hours with 0 activity) during work hours
+	// This is more accurate than the bucket approach when we have clear data
+	for localHour := workStart + 1; localHour < workEnd - 1; localHour++ {
+		utcHour := localHour - utcOffset
+		// Normalize to 0-23 range
+		for utcHour < 0 {
+			utcHour += 24
+		}
+		for utcHour >= 24 {
+			utcHour -= 24
+		}
+		
+		// Check if this hour has zero activity (potential lunch hour)
+		if hourCounts[utcHour] == 0 {
+			// Check if it's in typical lunch time range (11am-2pm)
+			if localHour >= 11 && localHour <= 14 {
+				// Found a clear lunch gap!
+				// Check if the next hour is also empty (1-hour lunch)
+				nextUTCHour := (utcHour + 1) % 24
+				if hourCounts[nextUTCHour] == 0 {
+					return float64(localHour), float64(localHour + 1), 0.9 // High confidence for 1-hour gap
+				} else {
+					// Just a 30-minute gap, but still likely lunch
+					return float64(localHour), float64(localHour) + 0.5, 0.85
+				}
+			}
+		}
+	}
+	
+	// If no clear gaps, fall back to the bucket-based approach for finding dips
 	// Convert hour counts to 30-minute buckets for better precision
 	bucketCounts := make(map[float64]int)
 	for hour, count := range hourCounts {

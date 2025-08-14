@@ -87,6 +87,7 @@ func main() {
 	}
 
 	detector := ghutz.NewWithLogger(logger, detectorOpts...)
+	defer detector.Close() // Save cache to disk on exit
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -234,7 +235,7 @@ func printResult(result *ghutz.Result) {
 		
 		// Add peak productivity time
 		if result.PeakProductivity.Count > 0 {
-			fmt.Printf("\n🔥 Peak Time: %s → %s",
+			fmt.Printf("\n🔥 Activity Peak: %s → %s",
 				formatHour(result.PeakProductivity.Start),
 				formatHour(result.PeakProductivity.End))
 		}
