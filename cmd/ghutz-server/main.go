@@ -143,7 +143,7 @@ func securityHeadersMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			"script-src 'self' https://unpkg.com; "+
 			"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "+
 			"style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "+
-			"img-src 'self' data: https://*.tile.openstreetmap.org; "+
+			"img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com; "+
 			"font-src 'self' https://fonts.gstatic.com; "+
 			"connect-src 'self' https://*.tile.openstreetmap.org; "+
 			"frame-src https://www.openstreetmap.org; "+

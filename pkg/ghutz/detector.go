@@ -451,8 +451,7 @@ func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string
 	prSummary := make([]map[string]interface{}, len(prs))
 	for i, pr := range prs {
 		prSummary[i] = map[string]interface{}{
-			"title":      pr.Title,
-			"created_at": pr.CreatedAt,
+			"title": pr.Title,
 		}
 	}
 	
@@ -1597,20 +1596,18 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	// Use the single consolidated prompt for all cases
 	prompt := unifiedGeminiPrompt()
 	
-	contextJSON, err := json.Marshal(contextData)
-	if err != nil {
-		return "", "", 0, err
-	}
+	// Format evidence in a clear, readable way instead of a massive JSON blob
+	formattedEvidence := d.formatEvidenceForGemini(contextData)
 	
-	// The consolidated prompt only takes one parameter - the context data
-	fullPrompt := fmt.Sprintf(prompt, string(contextJSON))
+	// The consolidated prompt only takes one parameter - the formatted evidence
+	fullPrompt := fmt.Sprintf(prompt, formattedEvidence)
 	
 	if hasActivityData {
 		d.logger.Debug("Gemini unified prompt (with activity)", "prompt_length", len(fullPrompt), 
-			"context_size_bytes", len(contextJSON), "activity_timezone", activityTimezone)
+			"evidence_length", len(formattedEvidence), "activity_timezone", activityTimezone)
 	} else {
 		d.logger.Debug("Gemini unified prompt (context only)", "prompt_length", len(fullPrompt), 
-			"context_size_bytes", len(contextJSON))
+			"evidence_length", len(formattedEvidence))
 	}
 	
 	if verbose {
@@ -1633,18 +1630,22 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 				"properties": map[string]interface{}{
 					"timezone": map[string]string{
 						"type": "string",
-						"description": "IANA timezone identifier or UNKNOWN",
+						"description": "IANA timezone identifier",
 					},
 					"location": map[string]string{
 						"type": "string", 
-						"description": "Specific location name (city, region) or UNKNOWN",
+						"description": "Specific location name (city, region) - NEVER return UNKNOWN",
+					},
+					"confidence": map[string]string{
+						"type": "string",
+						"description": "Confidence level: high, medium, or low",
 					},
 					"reasoning": map[string]string{
 						"type": "string",
-						"description": "Brief explanation of the decision",
+						"description": "Brief explanation of the decision and evidence used",
 					},
 				},
-				"required": []string{"timezone", "location"},
+				"required": []string{"timezone", "location", "confidence", "reasoning"},
 			},
 			"maxOutputTokens": func() int {
 				if verbose {
@@ -1741,7 +1742,7 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	
 	d.logger.Debug("Gemini full response", "full_response", fullResponse)
 	
-	var timezone, location string
+	var timezone, location, confidence string
 	
 	var jsonResponse map[string]interface{}
 	if err := json.Unmarshal([]byte(fullResponse), &jsonResponse); err != nil {
@@ -1755,46 +1756,56 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	if loc, ok := jsonResponse["location"].(string); ok {
 		location = loc
 	}
+	if conf, ok := jsonResponse["confidence"].(string); ok {
+		confidence = conf
+	}
 	if reasoning, ok := jsonResponse["reasoning"].(string); ok {
 		d.logger.Debug("Gemini reasoning", "reasoning", reasoning)
 	}
 	
-	d.logger.Debug("Gemini unified response", "extracted_timezone", timezone, "extracted_location", location, "had_activity_data", hasActivityData, "verbose_mode", verbose)
+	d.logger.Debug("Gemini unified response", "extracted_timezone", timezone, "extracted_location", location, "confidence", confidence, "had_activity_data", hasActivityData, "verbose_mode", verbose)
 	if hasActivityData {
 		d.logger.Debug("Gemini activity comparison", "original_activity_timezone", activityTimezone, "gemini_response", timezone, "gemini_location", location)
 	}
 	
-	d.logger.Debug("Gemini unified context", "context_json", string(contextJSON))
-	
-	if timezone == "UNKNOWN" || timezone == "" {
-		return "", "", 0, nil
+	if timezone == "" {
+		return "", "", 0, fmt.Errorf("Gemini did not provide a timezone")
 	}
-	
-	if location == "UNKNOWN" {
-		location = ""
+	if location == "" {
+		return "", "", 0, fmt.Errorf("Gemini did not provide a location")
 	}
 	
 	if !strings.Contains(timezone, "/") {
 		d.logger.Debug("invalid timezone format from unified Gemini", "timezone", timezone)
-		return "", "", 0, nil
+		return "", "", 0, fmt.Errorf("invalid timezone format: %s", timezone)
 	}
 	
-	// Calculate confidence based on whether activity data exists and matches
-	var confidence float64
+	// Calculate confidence based on Gemini's assessment and activity data
+	var confidenceFloat float64
+	switch confidence {
+	case "high":
+		confidenceFloat = 0.9
+	case "medium":
+		confidenceFloat = 0.7
+	case "low":
+		confidenceFloat = 0.5
+	default:
+		// Default confidence if not provided or invalid
+		confidenceFloat = 0.6
+	}
+	
+	// Boost confidence if we have strong activity data that matches
 	if hasActivityData {
 		if timezone == activityTimezone {
 			d.logger.Debug("Gemini confirmed activity-based timezone", "timezone", timezone)
-			confidence = 0.9 // High confidence when activity + context agree
+			confidenceFloat = 0.9 // High confidence when activity + context agree
 		} else {
 			d.logger.Debug("Gemini refined activity-based timezone", "original", activityTimezone, "refined", timezone)
-			confidence = 0.75 // Medium-high confidence when Gemini refines based on strong evidence
+			// Keep Gemini's confidence level since it might have good reasons for the refinement
 		}
-	} else {
-		// Pure context-based detection
-		confidence = 0.7 // Lower confidence without activity data
 	}
 	
-	return timezone, location, confidence, nil
+	return timezone, location, confidenceFloat, nil
 }
 
 func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) string {
@@ -2037,5 +2048,99 @@ func detectLunchBreak(hourCounts map[int]int, utcOffset int, workStart, workEnd 
 	}
 	
 	return bestCandidate.start, bestCandidate.end, bestCandidate.confidence
+}
+
+// formatEvidenceForGemini formats contextual data into a readable, structured format for Gemini analysis
+func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) string {
+	var evidence strings.Builder
+	
+	// ACTIVITY ANALYSIS SECTION
+	if activityTz, ok := contextData["activity_detected_timezone"].(string); ok {
+		evidence.WriteString("## ACTIVITY ANALYSIS (HIGHLY RELIABLE)\n")
+		evidence.WriteString(fmt.Sprintf("Detected Timezone: %s\n", activityTz))
+		
+		if confidence, ok := contextData["activity_confidence"].(float64); ok {
+			evidence.WriteString(fmt.Sprintf("Activity Confidence: %.1f%%\n", confidence*100))
+		}
+		
+		if workStart, ok := contextData["work_start_local"].(float64); ok {
+			if workEnd, ok := contextData["work_end_local"].(float64); ok {
+				evidence.WriteString(fmt.Sprintf("Work Hours: %.1f-%.1f local time\n", workStart, workEnd))
+			}
+		}
+		
+		if lunchStart, ok := contextData["lunch_start_local"].(float64); ok {
+			if lunchEnd, ok := contextData["lunch_end_local"].(float64); ok {
+				if lunchConf, ok := contextData["lunch_confidence"].(float64); ok {
+					evidence.WriteString(fmt.Sprintf("Lunch Hours: %.1f-%.1f local time (%.1f%% confidence)\n", 
+						lunchStart, lunchEnd, lunchConf*100))
+				}
+			}
+		}
+		
+		if sleepHours, ok := contextData["sleep_hours_utc"].([]int); ok && len(sleepHours) > 0 {
+			evidence.WriteString(fmt.Sprintf("Sleep Hours UTC: %v\n", sleepHours))
+		}
+		
+		if offset, ok := contextData["detected_gmt_offset"].(string); ok {
+			evidence.WriteString(fmt.Sprintf("GMT Offset: %s\n", offset))
+		}
+		
+		evidence.WriteString("\n")
+	}
+	
+	// GITHUB USER PROFILE SECTION
+	if userJSON, ok := contextData["github_user_json"]; ok {
+		evidence.WriteString("## GITHUB USER PROFILE\n")
+		if userBytes, err := json.MarshalIndent(userJSON, "", "  "); err == nil {
+			evidence.WriteString(string(userBytes))
+		}
+		evidence.WriteString("\n\n")
+	}
+	
+	// ORGANIZATIONS SECTION
+	if orgs, ok := contextData["organizations"]; ok {
+		evidence.WriteString("## ORGANIZATION MEMBERSHIPS\n")
+		if orgBytes, err := json.MarshalIndent(orgs, "", "  "); err == nil {
+			evidence.WriteString(string(orgBytes))
+		}
+		evidence.WriteString("\n\n")
+	}
+	
+	// PULL REQUESTS SECTION
+	if prs, ok := contextData["pull_requests"]; ok {
+		evidence.WriteString("## RECENT PULL REQUEST TITLES\n")
+		if prBytes, err := json.MarshalIndent(prs, "", "  "); err == nil {
+			evidence.WriteString(string(prBytes))
+		}
+		evidence.WriteString("\n\n")
+	}
+	
+	// LONGEST PR/ISSUE CONTENT SECTION (inline, not JSON)
+	if title, ok := contextData["longest_pr_issue_title"].(string); ok && title != "" {
+		evidence.WriteString("## LONGEST PR/ISSUE CONTENT\n")
+		evidence.WriteString(fmt.Sprintf("Title: %s\n\n", title))
+		
+		if body, ok := contextData["longest_pr_issue_body"].(string); ok && body != "" {
+			evidence.WriteString("Body:\n")
+			evidence.WriteString(body)
+			evidence.WriteString("\n\n")
+		}
+	}
+	
+	// WEBSITE CONTENT SECTION
+	if websiteContent, ok := contextData["website_content"].(string); ok && websiteContent != "" {
+		evidence.WriteString("## WEBSITE/BLOG CONTENT\n")
+		evidence.WriteString(websiteContent)
+		evidence.WriteString("\n\n")
+	}
+	
+	// ISSUE COUNT
+	if issueCount, ok := contextData["issue_count"].(int); ok {
+		evidence.WriteString(fmt.Sprintf("## ADDITIONAL METRICS\n"))
+		evidence.WriteString(fmt.Sprintf("Issue Count: %d\n", issueCount))
+	}
+	
+	return evidence.String()
 }
 

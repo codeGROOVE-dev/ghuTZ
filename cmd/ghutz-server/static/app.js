@@ -139,15 +139,19 @@ function displayResults(data) {
     const methodName = formatMethodName(data.method);
     document.getElementById('method').textContent = methodName;
 
+    // Show results first so map container has proper dimensions
+    document.getElementById('result').classList.add('show');
+
     if (data.location) {
         const mapRow = document.getElementById('mapRow');
         if (mapRow) {
             mapRow.style.display = 'block';
         }
-        initMap(data.location.latitude, data.location.longitude, data.username);
+        // Initialize map after results are visible and DOM has updated
+        setTimeout(() => {
+            initMap(data.location.latitude, data.location.longitude, data.username);
+        }, 100);
     }
-
-    document.getElementById('result').classList.add('show');
 }
 
 function formatMethodName(method) {
@@ -193,7 +197,7 @@ function initMap(lat, lng, username) {
     if (typeof L === 'undefined') {
         // Fallback to simple link if Leaflet fails to load
         const mapLink = document.createElement('a');
-        mapLink.href = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}&zoom=10#map=10/${lat}/${lng}`;
+        mapLink.href = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}&zoom=6#map=6/${lat}/${lng}`;
         mapLink.target = '_blank';
         mapLink.textContent = `View ${username} on OpenStreetMap (${lat.toFixed(2)}, ${lng.toFixed(2)})`;
         mapLink.style.cssText = 'color: #000; text-decoration: underline;';
@@ -201,20 +205,45 @@ function initMap(lat, lng, username) {
         return;
     }
     
-    // Create the map
-    const map = L.map(mapDiv).setView([lat, lng], 10);
-    
-    // Add OpenStreetMap tiles
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
-        maxZoom: 18,
-    }).addTo(map);
-    
-    // Add a marker for the user location
-    L.marker([lat, lng])
-        .addTo(map)
-        .bindPopup(`${username}<br/>${lat.toFixed(2)}, ${lng.toFixed(2)}`)
-        .openPopup();
+    try {
+        // Create the map with explicit options
+        const map = L.map(mapDiv, {
+            center: [lat, lng],
+            zoom: 6,  // Zoomed out to show state/country context
+            scrollWheelZoom: false,
+            attributionControl: true
+        });
+        
+        // Add OpenStreetMap tiles with proper attribution
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 18,
+            subdomains: ['a', 'b', 'c']
+        }).addTo(map);
+        
+        // Add a marker for the user location
+        L.marker([lat, lng])
+            .addTo(map)
+            .bindPopup(`<strong>${username}</strong><br/>${lat.toFixed(2)}, ${lng.toFixed(2)}`)
+            .openPopup();
+        
+        // Force the map to recalculate its size after creation
+        // This is crucial for proper tile loading when container was recently made visible
+        setTimeout(() => {
+            map.invalidateSize();
+        }, 50);
+        
+    } catch (error) {
+        console.error('Failed to initialize map:', error);
+        // Fallback to link if map creation fails
+        const mapLink = document.createElement('a');
+        mapLink.href = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}&zoom=6#map=6/${lat}/${lng}`;
+        mapLink.target = '_blank';
+        mapLink.textContent = `View ${username} on OpenStreetMap (${lat.toFixed(2)}, ${lng.toFixed(2)})`;
+        mapLink.style.cssText = 'color: #000; text-decoration: underline;';
+        mapDiv.innerHTML = '';
+        mapDiv.appendChild(mapLink);
+    }
 }
 
 document.addEventListener('keydown', (e) => {
