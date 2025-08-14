@@ -9,12 +9,11 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"sort"
 	"strings"
 )
 
 // calculateTypicalActiveHours determines typical work hours based on activity patterns
-// It uses percentiles to exclude outliers (e.g., occasional early starts or late nights)
+// It finds the longest continuous block of substantial activity, ignoring gaps > 2 hours
 func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOffset int) (start, end int) {
 	// Create a map for easy lookup of quiet hours
 	quietMap := make(map[int]bool)
@@ -22,273 +21,199 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 		quietMap[h] = true
 	}
 
-	// Find hours with meaningful activity (>10% of max activity)
+	// Find hours with meaningful activity (>5% of max activity)
 	maxActivity := 0
 	for _, count := range hourCounts {
 		if count > maxActivity {
 			maxActivity = count
 		}
 	}
-	threshold := maxActivity / 10
+	threshold := maxActivity / 20 // Lower threshold to catch more activity
 
-	// Collect active hours (not in quiet period and above threshold)
-	var activeHours []int
-	for hour := 0; hour < 24; hour++ {
-		if !quietMap[hour] && hourCounts[hour] > threshold {
-			activeHours = append(activeHours, hour)
-		}
-	}
-
-	if len(activeHours) == 0 {
-		// Default to 9am-5pm if no clear pattern
+	if maxActivity == 0 {
+		// Default to 9am-5pm if no activity
 		return 9, 17
 	}
 
-	// Find the continuous block of active hours
-	// Handle wrap-around (e.g., activity from 22-02)
-	sort.Ints(activeHours)
-
-	// Find the largest gap to determine where the active period starts/ends
-	maxGap := 0
-	gapStart := activeHours[len(activeHours)-1]
-	for i := 0; i < len(activeHours); i++ {
-		gap := activeHours[i] - gapStart
-		if gap < 0 {
-			gap += 24
-		}
-		if gap > maxGap {
-			maxGap = gap
-			start = activeHours[i]
-		}
-		gapStart = activeHours[i]
+	// Find all continuous work blocks (gaps <= 2 hours allowed, except for lunch)
+	type workBlock struct {
+		start, end     int
+		totalActivity  int
+		hourCount      int
 	}
-
-	// Find the end of the active period
-	end = start
-	for i := 0; i < len(activeHours); i++ {
-		hour := activeHours[i]
-		// Check if this hour is part of the continuous block
-		diff := hour - start
-		if diff < 0 {
-			diff += 24
-		}
-		if diff < 16 { // Maximum 16-hour workday
-			end = hour
-		}
-	}
-
-	// Apply smart filtering: use 10th and 90th percentiles to exclude outliers
-	// This prevents occasional early/late activity from skewing the results
-	activityInRange := make([]int, 0)
-	for h := start; ; h = (h + 1) % 24 {
-		if hourCounts[h] > 0 {
-			// Add this hour's count multiple times to weight the calculation
-			for i := 0; i < hourCounts[h]; i++ {
-				activityInRange = append(activityInRange, h)
-			}
-		}
-		if h == end {
-			break
-		}
-	}
-
-	if len(activityInRange) > 10 {
-		sort.Ints(activityInRange)
-		// Use 5th percentile for start (ignore occasional early starts)
-		percentile5 := len(activityInRange) / 20
-		// Use 98th percentile for end to capture more of the workday
-		// Many developers work past traditional hours
-		percentile98 := len(activityInRange) * 98 / 100
+	
+	var blocks []workBlock
+	currentBlock := workBlock{start: -1}
+	
+	for hour := 0; hour < 24; hour++ {
+		hasActivity := !quietMap[hour] && hourCounts[hour] > threshold
 		
-		// Ensure we don't have invalid indices
-		if percentile5 < 0 {
-			percentile5 = 0
-		}
-		if percentile98 >= len(activityInRange) {
-			percentile98 = len(activityInRange) - 1
-		}
-
-		start = activityInRange[percentile5]
-		end = activityInRange[percentile98]
-		
-		// Also check if there's significant activity continuing past the current end
-		// If activity at end+1 hour is > 25% of max activity in work hours, extend
-		maxWorkActivity := 0
-		for h := start; h != end; h = (h + 1) % 24 {
-			if hourCounts[h] > maxWorkActivity {
-				maxWorkActivity = hourCounts[h]
-			}
-		}
-		
-		// Keep extending end time while there's meaningful activity
-		for {
-			nextHour := (end + 1) % 24
-			// Stop if we hit quiet hours or wrap around to start
-			if nextHour == start {
-				break
-			}
-			// Check if this hour is in quiet hours
-			isQuiet := false
-			if quietMap[nextHour] {
-				isQuiet = true
-			}
-			if isQuiet {
-				break
-			}
-			// If activity is still meaningful (>20% of max), extend
-			if hourCounts[nextHour] > maxWorkActivity/5 {
-				end = nextHour
+		if hasActivity {
+			if currentBlock.start == -1 {
+				// Start new block
+				currentBlock.start = hour
+				currentBlock.end = hour
+				currentBlock.totalActivity = hourCounts[hour]
+				currentBlock.hourCount = 1
 			} else {
-				break
+				// Extend current block
+				currentBlock.end = hour
+				currentBlock.totalActivity += hourCounts[hour]
+				currentBlock.hourCount++
+			}
+		} else {
+			if currentBlock.start != -1 {
+				// Check if we should end the current block
+				// Allow gaps of up to 1 hour (for lunch breaks)
+				foundActivity := false
+				
+				// Look ahead up to 1 hour for continuation (serious lunch breaks!)
+				for lookahead := 1; lookahead <= 1; lookahead++ {
+					nextHour := (hour + lookahead) % 24
+					if !quietMap[nextHour] && hourCounts[nextHour] > threshold {
+						foundActivity = true
+						break
+					}
+				}
+				
+				if !foundActivity {
+					// End current block - no meaningful activity found within 1 hour
+					blocks = append(blocks, currentBlock)
+					currentBlock = workBlock{start: -1}
+				}
 			}
 		}
 	}
-
-	// Convert from UTC to local time
-	start = (start + utcOffset + 24) % 24
-	end = (end + utcOffset + 24) % 24
-
+	
+	// Don't forget to add the last block if we ended on activity
+	if currentBlock.start != -1 {
+		blocks = append(blocks, currentBlock)
+	}
+	
+	if len(blocks) == 0 {
+		// Default to 9am-5pm if no clear pattern
+		return 9, 17
+	}
+	
+	// Find the longest block by total activity (not just hour count)
+	bestBlock := blocks[0]
+	for _, block := range blocks[1:] {
+		// Prefer blocks with more total activity and longer duration
+		score := block.totalActivity * block.hourCount
+		bestScore := bestBlock.totalActivity * bestBlock.hourCount
+		
+		if score > bestScore {
+			bestBlock = block
+		}
+	}
+	
+	start = bestBlock.start
+	end = bestBlock.end
+	
+	// Convert UTC hours to local hours for final result
+	start = (start + utcOffset) % 24
+	if start < 0 {
+		start += 24
+	}
+	end = (end + utcOffset) % 24
+	if end < 0 {
+		end += 24
+	}
+	
 	return start, end
 }
 
-// findSleepHours looks for extended periods of zero or near-zero activity
-// This is more reliable than finding "quiet" hours which might just be evening time
+// findSleepHours looks for continuous quiet periods of at least 3 hours
+// Only returns quiet periods that are 3+ hours continuous 
 func findSleepHours(hourCounts map[int]int) []int {
-	// First, find all hours with zero or minimal activity
-	zeroHours := []int{}
+	// Find threshold for quiet hours (≤5% of max activity or ≤1 event)
+	maxActivity := 0
+	for _, count := range hourCounts {
+		if count > maxActivity {
+			maxActivity = count
+		}
+	}
+	
+	threshold := maxActivity / 20
+	if threshold < 1 {
+		threshold = 1
+	}
+	
+	// Find all quiet hours
+	quietHours := make([]bool, 24)
 	for hour := 0; hour < 24; hour++ {
-		if hourCounts[hour] <= 1 { // Allow for 1 random event
-			zeroHours = append(zeroHours, hour)
+		quietHours[hour] = hourCounts[hour] <= threshold
+	}
+	
+	// If very few quiet hours, be more strict (only zero activity)
+	totalQuietHours := 0
+	for _, isQuiet := range quietHours {
+		if isQuiet {
+			totalQuietHours++
 		}
 	}
-
-	// If we have a good stretch of zero activity, use that
-	if len(zeroHours) >= 5 {
-		// Find the longest consecutive sequence (including wrap-around)
-		maxLen := 0
-		maxStart := 0
-		
-		// Check if hours wrap around midnight
-		hasWrapAround := false
-		if len(zeroHours) > 1 {
-			// Check if we have both late night (20-23) and early morning (0-5) hours
-			hasLateNight := false
-			hasEarlyMorning := false
-			for _, h := range zeroHours {
-				if h >= 20 && h <= 23 {
-					hasLateNight = true
-				}
-				if h >= 0 && h <= 5 {
-					hasEarlyMorning = true
-				}
-			}
-			hasWrapAround = hasLateNight && hasEarlyMorning
-		}
-		
-		if hasWrapAround {
-			// Try to find wrap-around sequence
-			// Build a bitmap of quiet hours for easier checking
-			quietMap := make(map[int]bool)
-			for _, h := range zeroHours {
-				quietMap[h] = true
-			}
-			
-			// Check each possible starting hour for the longest sequence
-			for startHour := 0; startHour < 24; startHour++ {
-				if !quietMap[startHour] {
-					continue
-				}
-				
-				// Count consecutive hours from this start point
-				length := 0
-				for i := 0; i < 24; i++ {
-					checkHour := (startHour + i) % 24
-					if !quietMap[checkHour] {
-						break
-					}
-					length++
-				}
-				
-				if length > maxLen {
-					maxLen = length
-					maxStart = startHour
-				}
-			}
-		} else {
-			// Original logic for non-wrapping sequences
-			currentStart := zeroHours[0]
-			currentLen := 1
-
-			for i := 1; i < len(zeroHours); i++ {
-				if zeroHours[i] == zeroHours[i-1]+1 {
-					currentLen++
-				} else {
-					if currentLen > maxLen {
-						maxLen = currentLen
-						maxStart = currentStart
-					}
-					currentStart = zeroHours[i]
-					currentLen = 1
-				}
-			}
-			if currentLen > maxLen {
-				maxLen = currentLen
-				maxStart = currentStart
-			}
-		}
-
-		// Extract the core sleep hours from the zero-activity period
-		// Skip early evening hours and wake-up hours to focus on deep sleep
-		result := []int{}
-		sleepStart := maxStart
-		sleepLength := maxLen
-
-		// Only skip hours if the quiet period starts in evening (19:00-23:00)
-		// Don't skip if it starts after midnight (00:00-06:00) as that's already sleep time
-		if maxStart >= 19 && maxStart <= 23 {
-			// Period starts in evening, might include pre-sleep wind-down time
-			if maxLen >= 8 {
-				sleepStart = (maxStart + 2) % 24 // Skip first 2 hours of evening
-				sleepLength = maxLen - 3         // Also skip last hour for wake-up
-			} else if maxLen >= 6 {
-				sleepStart = (maxStart + 1) % 24 // Skip first hour
-				sleepLength = maxLen - 2         // Also skip last hour
-			}
-		} else if maxStart >= 0 && maxStart <= 6 {
-			// Period starts after midnight or early morning - this is prime sleep time
-			// Don't skip the beginning, but maybe skip the end for wake-up time
-			if maxLen >= 6 {
-				sleepLength = maxLen - 1 // Only skip last hour for wake-up
-			}
-		} else {
-			// Period starts during day (7:00-18:00) - unusual but possible for night shift workers
-			// Use the period as-is, limiting to reasonable duration
-			if maxLen > 8 {
-				sleepLength = 8
-			}
-		}
-
-		// Limit to reasonable sleep duration (4-8 hours)
-		if sleepLength > 8 {
-			sleepLength = 8
-		}
-		if sleepLength < 4 && maxLen >= 4 {
-			sleepLength = maxLen // Use original if adjustment made it too short
-			sleepStart = maxStart
-		}
-
-		for i := 0; i < sleepLength; i++ {
-			hour := (sleepStart + i) % 24
-			result = append(result, hour)
-		}
-
-		if len(result) >= 4 {
-			return result
+	
+	if totalQuietHours < 4 {
+		// Be more strict - only use hours with zero activity
+		for hour := 0; hour < 24; hour++ {
+			quietHours[hour] = hourCounts[hour] == 0
 		}
 	}
-
-	// Fall back to the old method if we don't have clear zero periods
-	return findQuietHours(hourCounts)
+	
+	// Find continuous blocks of quiet hours that are at least 3 hours long
+	var result []int
+	var blocks [][]int
+	
+	// First pass: Find all continuous blocks
+	var currentBlock []int
+	for hour := 0; hour < 24; hour++ {
+		if quietHours[hour] {
+			currentBlock = append(currentBlock, hour)
+		} else {
+			if len(currentBlock) >= 3 {
+				blocks = append(blocks, currentBlock)
+			}
+			currentBlock = nil
+		}
+	}
+	
+	// Handle wraparound case: check if first and last blocks can be combined
+	// (e.g., [22, 23] and [0, 1, 2] should become [22, 23, 0, 1, 2])
+	if len(currentBlock) > 0 && len(blocks) > 0 {
+		firstBlock := blocks[0]
+		lastBlock := currentBlock
+		
+		// Check if they can be combined (last hour of currentBlock is 23, first hour of firstBlock is 0)
+		if len(lastBlock) > 0 && len(firstBlock) > 0 && 
+		   lastBlock[len(lastBlock)-1] == 23 && firstBlock[0] == 0 {
+			// Combine the blocks: [22, 23] + [0, 1, 2] = [22, 23, 0, 1, 2]
+			combined := append(lastBlock, firstBlock...)
+			if len(combined) >= 3 {
+				// Replace the first block with the combined block
+				blocks[0] = combined
+			}
+		} else {
+			// They can't be combined, add the last block if it's long enough
+			if len(lastBlock) >= 3 {
+				blocks = append(blocks, lastBlock)
+			}
+		}
+	} else if len(currentBlock) >= 3 {
+		// No existing blocks, just add the current one if it's long enough
+		blocks = append(blocks, currentBlock)
+	}
+	
+	// Flatten all valid blocks into the result
+	for _, block := range blocks {
+		result = append(result, block...)
+	}
+	
+	// If no continuous blocks of 3+ hours found, fall back to old method
+	if len(result) == 0 {
+		return findQuietHours(hourCounts)
+	}
+	
+	return result
 }
 
 func findQuietHours(hourCounts map[int]int) []int {
@@ -603,38 +528,14 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 			primaryConfidence = confidence * 100
 		}
 		
-		// If work starts very early, reduce confidence and suggest alternatives
+		// If work starts very early, acknowledge the issue but keep primary timezone as highest confidence
 		if workStart < 6.0 {
-			primaryConfidence = 40.0 // Low confidence for unusual work hours
+			primaryConfidence = 60.0 // Moderate confidence - unusual but still the detected timezone
 			
 			evidence.WriteString(fmt.Sprintf("1. **%s** (%.0f%% confidence)\n", activityTz, primaryConfidence))
-			evidence.WriteString("   - ⚠️ Work starts at 3am which is VERY unusual\n")
-			evidence.WriteString("   - Could be night shift or incorrect timezone detection\n\n")
-			
-			// Add China as high confidence alternative if sleep is 19-23 UTC
-			if sleepHours, ok := contextData["sleep_hours_utc"].([]int); ok && len(sleepHours) > 0 {
-				midSleep := sleepHours[len(sleepHours)/2]
-				
-				if midSleep >= 19 && midSleep <= 23 {
-					evidence.WriteString("2. **UTC+8 (China/Singapore)** (70% confidence)\n")
-					evidence.WriteString("   - Would make work hours 11am-2am (common for global teams)\n")
-					
-					// Add name-based hint if available
-					if userJSON, ok := contextData["github_user_json"]; ok {
-						if userMap, ok := userJSON.(map[string]interface{}); ok {
-							if name, ok := userMap["name"].(string); ok && name != "" {
-								evidence.WriteString(fmt.Sprintf("   - User's name is '%s'\n", name))
-							}
-						}
-					}
-					
-					evidence.WriteString("   - Consider Asian timezone if name/company suggests it\n\n")
-					
-					evidence.WriteString("3. **UTC-8 (Pacific US)** (30% confidence)\n")
-					evidence.WriteString("   - VMware headquarters in Palo Alto, California\n")
-					evidence.WriteString("   - Would be night shift work pattern\n\n")
-				}
-			}
+			evidence.WriteString("   - ⚠️ Work starts very early (unusual pattern)\n")
+			evidence.WriteString("   - Could indicate night shift, remote work, or irregular schedule\n")
+			evidence.WriteString("   - Sleep pattern still aligns with this timezone\n\n")
 		} else {
 			// Normal work hours - higher confidence
 			evidence.WriteString(fmt.Sprintf("1. **%s** (%.0f%% confidence)\n", activityTz, primaryConfidence))
@@ -642,53 +543,36 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 			evidence.WriteString("   - Sleep pattern matches expected timezone\n\n")
 		}
 		
-		// Add alternative timezone possibilities based on sleep patterns
-		if sleepHours, ok := contextData["sleep_hours_utc"].([]int); ok && len(sleepHours) > 0 && workStart >= 6.0 {
+		// Add alternative timezone possibilities based on detected timezone and context
+		if sleepHours, ok := contextData["sleep_hours_utc"].([]int); ok && len(sleepHours) > 0 {
 			evidence.WriteString("\n### Other Possible Timezones (lower confidence):\n")
 			
-			// Calculate midpoint of sleep hours for alternative suggestions
-			midSleep := sleepHours[len(sleepHours)/2]
-			
-			// If sleep is around 19-23 UTC (like tnqn), this could be:
-			// - UTC+1 (sleeping 20-0 local) - Europe but work starts at 3am which is unusual!
-			// - UTC+8 (sleeping 3-7am local) - China with reasonable work hours 11am-2am
-			// - UTC-8 (sleeping 11am-3pm local) - Pacific with night shift work
-			if midSleep >= 19 && midSleep <= 23 {
-				evidence.WriteString("- UTC+8 (China/Singapore) - Chinese developer with late night work pattern\n")
-				evidence.WriteString("  → Would be working 11am-2am CST which is common for global teams\n")
-				evidence.WriteString("  → If name is clearly Chinese (Quan, Wei, Zhang, etc), strongly consider this\n")
-				evidence.WriteString("- UTC-8 (Pacific US) - developer working night shift or unusual hours\n")
-				evidence.WriteString("  → VMware has offices in Palo Alto, California\n")
-			}
-			
-			// If sleep is around 20-2 UTC (like kinzhi), could be:
-			// - UTC+4 (sleeping 0-5am local) - Middle East
-			// - UTC+8 (irregular pattern or incomplete data) - China
-			if midSleep >= 20 && midSleep <= 2 {
-				evidence.WriteString("- UTC+8 (China/Singapore) - if Chinese name/company despite unusual hours\n")
-				evidence.WriteString("  → Chinese developers may have irregular GitHub activity\n")
-				evidence.WriteString("  → DaoCloud, KubeSphere, Karmada are Chinese projects\n")
-			}
-			
-			// If sleep is 0-3 UTC (like Gauravpadam), could be:
-			// - UTC+2 (sleeping 2-5am local) - Europe
-			// - UTC+5:30 (unusual schedule, or data incomplete) - India
-			// - UTC+3 (sleeping 3-6am local) - Eastern Europe/East Africa
-			if midSleep >= 0 && midSleep <= 3 {
-				evidence.WriteString("- UTC+5:30 (India) - Indian developer working European hours from India\n")
-				evidence.WriteString("  → Common for Indians at European companies (HERE Maps, SAP, etc.)\n")
-				evidence.WriteString("  → Would be working 2pm-11pm IST to align with Berlin office\n")
+			// Generate contextually appropriate alternatives based on primary detection
+			if activityTz == "UTC+1" {
+				if workStart < 6.0 {
+					evidence.WriteString("- Night shift worker in Central Europe (Germany, Poland, etc.)\n")
+					evidence.WriteString("- Remote worker aligning with US East Coast hours (UTC-5)\n") 
+					evidence.WriteString("- Freelancer with irregular schedule in Central European timezone\n")
+				} else {
+					evidence.WriteString("- UTC+5:30 (India) - Indian developer working European hours from India\n")
+					evidence.WriteString("  → Common for Indians at European companies (HERE Maps, SAP, etc.)\n")
+					evidence.WriteString("  → Would be working 2pm-11pm IST to align with Berlin office\n")
+				}
 				evidence.WriteString("- UTC+3 (East Africa/Arabia) - adjacent timezone possibility\n")
-			} else if midSleep >= 14 && midSleep <= 18 {
-				// Asian sleep pattern
-				evidence.WriteString("- UTC+8 (China/Singapore) - strong Asian pattern\n")
-				evidence.WriteString("- UTC+9 (Japan/Korea) - alternative Asian timezone\n")
-				evidence.WriteString("- UTC+7 (Thailand/Vietnam) - Southeast Asia possibility\n")
-			} else if midSleep >= 4 && midSleep <= 10 {
-				// American sleep pattern
+			} else if activityTz == "UTC+2" {
+				evidence.WriteString("- UTC+1 (Central Europe) - one hour west possibility\n")
+				evidence.WriteString("- UTC+3 (Eastern Europe/Middle East) - one hour east possibility\n")
+			} else if activityTz == "UTC-5" {
+				evidence.WriteString("- UTC-6 (Central US) - typical American pattern\n")
+				evidence.WriteString("- UTC-4 (Eastern US) - East Coast possibility\n")
+			} else if activityTz == "UTC-6" {
 				evidence.WriteString("- UTC-6 (Central US) - typical American pattern\n")
 				evidence.WriteString("- UTC-5 (Eastern US) - East Coast possibility\n")
 				evidence.WriteString("- UTC-7 (Mountain US) - Western US possibility\n")
+			} else if strings.Contains(activityTz, "UTC+8") {
+				evidence.WriteString("- UTC+8 (China/Singapore) - Chinese developer with late night work pattern\n")
+				evidence.WriteString("  → Would be working 11am-2am CST which is common for global teams\n")
+				evidence.WriteString("  → If name is clearly Chinese (Quan, Wei, Zhang, etc), strongly consider this\n")
 			}
 			evidence.WriteString("Note: Consider these alternatives if name/company evidence strongly suggests them\n")
 		}
@@ -737,9 +621,39 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	// GITHUB USER PROFILE SECTION
 	if userJSON, ok := contextData["github_user_json"]; ok {
 		evidence.WriteString("## GITHUB USER PROFILE\n")
-		// Convert JSON to key/value bullets to save tokens
-		if userMap, ok := userJSON.(map[string]interface{}); ok {
+		
+		// Handle GitHubUser struct directly 
+		if user, ok := userJSON.(*GitHubUser); ok && user != nil {
 			// Important fields first
+			if user.Name != "" {
+				evidence.WriteString(fmt.Sprintf("• Name: %s\n", user.Name))
+			}
+			if user.Login != "" {
+				evidence.WriteString(fmt.Sprintf("• Login: %s\n", user.Login))
+			}
+			if user.Location != "" {
+				evidence.WriteString(fmt.Sprintf("• Location: %s\n", user.Location))
+			}
+			if user.Company != "" {
+				evidence.WriteString(fmt.Sprintf("• Company: %s\n", user.Company))
+			}
+			if user.Email != "" {
+				evidence.WriteString(fmt.Sprintf("• Email: %s\n", user.Email))
+			}
+			if user.Blog != "" {
+				evidence.WriteString(fmt.Sprintf("• Blog: %s\n", user.Blog))
+			}
+			if user.Bio != "" {
+				evidence.WriteString(fmt.Sprintf("• Bio: %s\n", user.Bio))
+			}
+			if user.TwitterUsername != "" {
+				evidence.WriteString(fmt.Sprintf("• Twitter: @%s\n", user.TwitterUsername))
+			}
+			if user.CreatedAt != "" {
+				evidence.WriteString(fmt.Sprintf("• Created: %s\n", user.CreatedAt))
+			}
+		} else if userMap, ok := userJSON.(map[string]interface{}); ok {
+			// Fallback: handle map[string]interface{} format
 			if name, ok := userMap["name"].(string); ok && name != "" {
 				evidence.WriteString(fmt.Sprintf("• Name: %s\n", name))
 			}
@@ -764,16 +678,6 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 			if twitterUsername, ok := userMap["twitter_username"].(string); ok && twitterUsername != "" {
 				evidence.WriteString(fmt.Sprintf("• Twitter: @%s\n", twitterUsername))
 			}
-			// Numeric fields
-			if publicRepos, ok := userMap["public_repos"].(float64); ok {
-				evidence.WriteString(fmt.Sprintf("• Public repos: %.0f\n", publicRepos))
-			}
-			if followers, ok := userMap["followers"].(float64); ok {
-				evidence.WriteString(fmt.Sprintf("• Followers: %.0f\n", followers))
-			}
-			if following, ok := userMap["following"].(float64); ok {
-				evidence.WriteString(fmt.Sprintf("• Following: %.0f\n", following))
-			}
 			if createdAt, ok := userMap["created_at"].(string); ok && createdAt != "" {
 				evidence.WriteString(fmt.Sprintf("• Created: %s\n", createdAt))
 			}
@@ -794,8 +698,23 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	// ORGANIZATIONS SECTION
 	if orgs, ok := contextData["organizations"]; ok {
 		evidence.WriteString("## ORGANIZATION MEMBERSHIPS\n")
-		// Convert to simple bulleted list to save tokens
-		if orgsList, ok := orgs.([]interface{}); ok {
+		
+		// Handle []Organization slice directly
+		if orgsList, ok := orgs.([]Organization); ok {
+			for _, org := range orgsList {
+				if org.Login != "" {
+					if org.Description != "" {
+						evidence.WriteString(fmt.Sprintf("• %s - %s\n", org.Login, org.Description))
+					} else {
+						evidence.WriteString(fmt.Sprintf("• %s\n", org.Login))
+					}
+					if org.Location != "" {
+						evidence.WriteString(fmt.Sprintf("  → Location: %s\n", org.Location))
+					}
+				}
+			}
+		} else if orgsList, ok := orgs.([]interface{}); ok {
+			// Fallback: handle []interface{} format
 			for _, org := range orgsList {
 				if orgMap, ok := org.(map[string]interface{}); ok {
 					if name, ok := orgMap["name"].(string); ok {
@@ -814,10 +733,22 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	// PULL REQUESTS SECTION
 	if prs, ok := contextData["pull_requests"]; ok {
 		evidence.WriteString("## RECENT PULL REQUEST TITLES\n")
-		// Convert to simple bulleted list to save tokens
-		if prsList, ok := prs.([]interface{}); ok {
+		
+		// Handle []map[string]interface{} format (actual format from detector.go)
+		if prsList, ok := prs.([]map[string]interface{}); ok {
 			for _, pr := range prsList {
-				if prStr, ok := pr.(string); ok {
+				if title, ok := pr["title"].(string); ok && title != "" {
+					evidence.WriteString(fmt.Sprintf("• %s\n", title))
+				}
+			}
+		} else if prsList, ok := prs.([]interface{}); ok {
+			// Fallback: handle []interface{} format  
+			for _, pr := range prsList {
+				if prMap, ok := pr.(map[string]interface{}); ok {
+					if title, ok := prMap["title"].(string); ok && title != "" {
+						evidence.WriteString(fmt.Sprintf("• %s\n", title))
+					}
+				} else if prStr, ok := pr.(string); ok {
 					evidence.WriteString(fmt.Sprintf("• %s\n", prStr))
 				}
 			}
@@ -842,16 +773,10 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		evidence.WriteString("## USER'S TOP REPOSITORIES (Pinned/Popular)\n")
 		evidence.WriteString("These repositories may provide strong clues about the user's location, work affiliations, and regional interests:\n")
 		for _, repo := range repos {
-			evidence.WriteString(fmt.Sprintf("- **%s** (%d stars)", repo.FullName, repo.StargazersCount))
-			if repo.IsPinned {
-				evidence.WriteString(" [PINNED]")
-			}
-			evidence.WriteString("\n")
 			if repo.Description != "" {
-				evidence.WriteString(fmt.Sprintf("  Description: %s\n", repo.Description))
-			}
-			if repo.Language != "" {
-				evidence.WriteString(fmt.Sprintf("  Language: %s\n", repo.Language))
+				evidence.WriteString(fmt.Sprintf("• %s: %s\n", repo.FullName, repo.Description))
+			} else {
+				evidence.WriteString(fmt.Sprintf("• %s\n", repo.FullName))
 			}
 		}
 		evidence.WriteString("\n")

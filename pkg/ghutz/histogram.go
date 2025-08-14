@@ -2,6 +2,7 @@ package ghutz
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	
 	"github.com/fatih/color"
@@ -110,8 +111,9 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 		
 		// Check for peak time first (highest priority)
 		if hourType == "" && result.PeakProductivity.Count > 0 {
-			peakStart := result.PeakProductivity.Start
-			peakEnd := result.PeakProductivity.End
+			// Convert peak times from UTC to display timezone
+			peakStart := math.Mod(result.PeakProductivity.Start + float64(utcOffset) + 24, 24)
+			peakEnd := math.Mod(result.PeakProductivity.End + float64(utcOffset) + 24, 24)
 			localHourFloat := float64(localHour)
 			
 			// Check if the current hour overlaps with peak time
@@ -127,9 +129,10 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 		
 		// Check for lunch hour
 		if hourType == "" && (result.LunchHoursLocal.Start != 0 || result.LunchHoursLocal.End != 0) {
+			// Convert lunch times from UTC to display timezone
+			lunchStartHour := math.Mod(result.LunchHoursLocal.Start + float64(utcOffset) + 24, 24)
+			lunchEndHour := math.Mod(result.LunchHoursLocal.End + float64(utcOffset) + 24, 24)
 			localHourFloat := float64(localHour)
-			lunchStartHour := result.LunchHoursLocal.Start
-			lunchEndHour := result.LunchHoursLocal.End
 			
 			// Check if the current hour block overlaps with lunch time
 			hourStart := localHourFloat

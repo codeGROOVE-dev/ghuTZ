@@ -889,25 +889,32 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	result.ActivityDateRange.TotalDays = totalDays
 	result.ActivityDateRange.SpansDSTTransitions = spansDSTTransitions
 
-	// Always add lunch hours (they're always detected now)
+	// Convert lunch and peak hours from local (activity timezone) to UTC for storage
+	// This ensures all times are stored consistently in UTC and converted only during display
+	lunchStartUTC := math.Mod(lunchStart - float64(offsetInt) + 24, 24)
+	lunchEndUTC := math.Mod(lunchEnd - float64(offsetInt) + 24, 24)
+	peakStartUTC := math.Mod(peakStart - float64(offsetInt) + 24, 24)
+	peakEndUTC := math.Mod(peakEnd - float64(offsetInt) + 24, 24)
+	
+	// Store lunch hours in UTC (renamed from LunchHoursLocal to LunchHoursUTC)
 	result.LunchHoursLocal = struct {
 		Start      float64 `json:"start"`
 		End        float64 `json:"end"`
 		Confidence float64 `json:"confidence"`
 	}{
-		Start:      lunchStart,
-		End:        lunchEnd,
+		Start:      lunchStartUTC,
+		End:        lunchEndUTC,
 		Confidence: lunchConfidence,
 	}
 	
-	// Add peak productivity window
+	// Store peak productivity window in UTC  
 	result.PeakProductivity = struct {
 		Start float64 `json:"start"`
 		End   float64 `json:"end"`
 		Count int     `json:"count"`
 	}{
-		Start: peakStart,
-		End:   peakEnd,
+		Start: peakStartUTC,
+		End:   peakEndUTC,
 		Count: peakCount,
 	}
 	

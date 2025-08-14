@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"math"
 	"os"
 	"regexp"
 	"strconv"
@@ -116,19 +117,21 @@ func main() {
 	
 	// Show histogram by default if activity data is available
 	if result.HourlyActivityUTC != nil {
-		// Calculate UTC offset from timezone string
-		// Try ActivityTimezone first (it has the actual UTC offset), then fall back to Timezone
+		// Calculate UTC offset from the FINAL detected timezone for consistent display
+		// Both histogram and quiet times should be shown in the user's detected timezone
 		utcOffset := 0
-		offsetSource := result.ActivityTimezone
-		if offsetSource == "" {
-			offsetSource = result.Timezone
-		}
 		
-		if strings.HasPrefix(offsetSource, "UTC") {
-			offsetStr := strings.TrimPrefix(offsetSource, "UTC")
-			if offset, err := strconv.Atoi(offsetStr); err == nil {
+		if strings.HasPrefix(result.Timezone, "UTC") {
+			offsetStr := strings.TrimPrefix(result.Timezone, "UTC")
+			if offsetStr == "" {
+				utcOffset = 0 // UTC+0
+			} else if offset, err := strconv.Atoi(offsetStr); err == nil {
 				utcOffset = offset
 			}
+		} else if loc, err := time.LoadLocation(result.Timezone); err == nil {
+			now := time.Now().In(loc)
+			_, offset := now.Zone()
+			utcOffset = offset / 3600
 		}
 		
 		histogramOutput := ghutz.GenerateHistogram(result, result.HourlyActivityUTC, utcOffset)
@@ -239,9 +242,27 @@ func printResult(result *ghutz.Result) {
 		}
 		
 		if result.LunchHoursLocal.Confidence > 0 {
+			// Convert lunch times from UTC to final detected timezone for display
+			finalOffset := 0
+			if strings.HasPrefix(result.Timezone, "UTC") {
+				offsetStr := strings.TrimPrefix(result.Timezone, "UTC")
+				if offsetStr == "" {
+					finalOffset = 0
+				} else if offset, err := strconv.Atoi(offsetStr); err == nil {
+					finalOffset = offset
+				}
+			} else if loc, err := time.LoadLocation(result.Timezone); err == nil {
+				now := time.Now().In(loc)
+				_, offset := now.Zone()
+				finalOffset = offset / 3600
+			}
+			
+			lunchStart := math.Mod(result.LunchHoursLocal.Start + float64(finalOffset) + 24, 24)
+			lunchEnd := math.Mod(result.LunchHoursLocal.End + float64(finalOffset) + 24, 24)
+			
 			fmt.Printf("\n🍽️  Lunch Break: %s → %s", 
-				formatHour(result.LunchHoursLocal.Start),
-				formatHour(result.LunchHoursLocal.End))
+				formatHour(lunchStart),
+				formatHour(lunchEnd))
 			if result.LunchHoursLocal.Confidence < 0.7 {
 				fmt.Printf(" (uncertain)")
 			}
@@ -249,46 +270,101 @@ func printResult(result *ghutz.Result) {
 		
 		// Add peak productivity time
 		if result.PeakProductivity.Count > 0 {
+			// Convert peak times from UTC to final detected timezone for display
+			finalOffset := 0
+			if strings.HasPrefix(result.Timezone, "UTC") {
+				offsetStr := strings.TrimPrefix(result.Timezone, "UTC")
+				if offsetStr == "" {
+					finalOffset = 0
+				} else if offset, err := strconv.Atoi(offsetStr); err == nil {
+					finalOffset = offset
+				}
+			} else if loc, err := time.LoadLocation(result.Timezone); err == nil {
+				now := time.Now().In(loc)
+				_, offset := now.Zone()
+				finalOffset = offset / 3600
+			}
+			
+			peakStart := math.Mod(result.PeakProductivity.Start + float64(finalOffset) + 24, 24)
+			peakEnd := math.Mod(result.PeakProductivity.End + float64(finalOffset) + 24, 24)
+			
 			fmt.Printf("\n🔥 Activity Peak: %s → %s",
-				formatHour(result.PeakProductivity.Start),
-				formatHour(result.PeakProductivity.End))
+				formatHour(peakStart),
+				formatHour(peakEnd))
 		}
 		
 		// Add quiet hours (sleep/family time)
 		if len(result.QuietHoursUTC) > 0 {
-			// Convert quiet hours from UTC to local
-			quietStart := -1
-			quietEnd := -1
+			// Calculate UTC offset from the FINAL detected timezone for display
+			// Quiet hours are stored in UTC and should be converted to the user's detected timezone
+			utcOffset := 0
 			
-			// Find the continuous range of quiet hours
-			if len(result.QuietHoursUTC) > 0 {
-				// Calculate UTC offset from timezone
-				utcOffset := 0
-				
-				// First try to extract offset from UTC+X format
-				if strings.HasPrefix(tzName, "UTC") {
-					offsetStr := strings.TrimPrefix(tzName, "UTC")
-					if offset, err := strconv.Atoi(offsetStr); err == nil {
-						utcOffset = offset
-					}
-				} else if loc, err := time.LoadLocation(tzName); err == nil {
-					now := time.Now().In(loc)
-					_, offset := now.Zone()
-					utcOffset = offset / 3600
+			// First try to extract offset from UTC+X format
+			if strings.HasPrefix(tzName, "UTC") {
+				offsetStr := strings.TrimPrefix(tzName, "UTC")
+				if offsetStr == "" {
+					utcOffset = 0 // UTC+0
+				} else if offset, err := strconv.Atoi(offsetStr); err == nil {
+					utcOffset = offset
 				}
-				
-				// Convert first and last quiet hour to local time
-				quietStart = (result.QuietHoursUTC[0] + utcOffset + 24) % 24
-				quietEnd = (result.QuietHoursUTC[len(result.QuietHoursUTC)-1] + utcOffset + 24) % 24
-				
-				// Add one hour to end to show the end of the quiet period
-				quietEnd = (quietEnd + 1) % 24
+			} else if loc, err := time.LoadLocation(tzName); err == nil {
+				now := time.Now().In(loc)
+				_, offset := now.Zone()
+				utcOffset = offset / 3600
 			}
 			
-			if quietStart >= 0 && quietEnd >= 0 {
-				fmt.Printf("\n💤 Quiet Time: %s → %s",
-					formatHour(float64(quietStart)),
-					formatHour(float64(quietEnd)))
+			// Convert UTC quiet hours to local hours
+			localQuietHours := make([]int, len(result.QuietHoursUTC))
+			for i, utcHour := range result.QuietHoursUTC {
+				localQuietHours[i] = (utcHour + utcOffset + 24) % 24
+			}
+			
+			// Group consecutive quiet hours into ranges
+			type quietRange struct {
+				start, end int
+			}
+			
+			var ranges []quietRange
+			if len(localQuietHours) > 0 {
+				currentStart := localQuietHours[0]
+				currentEnd := localQuietHours[0]
+				
+				for i := 1; i < len(localQuietHours); i++ {
+					hour := localQuietHours[i]
+					
+					// Check if this hour is consecutive (handle day wraparound)
+					isConsecutive := false
+					if hour == (currentEnd + 1) % 24 {
+						isConsecutive = true
+					}
+					// Special case: if current end is 23 and next hour is 0
+					if currentEnd == 23 && hour == 0 {
+						isConsecutive = true
+					}
+					
+					if isConsecutive {
+						currentEnd = hour
+					} else {
+						// End current range and start new one
+						ranges = append(ranges, quietRange{currentStart, (currentEnd + 1) % 24})
+						currentStart = hour
+						currentEnd = hour
+					}
+				}
+				
+				// Add the final range
+				ranges = append(ranges, quietRange{currentStart, (currentEnd + 1) % 24})
+			}
+			
+			// Format and display ranges
+			if len(ranges) > 0 {
+				var rangeStrings []string
+				for _, r := range ranges {
+					rangeStrings = append(rangeStrings, fmt.Sprintf("%s - %s", 
+						formatHour(float64(r.start)), 
+						formatHour(float64(r.end))))
+				}
+				fmt.Printf("\n💤 Quiet Time: %s", strings.Join(rangeStrings, ", "))
 			}
 		}
 		

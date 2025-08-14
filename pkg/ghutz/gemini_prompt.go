@@ -67,6 +67,12 @@ INVESTIGATIVE METHODOLOGY:
    - Technical writing style and cultural references
    - Name etymology can be a strong weight when there is a clear match to an adjacent timezone
        → Many Arabic speakers work in Nordic countries, Germany, France
+     * Polish names (ending in -ski, -cki, -wicz, -ak, -czak, -czyk) = EXTREMELY STRONGLY suggests Poland (Warsaw, Krakow)
+       → Polish special characters: ł, ą, ć, ę, ń, ó, ś, ź, ż (e.g., Łukasz, Paweł, Michał)
+       → Common Polish first names: Łukasz, Paweł, Michał, Piotr, Wojciech, Krzysztof, Andrzej
+       → "Wojciech Kocjan" = DEFINITIVELY Polish name - MUST be Poland, not Germany
+       → Polish names override timezone detection - if UTC+1 + Polish name = Warsaw, Poland
+       → Never suggest Berlin for clearly Polish names - Poland is the obvious choice
      * Chinese names (Quan, Tian, Wei, Wang, Li, Zhang, Chen, Liu, Zhao, Wu, Zhou, Yang, Huang, Xu) = STRONGLY suggests China (Beijing, Shanghai, Shenzhen)
        → If detected timezone is UTC+1/+2/+3 but name is clearly Chinese, strongly consider UTC+8 instead
        → If work hours start before 6am or after 11am local time, this is a strong signal the timezone is wrong
@@ -75,7 +81,6 @@ INVESTIGATIVE METHODOLOGY:
        → VMware has major offices in Beijing and Shanghai
      * Japanese names (ending in -moto, -mura, -yama, -uchi) = likely Japan (Tokyo, Osaka)
      * Korean names (Kim, Park, Lee, Choi) = likely South Korea (Seoul)
-     * Polish or Romanian names in China are very unlikely - it's more likely that they are just working unusual hours.
      * If you have no evidence other than name and activity hours, don't be afraid to shift someone to a nearby timezone/location that is more likely
 
 5. CONTENT ANALYSIS:
