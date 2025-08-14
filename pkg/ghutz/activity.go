@@ -10,16 +10,6 @@ import (
 	"time"
 )
 
-func (d *Detector) tryActivityPatterns(ctx context.Context, username string) *Result {
-	// Start with public events data
-	events, err := d.fetchPublicEvents(ctx, username)
-	if err != nil {
-		d.logger.Debug("failed to fetch public events", "username", username, "error", err)
-		// Don't return nil - try other sources
-		events = []PublicEvent{}
-	}
-	return d.tryActivityPatternsWithEvents(ctx, username, events)
-}
 
 func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username string, events []PublicEvent) *Result {
 
@@ -861,7 +851,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 						"new_lunch_start", lunchStart, "new_offset", offsetInt, "new_confidence", confidence)
 				} else {
 					// Revert if it didn't help
-					offsetInt = offsetInt - suggestedOffsetCorrection
+					offsetInt -= suggestedOffsetCorrection
 					timezone = timezoneFromOffset(offsetInt)
 					activeStart, activeEnd = calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
 					d.logger.Debug("lunch-based correction didn't improve, reverting", "username", username)

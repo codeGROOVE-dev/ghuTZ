@@ -148,7 +148,6 @@ func TestTimezoneFromOffset(t *testing.T) {
 }
 
 func TestFindQuietHours(t *testing.T) {
-
 	// Create a pattern with clear quiet hours (midnight to 6am)
 	hourCounts := make(map[int]int)
 	// Quiet hours: 0-5 (minimal activity)
@@ -206,10 +205,16 @@ func TestLunchDetection(t *testing.T) {
 		},
 		{
 			name: "Typical lunch pattern at noon",
-			// Pattern with clear lunch dip at noon
-			hourlyActivity: []int{2, 1, 1, 1, 2, 2, 3, 4, 5, 8, 10, 12, 0, 0, 10, 8, 6, 4, 3, 2, 2, 1, 1, 1},
+			// Pattern with clear lunch dip at noon Pacific Time
+			// Noon Pacific = 20:00 UTC (UTC-8)
+			// Create a clear gap at hour 20 (index 20) for noon Pacific
+			hourlyActivity: []int{
+				2, 1, 1, 1, 2, 2, 3, 4,     // 0-7 UTC: nighttime/early morning
+				5, 8, 10, 12, 14, 15, 16, 14, // 8-15 UTC: morning work (0-7 AM Pacific)
+				12, 10, 8, 6, 0, 8, 10, 6,    // 16-23 UTC: hour 20 = 0 for lunch gap
+			},
 			utcOffset:      -8, // Pacific Time
-			expectedStart:  12.0, // Should detect noon lunch
+			expectedStart:  12.0, // Should detect noon lunch (20:00 UTC converted to 12:00 Pacific)
 			expectedEnd:    13.0, // 1-hour gap
 			minConfidence:  0.8,
 		},

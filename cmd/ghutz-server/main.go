@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"html"
@@ -319,7 +320,7 @@ func runServer(detector *ghutz.Detector, logger *slog.Logger) {
 
 	select {
 	case err := <-serverErrors:
-		if err != nil && err != http.ErrServerClosed {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("Server error", "error", err)
 			os.Exit(1)
 		}
@@ -334,7 +335,9 @@ func runServer(detector *ghutz.Detector, logger *slog.Logger) {
 		if err := server.Shutdown(ctx); err != nil {
 			logger.Error("Server shutdown error", "error", err)
 			// Force close
-			server.Close()
+			if closeErr := server.Close(); closeErr != nil {
+				logger.Error("Failed to force close server", "error", closeErr)
+			}
 		}
 
 		// Close detector (saves cache to disk)
@@ -359,18 +362,6 @@ func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// SECURITY: Only trust proxy headers if we're behind a known trusted proxy
 		// In production, this should check against a whitelist of trusted proxy IPs
 		// For now, we'll use the direct connection IP to prevent header spoofing
-		// Uncomment and configure if running behind a trusted reverse proxy:
-		/*
-			if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-				// Parse first IP in chain (client IP)
-				ips := strings.Split(forwarded, ",")
-				if len(ips) > 0 {
-					clientIP = strings.TrimSpace(ips[0])
-				}
-			} else if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
-				clientIP = realIP
-			}
-		*/
 
 		if !apiLimiter.allow(clientIP) {
 			http.Error(w, "Rate limit exceeded. Please try again later.", http.StatusTooManyRequests)
@@ -426,7 +417,7 @@ func handleHomeOrUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleAPIDetect(detector *ghutz.Detector, logger *slog.Logger) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return func(writer http.ResponseWriter, request *http.Request) {
 		// Method check is now handled by the mux pattern "POST /api/v1/detect"
 		// CSRF protection is now handled by Go 1.25's CrossOriginProtection
 
@@ -435,14 +426,14 @@ func handleAPIDetect(detector *ghutz.Detector, logger *slog.Logger) http.Handler
 		}
 
 		// SECURITY: Limit request size to prevent DoS attacks
-		r.Body = http.MaxBytesReader(w, r.Body, 4096) // 4KB max - much smaller for simple username
+		request.Body = http.MaxBytesReader(writer, request.Body, 4096) // 4KB max - much smaller for simple username
 
-		decoder := json.NewDecoder(r.Body)
+		decoder := json.NewDecoder(request.Body)
 		decoder.DisallowUnknownFields() // SECURITY: Strict JSON parsing
 
 		if err := decoder.Decode(&req); err != nil {
-			logger.Warn("Invalid request", "error", err, "remote_addr", r.RemoteAddr)
-			http.Error(w, "Invalid request", http.StatusBadRequest)
+			logger.Warn("Invalid request", "error", err, "remote_addr", request.RemoteAddr)
+			http.Error(writer, "Invalid request", http.StatusBadRequest)
 			return
 		}
 
@@ -451,39 +442,39 @@ func handleAPIDetect(detector *ghutz.Detector, logger *slog.Logger) http.Handler
 			// SECURITY: Log potential attack attempts
 			logger.Warn("SECURITY: Invalid username attempt",
 				"username_length", len(req.Username),
-				"remote_addr", r.RemoteAddr,
-				"user_agent", r.Header.Get("User-Agent"))
-			http.Error(w, "Invalid username", http.StatusBadRequest)
+				"remote_addr", request.RemoteAddr,
+				"user_agent", request.Header.Get("User-Agent"))
+			http.Error(writer, "Invalid username", http.StatusBadRequest)
 			return
 		}
 
-		logger.Info("Processing detection request", "username", req.Username, "remote_addr", r.RemoteAddr)
+		logger.Info("Processing detection request", "username", req.Username, "remote_addr", request.RemoteAddr)
 
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(request.Context(), 30*time.Second)
 		defer cancel()
 
 		result, err := detector.Detect(ctx, req.Username)
 		if err != nil {
 			logger.Error("Detection failed", "username", req.Username, "error", err)
-			http.Error(w, "Detection failed", http.StatusInternalServerError)
+			http.Error(writer, "Detection failed", http.StatusInternalServerError)
 			return
 		}
 
 		// Check if this is a "user not found" result
 		if result.Method == "user_not_found" {
 			logger.Info("User not found", "username", req.Username)
-			http.Error(w, "User not found", http.StatusNotFound)
+			http.Error(writer, "User not found", http.StatusNotFound)
 			return
 		}
 
 		logger.Info("Detection successful", "username", req.Username, "timezone", result.Timezone, "method", result.Method)
 
-		w.Header().Set("Content-Type", "application/json")
+		writer.Header().Set("Content-Type", "application/json")
 
 		// SECURITY: Restrictive CORS - only allow same origin by default
 		// No CORS headers = same-origin only (most secure default)
 
-		if err := json.NewEncoder(w).Encode(result); err != nil {
+		if err := json.NewEncoder(writer).Encode(result); err != nil {
 			logger.Error("failed to encode JSON response", "error", err)
 		}
 	}

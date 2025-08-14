@@ -33,7 +33,7 @@ func (d *Detector) fetchPublicEvents(ctx context.Context, username string) ([]Pu
 	for page := 1; page <= maxPages; page++ {
 		apiURL := fmt.Sprintf("https://api.github.com/users/%s/events/public?per_page=%d&page=%d", username, perPage, page)
 		
-		req, err := http.NewRequestWithContext(ctx, "GET", apiURL, http.NoBody)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 		if err != nil {
 			return allEvents, fmt.Errorf("creating request: %w", err)
 		}
@@ -85,7 +85,7 @@ func (d *Detector) fetchPublicEvents(ctx context.Context, username string) ([]Pu
 func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]PullRequest, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:pr&sort=created&order=desc&per_page=100", username)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -161,7 +161,7 @@ func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]Pu
 func (d *Detector) fetchIssues(ctx context.Context, username string) ([]Issue, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:issue&sort=created&order=desc&per_page=100", username)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -263,7 +263,7 @@ func (d *Detector) fetchUserComments(ctx context.Context, username string) ([]Co
 		return nil, fmt.Errorf("marshaling GraphQL query: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.github.com/graphql", bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.github.com/graphql", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -348,7 +348,7 @@ func (d *Detector) fetchUserComments(ctx context.Context, username string) ([]Co
 func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]Organization, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/users/%s/orgs", username)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -391,7 +391,7 @@ func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]O
 func (d *Detector) fetchUser(ctx context.Context, username string) *GitHubUser {
 	url := fmt.Sprintf("https://api.github.com/users/%s", username)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil
 	}
@@ -481,7 +481,7 @@ func (d *Detector) fetchPinnedRepositories(ctx context.Context, username string)
 		return nil, fmt.Errorf("marshaling GraphQL query: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.github.com/graphql", bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.github.com/graphql", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -559,7 +559,7 @@ func (d *Detector) fetchPinnedRepositories(ctx context.Context, username string)
 func (d *Detector) fetchPopularRepositories(ctx context.Context, username string) ([]Repository, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/users/%s/repos?sort=stars&direction=desc&per_page=6", username)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}

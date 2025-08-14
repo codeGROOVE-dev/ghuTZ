@@ -30,10 +30,6 @@ var (
 	githubFineGrainedRegex = regexp.MustCompile(`^github_pat_[a-zA-Z0-9_]{82}$`)
 	// GitHub username validation regex
 	validUsernameRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$`)
-	// HTML tag removal regex
-	htmlTagRegex = regexp.MustCompile(`<[^>]*>`)
-	// Whitespace normalization regex
-	whitespaceRegex = regexp.MustCompile(`\s+`)
 	// Timezone extraction patterns
 	timezoneDataAttrRegex = regexp.MustCompile(`data-timezone="([^"]+)"`)
 	timezoneJSONRegex     = regexp.MustCompile(`"timezone":"([^"]+)"`)
@@ -69,7 +65,7 @@ func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*htt
 			}
 
 			// Check for rate limiting or server errors
-			if resp.StatusCode == 429 || resp.StatusCode == 403 || resp.StatusCode >= 500 {
+			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden || resp.StatusCode >= http.StatusInternalServerError {
 				body, readErr := io.ReadAll(resp.Body)
 				closeErr := resp.Body.Close()
 				if readErr != nil {
@@ -282,7 +278,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 func (d *Detector) fetchProfileHTML(ctx context.Context, username string) string {
 	url := fmt.Sprintf("https://github.com/%s", username)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return ""
 	}
@@ -319,7 +315,7 @@ func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Res
 	if html == "" {
 		url := fmt.Sprintf("https://github.com/%s", username)
 		
-		req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 		if err != nil {
 			return nil
 		}
@@ -440,16 +436,6 @@ func (d *Detector) tryLocationField(ctx context.Context, username string) *Resul
 	}
 }
 
-// tryUnifiedGeminiAnalysis uses Gemini with all available data (activity + context) in a single call.
-func (d *Detector) tryUnifiedGeminiAnalysis(ctx context.Context, username string, activityResult *Result) *Result {
-	// Fetch events if not provided
-	events, err := d.fetchPublicEvents(ctx, username)
-	if err != nil {
-		d.logger.Debug("failed to fetch public events", "username", username, "error", err)
-		events = []PublicEvent{}
-	}
-	return d.tryUnifiedGeminiAnalysisWithEvents(ctx, username, activityResult, events)
-}
 
 // tryUnifiedGeminiAnalysisWithEvents uses Gemini with provided events data.
 func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, username string, activityResult *Result, events []PublicEvent) *Result {
@@ -493,20 +479,22 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 		case "PullRequestEvent", "PullRequestReviewEvent", "PullRequestReviewCommentEvent":
 			// Extract PR title if available in payload
 			var payload map[string]interface{}
-			if err := json.Unmarshal(event.Payload, &payload); err == nil {
-				if pr, ok := payload["pull_request"].(map[string]interface{}); ok {
-					if title, ok := pr["title"].(string); ok {
-						// Only add if we haven't seen this title before
-						if !seenTitles[title] {
-							seenTitles[title] = true
-							prSummary = append(prSummary, map[string]interface{}{
-								"title": title,
-							})
-						}
-						if body, ok := pr["body"].(string); ok && len(body) > len(longestBody) {
-							longestBody = body
-							longestTitle = title
-						}
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				// Skip if we can't parse payload
+				continue
+			}
+			if pr, ok := payload["pull_request"].(map[string]interface{}); ok {
+				if title, ok := pr["title"].(string); ok {
+					// Only add if we haven't seen this title before
+					if !seenTitles[title] {
+						seenTitles[title] = true
+						prSummary = append(prSummary, map[string]interface{}{
+							"title": title,
+						})
+					}
+					if body, ok := pr["body"].(string); ok && len(body) > len(longestBody) {
+						longestBody = body
+						longestTitle = title
 					}
 				}
 			}
@@ -514,13 +502,15 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 			issueCount++
 			// Extract issue information if needed
 			var payload map[string]interface{}
-			if err := json.Unmarshal(event.Payload, &payload); err == nil {
-				if issue, ok := payload["issue"].(map[string]interface{}); ok {
-					if title, ok := issue["title"].(string); ok {
-						if body, ok := issue["body"].(string); ok && len(body) > len(longestBody) {
-							longestBody = body
-							longestTitle = title
-						}
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				// Skip if we can't parse payload
+				continue
+			}
+			if issue, ok := payload["issue"].(map[string]interface{}); ok {
+				if title, ok := issue["title"].(string); ok {
+					if body, ok := issue["body"].(string); ok && len(body) > len(longestBody) {
+						longestBody = body
+						longestTitle = title
 					}
 				}
 			}
@@ -603,7 +593,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 		// For Twitter/X URLs, try to fetch the profile and extract location/bio data
 		for _, url := range htmlSocialURLs {
 			if strings.Contains(url, "/@") || strings.Contains(url, "mastodon") || strings.Contains(url, ".exchange") || strings.Contains(url, ".social") {
-				website := fetchMastodonWebsite(url, d.logger)
+				website := d.fetchMastodonWebsite(ctx, url)
 				if website != "" {
 					d.logger.Info("extracted website from Mastodon profile", "mastodon", url, "website", website)
 					socialURLs = append(socialURLs, website)
@@ -755,7 +745,7 @@ func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Locat
 	url := fmt.Sprintf("https://maps.googleapis.com/maps/api/geocode/json?address=%s&key=%s",
 		encodedLocation, d.mapsAPIKey)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -847,7 +837,7 @@ func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64)
 	url := fmt.Sprintf("https://maps.googleapis.com/maps/api/timezone/json?location=%.6f,%.6f&timestamp=%d&key=%s",
 		lat, lng, timestamp, d.mapsAPIKey)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return "", err
 	}
@@ -946,24 +936,19 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 		if cachedData, found := d.cache.APICall(cacheKey, []byte(prompt)); found {
 			d.logger.Debug("Gemini SDK cache hit", "cache_data_length", len(cachedData))
 			var result geminiResponse
-			if err := json.Unmarshal(cachedData, &result); err == nil {
+			if err := json.Unmarshal(cachedData, &result); err != nil {
+				d.logger.Debug("Failed to unmarshal cached Gemini response", "error", err)
+			} else if result.timezone != "" && result.location != "" {
 				// Validate the cached result has actual data
-				if result.timezone != "" && result.location != "" {
-					d.logger.Debug("Using cached Gemini response", 
-						"timezone", result.timezone, 
-						"location", result.location, 
-						"confidence", result.confidence)
-					return &result, nil
-				} else {
-					d.logger.Warn("Cached Gemini response is invalid/empty, fetching fresh",
-						"timezone", result.timezone,
-						"location", result.location)
-					// Continue to make a fresh API call
-				}
+				d.logger.Debug("Using cached Gemini response", 
+					"timezone", result.timezone, 
+					"location", result.location, 
+					"confidence", result.confidence)
+				return &result, nil
 			} else {
-				d.logger.Warn("Failed to unmarshal cached Gemini response, fetching fresh",
-					"error", err,
-					"cache_data_preview", string(cachedData[:min(200, len(cachedData))]))
+				d.logger.Warn("Cached Gemini response is invalid/empty, fetching fresh",
+					"timezone", result.timezone,
+					"location", result.location)
 				// Continue to make a fresh API call
 			}
 		}
@@ -1243,7 +1228,7 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 		blogURL = "https://" + blogURL
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", blogURL, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, blogURL, http.NoBody)
 	if err != nil {
 		d.logger.Debug("failed to create website request", "url", blogURL, "error", err)
 		return ""

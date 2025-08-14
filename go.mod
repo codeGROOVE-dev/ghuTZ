@@ -1,6 +1,6 @@
 module github.com/codeGROOVE-dev/ghuTZ
 
-go 1.25
+go 1.24
 
 require (
 	github.com/codeGROOVE-dev/retry v1.2.0

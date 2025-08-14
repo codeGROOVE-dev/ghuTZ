@@ -158,7 +158,11 @@ func (c *OtterCache) loadFromDisk() error {
 		}
 		return fmt.Errorf("opening cache file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			c.logger.Debug("Failed to close cache file", "error", closeErr)
+		}
+	}()
 
 	decoder := gob.NewDecoder(file)
 
@@ -199,8 +203,12 @@ func (c *OtterCache) saveToDisk() error {
 		return fmt.Errorf("creating temp cache file: %w", err)
 	}
 	defer func() {
-		file.Close()
-		os.Remove(tempPath) // Clean up temp file if we fail
+		if closeErr := file.Close(); closeErr != nil {
+			c.logger.Debug("Failed to close temp file", "error", closeErr)
+		}
+		if removeErr := os.Remove(tempPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			c.logger.Debug("Failed to remove temp file", "error", removeErr)
+		}
 	}()
 
 	// Collect all cache entries
@@ -300,7 +308,7 @@ func (c *OtterCache) Clean() error {
 // CachedHTTPDo performs an HTTP request with caching support.
 func (d *Detector) cachedHTTPDo(ctx context.Context, req *http.Request) (*http.Response, error) {
 	// Only cache GET requests
-	if req.Method != "GET" {
+	if req.Method != http.MethodGet {
 		return d.retryableHTTPDo(ctx, req)
 	}
 

@@ -224,9 +224,3 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 
 	return output.String()
 }
-
-func formatHour(decimalHour float64) string {
-	hour := int(decimalHour)
-	minutes := int((decimalHour - float64(hour)) * 60)
-	return fmt.Sprintf("%02d:%02d", hour, minutes)
-}

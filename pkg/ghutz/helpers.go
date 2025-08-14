@@ -1,10 +1,10 @@
 package ghutz
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -542,9 +542,13 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 			if offsetStr == "GMT+0" || offsetStr == "GMT-0" {
 				utcOffset = 0
 			} else if strings.HasPrefix(offsetStr, "GMT+") {
-				fmt.Sscanf(offsetStr, "GMT+%d", &utcOffset)
+				if _, err := fmt.Sscanf(offsetStr, "GMT+%d", &utcOffset); err != nil {
+					d.logger.Debug("Failed to parse GMT+ offset", "offset", offsetStr, "error", err)
+				}
 			} else if strings.HasPrefix(offsetStr, "GMT-") {
-				fmt.Sscanf(offsetStr, "GMT-%d", &utcOffset)
+				if _, err := fmt.Sscanf(offsetStr, "GMT-%d", &utcOffset); err != nil {
+					d.logger.Debug("Failed to parse GMT- offset", "offset", offsetStr, "error", err)
+				}
 				utcOffset = -utcOffset
 			}
 		}
@@ -1092,35 +1096,45 @@ func extractSocialMediaURLs(user *GitHubUser) []string {
 }
 
 // fetchMastodonWebsite fetches a Mastodon profile and extracts the website URL
-func fetchMastodonWebsite(mastodonURL string, logger *slog.Logger) string {
+func (d *Detector) fetchMastodonWebsite(ctx context.Context, mastodonURL string) string {
 	// Parse the Mastodon URL to extract instance and username
 	// Format: https://instance.domain/@username
 	re := regexp.MustCompile(`https?://([^/]+)/@([^/]+)`)
 	matches := re.FindStringSubmatch(mastodonURL)
 	if len(matches) < 3 {
-		logger.Debug("invalid Mastodon URL format", "url", mastodonURL)
+		d.logger.Debug("invalid Mastodon URL format", "url", mastodonURL)
 		return ""
 	}
 
 	instance := matches[1]
 	username := matches[2]
 
-	// Try to fetch the Mastodon profile page
-	resp, err := http.Get(mastodonURL)
+	// Try to fetch the Mastodon profile page with retry
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mastodonURL, http.NoBody)
 	if err != nil {
-		logger.Debug("failed to fetch Mastodon profile", "url", mastodonURL, "error", err)
+		d.logger.Debug("failed to create request for Mastodon profile", "url", mastodonURL, "error", err)
 		return ""
 	}
-	defer resp.Body.Close()
+	
+	resp, err := d.retryableHTTPDo(ctx, req)
+	if err != nil {
+		d.logger.Debug("failed to fetch Mastodon profile", "url", mastodonURL, "error", err)
+		return ""
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			d.logger.Debug("Failed to close response body", "error", closeErr)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
-		logger.Debug("Mastodon profile returned non-200 status", "url", mastodonURL, "status", resp.StatusCode)
+		d.logger.Debug("Mastodon profile returned non-200 status", "url", mastodonURL, "status", resp.StatusCode)
 		return ""
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		logger.Debug("failed to read Mastodon profile body", "url", mastodonURL, "error", err)
+		d.logger.Debug("failed to read Mastodon profile body", "url", mastodonURL, "error", err)
 		return ""
 	}
 
@@ -1131,7 +1145,7 @@ func fetchMastodonWebsite(mastodonURL string, logger *slog.Logger) string {
 	websiteRegex := regexp.MustCompile(`(?i)(?:website|homepage|blog|site)[^>]*>.*?href="([^"]+)"`)
 	if matches := websiteRegex.FindStringSubmatch(html); len(matches) > 1 {
 		website := matches[1]
-		logger.Debug("found website in Mastodon profile", "mastodon", mastodonURL, "website", website)
+		d.logger.Debug("found website in Mastodon profile", "mastodon", mastodonURL, "website", website)
 		return website
 	}
 
@@ -1141,7 +1155,7 @@ func fetchMastodonWebsite(mastodonURL string, logger *slog.Logger) string {
 		website := matches[1]
 		// Filter out other social media links
 		if !strings.Contains(website, "twitter.com") && !strings.Contains(website, "github.com") {
-			logger.Debug("found verified website in Mastodon profile", "mastodon", mastodonURL, "website", website)
+			d.logger.Debug("found verified website in Mastodon profile", "mastodon", mastodonURL, "website", website)
 			return website
 		}
 	}
@@ -1150,7 +1164,11 @@ func fetchMastodonWebsite(mastodonURL string, logger *slog.Logger) string {
 	apiURL := fmt.Sprintf("https://%s/api/v1/accounts/lookup?acct=%s", instance, username)
 	apiResp, err := http.Get(apiURL)
 	if err == nil && apiResp.StatusCode == http.StatusOK {
-		defer apiResp.Body.Close()
+		defer func() {
+			if closeErr := apiResp.Body.Close(); closeErr != nil {
+				d.logger.Debug("Failed to close API response body", "error", closeErr)
+			}
+		}()
 		var account struct {
 			URL    string `json:"url"`
 			Fields []struct {
@@ -1159,7 +1177,9 @@ func fetchMastodonWebsite(mastodonURL string, logger *slog.Logger) string {
 				VerifiedAt string `json:"verified_at"`
 			} `json:"fields"`
 		}
-		if err := json.NewDecoder(apiResp.Body).Decode(&account); err == nil {
+		if err := json.NewDecoder(apiResp.Body).Decode(&account); err != nil {
+			d.logger.Debug("Failed to decode Mastodon API response", "error", err)
+		} else {
 			// Check fields for website
 			for _, field := range account.Fields {
 				fieldName := strings.ToLower(field.Name)
@@ -1169,7 +1189,7 @@ func fetchMastodonWebsite(mastodonURL string, logger *slog.Logger) string {
 					urlRegex := regexp.MustCompile(`href="([^"]+)"`)
 					if matches := urlRegex.FindStringSubmatch(field.Value); len(matches) > 1 {
 						website := matches[1]
-						logger.Debug("found website via Mastodon API", "mastodon", mastodonURL, "website", website)
+						d.logger.Debug("found website via Mastodon API", "mastodon", mastodonURL, "website", website)
 						return website
 					}
 				}
@@ -1177,7 +1197,7 @@ func fetchMastodonWebsite(mastodonURL string, logger *slog.Logger) string {
 		}
 	}
 
-	logger.Debug("no website found in Mastodon profile", "url", mastodonURL)
+	d.logger.Debug("no website found in Mastodon profile", "url", mastodonURL)
 	return ""
 }
 

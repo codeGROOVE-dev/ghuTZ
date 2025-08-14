@@ -4,11 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"log/slog"
 	"math"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,7 +23,6 @@ var (
 	cacheDir     = flag.String("cache-dir", "", "Cache directory (or set CACHE_DIR)")
 	verbose      = flag.Bool("verbose", false, "Enable verbose logging")
 	version      = flag.Bool("version", false, "Show version")
-	histogram    = flag.Bool("histogram", false, "Show activity histogram")
 )
 
 func main() {
@@ -89,14 +86,20 @@ func main() {
 	}
 
 	detector := ghutz.NewWithLogger(logger, detectorOpts...)
-	defer detector.Close() // Save cache to disk on exit
+	defer func() {
+		if err := detector.Close(); err != nil {
+			logger.Error("Failed to close detector", "error", err)
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	result, err := detector.Detect(ctx, username)
 	if err != nil {
-		log.Fatalf("Detection failed: %v", err)
+		cancel() // Ensure context is cancelled before exit
+		logger.Error("Detection failed", "error", err)
+		os.Exit(1)
 	}
 
 	// When verbose, show Gemini prompt and reasoning before results
@@ -202,19 +205,7 @@ func printResult(result *ghutz.Result) {
 	if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
 		// Convert active hours from UTC to final detected timezone for display
 		// Despite the field name "Local", these are stored as UTC values
-		finalOffset := 0
-		if strings.HasPrefix(result.Timezone, "UTC") {
-			offsetStr := strings.TrimPrefix(result.Timezone, "UTC")
-			if offsetStr == "" {
-				finalOffset = 0
-			} else if offset, err := strconv.Atoi(offsetStr); err == nil {
-				finalOffset = offset
-			}
-		} else if loc, err := time.LoadLocation(result.Timezone); err == nil {
-			now := time.Now().In(loc)
-			_, offset := now.Zone()
-			finalOffset = offset / 3600
-		}
+		finalOffset := calculateTimezoneOffset(result.Timezone)
 
 		// Convert UTC to local time
 		activeStartLocal := math.Mod(result.ActiveHoursLocal.Start+float64(finalOffset)+24, 24)
@@ -235,7 +226,7 @@ func printResult(result *ghutz.Result) {
 			}
 			if hoursToStart > 12 {
 				// It was yesterday/earlier today
-				hoursToStart = hoursToStart - 24
+				hoursToStart -= 24
 			}
 
 			// Calculate relative time to work end (using converted local times)
@@ -245,7 +236,7 @@ func printResult(result *ghutz.Result) {
 			}
 			if hoursToEnd > 12 {
 				// It was yesterday/earlier today
-				hoursToEnd = hoursToEnd - 24
+				hoursToEnd -= 24
 			}
 
 			// Format relative times tersely
@@ -263,19 +254,7 @@ func printResult(result *ghutz.Result) {
 
 		if result.LunchHoursLocal.Confidence > 0 {
 			// Convert lunch times from UTC to final detected timezone for display
-			finalOffset := 0
-			if strings.HasPrefix(result.Timezone, "UTC") {
-				offsetStr := strings.TrimPrefix(result.Timezone, "UTC")
-				if offsetStr == "" {
-					finalOffset = 0
-				} else if offset, err := strconv.Atoi(offsetStr); err == nil {
-					finalOffset = offset
-				}
-			} else if loc, err := time.LoadLocation(result.Timezone); err == nil {
-				now := time.Now().In(loc)
-				_, offset := now.Zone()
-				finalOffset = offset / 3600
-			}
+			finalOffset := calculateTimezoneOffset(result.Timezone)
 
 			lunchStart := math.Mod(result.LunchHoursLocal.Start+float64(finalOffset)+24, 24)
 			lunchEnd := math.Mod(result.LunchHoursLocal.End+float64(finalOffset)+24, 24)
@@ -291,19 +270,7 @@ func printResult(result *ghutz.Result) {
 		// Add peak productivity time
 		if result.PeakProductivity.Count > 0 {
 			// Convert peak times from UTC to final detected timezone for display
-			finalOffset := 0
-			if strings.HasPrefix(result.Timezone, "UTC") {
-				offsetStr := strings.TrimPrefix(result.Timezone, "UTC")
-				if offsetStr == "" {
-					finalOffset = 0
-				} else if offset, err := strconv.Atoi(offsetStr); err == nil {
-					finalOffset = offset
-				}
-			} else if loc, err := time.LoadLocation(result.Timezone); err == nil {
-				now := time.Now().In(loc)
-				_, offset := now.Zone()
-				finalOffset = offset / 3600
-			}
+			finalOffset := calculateTimezoneOffset(result.Timezone)
 
 			peakStart := math.Mod(result.PeakProductivity.Start+float64(finalOffset)+24, 24)
 			peakEnd := math.Mod(result.PeakProductivity.End+float64(finalOffset)+24, 24)
@@ -317,21 +284,7 @@ func printResult(result *ghutz.Result) {
 		if len(result.QuietHoursUTC) > 0 {
 			// Calculate UTC offset from the FINAL detected timezone for display
 			// Quiet hours are stored in UTC and should be converted to the user's detected timezone
-			utcOffset := 0
-
-			// First try to extract offset from UTC+X format
-			if strings.HasPrefix(tzName, "UTC") {
-				offsetStr := strings.TrimPrefix(tzName, "UTC")
-				if offsetStr == "" {
-					utcOffset = 0 // UTC+0
-				} else if offset, err := strconv.Atoi(offsetStr); err == nil {
-					utcOffset = offset
-				}
-			} else if loc, err := time.LoadLocation(tzName); err == nil {
-				now := time.Now().In(loc)
-				_, offset := now.Zone()
-				utcOffset = offset / 3600
-			}
+			utcOffset := calculateTimezoneOffset(tzName)
 
 			// Convert UTC quiet hours to local hours
 			localQuietHours := make([]int, len(result.QuietHoursUTC))
@@ -434,6 +387,24 @@ func formatHour(decimalHour float64) string {
 	return fmt.Sprintf("%d:%02d", hour, minutes)
 }
 
+// calculateTimezoneOffset calculates the UTC offset in hours for a given timezone
+func calculateTimezoneOffset(timezone string) int {
+	if strings.HasPrefix(timezone, "UTC") {
+		offsetStr := strings.TrimPrefix(timezone, "UTC")
+		if offsetStr == "" {
+			return 0
+		}
+		if offset, err := strconv.Atoi(offsetStr); err == nil {
+			return offset
+		}
+	} else if loc, err := time.LoadLocation(timezone); err == nil {
+		now := time.Now().In(loc)
+		_, offset := now.Zone()
+		return offset / 3600
+	}
+	return 0
+}
+
 func formatRelativeTime(hours float64) string {
 	if hours < -12 || hours > 12 {
 		return "" // Too far in past/future
@@ -490,64 +461,3 @@ func formatMethodName(method string) string {
 	return method
 }
 
-// stripANSI removes ANSI color codes from a string
-func stripANSI(s string) string {
-	// Simple regex to remove ANSI escape sequences
-	ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*m`)
-	return ansiRegex.ReplaceAllString(s, "")
-}
-
-// wrapOrganizationsWithCounts creates wrapped lines of organizations with color-coded counts
-func wrapOrganizationsWithCounts(orgs []struct {
-	Name  string `json:"name"`
-	Count int    `json:"count"`
-},
-	colors []string, grey string, maxWidth int) []string {
-	var lines []string
-	var currentLine strings.Builder
-	currentLength := 0
-
-	for i, org := range orgs {
-		// Choose color based on rank
-		color := grey
-		if i < 3 {
-			color = colors[i]
-		}
-
-		// Build the formatted org string: name (colorized count)
-		orgStr := fmt.Sprintf("%s (%s%d\033[0m)", org.Name, color, org.Count)
-
-		// Add comma if not first item on line
-		if currentLine.Len() > 0 {
-			orgStr = ", " + orgStr
-		}
-
-		// Calculate visual length: name + " (" + count digits + ")"
-		countStr := fmt.Sprintf("%d", org.Count)
-		orgLength := len(org.Name) + len(countStr) + 3 // " (123)"
-		if currentLine.Len() > 0 {
-			orgLength += 2 // ", " separator
-		}
-
-		if currentLength > 0 && currentLength+orgLength > maxWidth {
-			// Start a new line
-			lines = append(lines, currentLine.String())
-			currentLine.Reset()
-			currentLength = 0
-
-			// Don't add comma at start of new line
-			orgStr = fmt.Sprintf("%s (%s%d\033[0m)", org.Name, color, org.Count)
-			orgLength = len(org.Name) + len(countStr) + 3
-		}
-
-		currentLine.WriteString(orgStr)
-		currentLength += orgLength
-	}
-
-	// Add the last line if not empty
-	if currentLine.Len() > 0 {
-		lines = append(lines, currentLine.String())
-	}
-
-	return lines
-}
