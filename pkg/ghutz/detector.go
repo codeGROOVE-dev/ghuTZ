@@ -121,11 +121,11 @@ func (d *Detector) isValidGitHubToken(token string) bool {
 		githubFineGrainedRegex.MatchString(token)
 }
 
-func New(opts ...Option) *Detector {
-	return NewWithLogger(slog.Default(), opts...)
+func New(ctx context.Context, opts ...Option) *Detector {
+	return NewWithLogger(ctx, slog.Default(), opts...)
 }
 
-func NewWithLogger(logger *slog.Logger, opts ...Option) *Detector {
+func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *Detector {
 	optHolder := &OptionHolder{}
 	for _, opt := range opts {
 		opt(optHolder)
@@ -147,7 +147,7 @@ func NewWithLogger(logger *slog.Logger, opts ...Option) *Detector {
 
 	if cacheDir != "" {
 		var err error
-		cache, err = NewOtterCache(cacheDir, 20*24*time.Hour, logger)
+		cache, err = NewOtterCache(ctx, cacheDir, 20*24*time.Hour, logger)
 		if err != nil {
 			logger.Warn("cache initialization failed", "error", err, "cache_dir", cacheDir)
 			// Cache is optional, continue without it

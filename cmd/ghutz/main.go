@@ -86,15 +86,15 @@ func main() {
 		detectorOpts = append(detectorOpts, ghutz.WithCacheDir(*cacheDir))
 	}
 
-	detector := ghutz.NewWithLogger(logger, detectorOpts...)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	detector := ghutz.NewWithLogger(ctx, logger, detectorOpts...)
 	defer func() {
 		if err := detector.Close(); err != nil {
 			logger.Error("Failed to close detector", "error", err)
 		}
 	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 
 	result, err := detector.Detect(ctx, username)
 	if err != nil {

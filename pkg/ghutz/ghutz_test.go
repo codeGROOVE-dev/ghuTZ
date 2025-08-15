@@ -8,7 +8,8 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	detector := New()
+	ctx := context.Background()
+	detector := New(ctx)
 	if detector == nil {
 		t.Fatal("New() returned nil")
 	}
@@ -18,7 +19,8 @@ func TestNew(t *testing.T) {
 }
 
 func TestNewWithOptions(t *testing.T) {
-	detector := New(
+	ctx := context.Background()
+	detector := New(ctx,
 		WithGitHubToken("test-token"),
 		WithMapsAPIKey("test-maps-key"),
 		WithGeminiAPIKey("test-gemini-key"),
@@ -32,8 +34,8 @@ func TestNewWithOptions(t *testing.T) {
 }
 
 func TestDetectEmptyUsername(t *testing.T) {
-	detector := New()
 	ctx := context.Background()
+	detector := New(ctx)
 
 	_, err := detector.Detect(ctx, "")
 	if err == nil {

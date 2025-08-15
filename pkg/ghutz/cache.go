@@ -34,7 +34,7 @@ type OtterCache struct {
 	mu         sync.RWMutex
 }
 
-func NewOtterCache(dir string, ttl time.Duration, logger *slog.Logger) (*OtterCache, error) {
+func NewOtterCache(ctx context.Context, dir string, ttl time.Duration, logger *slog.Logger) (*OtterCache, error) {
 	// Create cache directory if it doesn't exist
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("creating cache directory: %w", err)
@@ -62,7 +62,7 @@ func NewOtterCache(dir string, ttl time.Duration, logger *slog.Logger) (*OtterCa
 	logger.Info("cache initialized", "dir", dir, "entries_loaded", c.cache.EstimatedSize())
 
 	// Start periodic save goroutine
-	c.startPeriodicSave()
+	c.startPeriodicSave(ctx)
 
 	return c, nil
 }
@@ -203,9 +203,7 @@ func (c *OtterCache) saveToDisk() error {
 		return fmt.Errorf("creating temp cache file: %w", err)
 	}
 	defer func() {
-		if closeErr := file.Close(); closeErr != nil {
-			c.logger.Debug("Failed to close temp file", "error", closeErr)
-		}
+		// Only try to remove temp file if it still exists
 		if removeErr := os.Remove(tempPath); removeErr != nil && !os.IsNotExist(removeErr) {
 			c.logger.Debug("Failed to remove temp file", "error", removeErr)
 		}
@@ -247,8 +245,8 @@ func (c *OtterCache) saveToDisk() error {
 	return nil
 }
 
-func (c *OtterCache) startPeriodicSave() {
-	ctx, cancel := context.WithCancel(context.Background())
+func (c *OtterCache) startPeriodicSave(ctx context.Context) {
+	saveCtx, cancel := context.WithCancel(ctx)
 	c.saveCancel = cancel
 
 	c.saveWg.Add(1)
@@ -260,7 +258,7 @@ func (c *OtterCache) startPeriodicSave() {
 
 		for {
 			select {
-			case <-ctx.Done():
+			case <-saveCtx.Done():
 				return
 			case <-ticker.C:
 				if err := c.saveToDisk(); err != nil {

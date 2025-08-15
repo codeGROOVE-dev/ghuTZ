@@ -251,7 +251,9 @@ func main() {
 		logger.Info("using custom cache directory", "cache_dir", *cacheDir)
 	}
 
-	detector := ghutz.NewWithLogger(logger, detectorOpts...)
+	// Create a context for the server lifetime
+	ctx := context.Background()
+	detector := ghutz.NewWithLogger(ctx, logger, detectorOpts...)
 
 	runServer(detector, logger)
 }

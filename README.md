@@ -89,14 +89,15 @@ make build
 ```go
 import "github.com/codeGROOVE-dev/ghuTZ/pkg/ghutz"
 
-detector := ghutz.New(
+ctx := context.Background()
+detector := ghutz.New(ctx,
     ghutz.WithGitHubToken(token),
     ghutz.WithGoogleMapsAPIKey(mapsKey),
     ghutz.WithGeminiAPIKey(geminiKey),
 )
 defer detector.Close()
 
-result, err := detector.Detect(context.Background(), "octocat")
+result, err := detector.Detect(ctx, "octocat")
 if err != nil {
     log.Fatal(err)
 }
