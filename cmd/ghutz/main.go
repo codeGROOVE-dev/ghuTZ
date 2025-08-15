@@ -44,7 +44,7 @@ func main() {
 	username := args[0]
 
 	// Configure logging
-	level := slog.LevelInfo
+	level := slog.LevelError
 	if *verbose {
 		level = slog.LevelDebug
 	}
