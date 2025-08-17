@@ -7,34 +7,44 @@ func unifiedGeminiPrompt() string {
 EVIDENCE:
 %s
 
-DETECTION PRIORITIES (in order):
+🔴 MANDATORY CONSTRAINT - THIS OVERRIDES ALL OTHER SIGNALS:
+If activity_timezone candidates are provided (e.g., "Top 3 candidates: UTC+12, UTC+9, UTC+11"):
+- You MUST select a timezone within ±2 hours of one of the top 3 candidates
+- Activity patterns represent ACTUAL behavior and cannot be ignored
+- Name etymology, company location, and other signals can only influence WHICH candidate to pick, not override them entirely
+- Example: If candidates are UTC+10/+11/+12, you CANNOT pick Europe/Moscow (UTC+3) even for a Russian name
 
-1. 🏆 REPOSITORY GEOGRAPHY (HIGHEST):
+DETECTION PRIORITIES (subject to above constraint):
+
+1. 🏆 REPOSITORY GEOGRAPHY (HIGHEST within activity constraint):
    - Repo names with locations = strongest evidence ("ncdmv-app" = North Carolina, "toronto-meetup" = Toronto)
-   - Government/civic repos override activity patterns ("dmv", "transit", municipal services)
-   - US state names/codes in repos = US location
+   - Government/civic repos suggest location IF compatible with activity patterns
+   - US state names/codes in repos = US location (but must match activity timezone)
+   - If someone with a Russian name isn't contributing to Russian projects, chances are they are in another country in the same timezone, like Australia.
 
-   2. NAME CLUES:
-   	  - Name etymology is an important signal, especially the last name
-      - Polish names (-ski, -wicz) + EU timezone = Poland (Warsaw)
-      - Chinese names + Asian timezone = China (Beijing, Shanghai)
-      - If we suggest UTC-0 or UTC+1 and the last name appears Belgian or Flemish (Ramlot), and no location is given, assume they are in Belgium! You can make the similar guesses for other European last names in these time zones. Reading into someones last name can easily shift someone a timezone over.
-      - If we suggest UTC-0 and the last name appears Portuguese (Lopes), assume they live in Portugal
+2. NAME CLUES (ONLY to disambiguate between viable candidates):
+   - Name etymology helps choose between similar timezones
+   - Polish names (-ski, -wicz) + EU timezone activity = Poland (Warsaw)
+   - Chinese names + Asian timezone activity = China (Beijing, Shanghai)
+   - Russian names + Pacific activity (UTC+10/+11) = Vladivostok/Far East Russia, NOT Moscow
+   - Belgian/Flemish names + UTC+0/+1 activity = Belgium
+   - Portuguese names + UTC+0 activity = Portugal
+   - A Russian name (like Mikhail Mazurskiy) in UTC-10 is more likely to be in Sydney than Russia - unless they work with Russian projects.
+   - ⚠️ NEVER let name override activity by more than 2 hours
 
-2. COMPANY CLUES:
+3. COMPANY CLUES (weak signal):
    - ⚠️ CAUTION: Don't assume employees work at company HQ - remote work is very common
    - ⚠️ CRITICAL: If activity strongly suggests Eastern Time (UTC-4/5), don't default to Seattle/SF just because of tech company
-   - Chinese companies are more likely to hire employees in China rather than nearby countries
-   - Only use company location if activity patterns strongly support it
+   - Only use company location if it matches activity patterns
+   - Being a Ukranian company, GitLab employees are more likely to live in Ukraine than Russia
+   - Company names may be GitHub org names, like "@gitlabhq" being a reference for GitLab
 
-3. ACTIVITY PATTERNS (CRITICAL CONSTRAINTS):
-   - 🚨 ABSOLUTE RULE: You MUST pick a timezone within ±1 hour of the top 3 activity candidates.
-   - 🚨 .ca domains with UTC-4 activity = Toronto/Montreal area, NOT Vancouver
-   - 🚨 .ca domains with UTC-8 activity = Vancouver area
-   - Europeans & Americans typically start work by 10am local - later starts suggest wrong timezone
-   - Work before 5am local = very suspicious timezone (5-6am can happen for American workaholics)
-   - Lunch outside 11am-2pm = wrong timezone likely
-   - ⚠️ Late evening coding (7-11pm) can create false European signals for US developers
+4. ACTIVITY PATTERNS (HARD CONSTRAINTS):
+   - Work before 5am local = wrong timezone (5-6am acceptable for some)
+   - Lunch outside 11am-2:30pm = wrong timezone likely
+   - Sleep period should be 6+ hours of low activity
+   - Evening activity (7-11pm) is common for developers
+   - If activity shows clear sleep/work/lunch patterns, trust them over geographic hints
 
 4. HOBBY & INTEREST SIGNALS (STRONG REGIONAL INDICATORS):
    - 🏔️ Caving/spelunking interests + US timezone = HIGH chance of Mountain timezone (Colorado, Utah, New Mexico)
@@ -50,6 +60,7 @@ DETECTION PRIORITIES (in order):
    - Country TLD domains (.ca, .fi, .de)
 
 6. Timezone Generation
+   - Trust in the confidence levels we provide, though they may be one timezone off in either direction.
    - Return the most appropriate and specific tz database entry for this user. For example, use Europe/Warsaw if we think they are in Poland, and Europe/Berlin if we think they are in Germany.
    - For US Mountain timezone, use America/Denver (or America/Phoenix for Arizona)
    - Look carefully at the activity period, as it may cross a daylight savings time boundary. Give the appropriate timezone for the current moment (now).
@@ -62,7 +73,7 @@ Return JSON only:
 {
   "detected_timezone": "America/New_York",
   "detected_location": "New York, NY, USA",
-  "confidence_level": "75%",
+  "confidence_level": "75%%",
   "detection_reasoning": "Strong evidence summary in 1-2 sentences."
 }`
 }

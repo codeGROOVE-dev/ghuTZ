@@ -36,11 +36,7 @@ func TestLunchDetectionTstromberg(t *testing.T) {
 	// Test with UTC-4 (EDT) offset
 	utcOffset := -4
 
-	// The algorithm should detect:
-	// - Activity drops from 31 (15:00 UTC = 11:00 EDT) to 5 (15:30 UTC = 11:30 EDT) - 84% drop
-	// - Stays low at 6 (16:00 UTC = 12:00 EDT)
-	// - Recovers to 19 (16:30 UTC = 12:30 EDT)
-	// Therefore lunch should be 15:30-16:30 UTC (11:30-12:30 EDT)
+	// The algorithm should detect lunch from 11:30-12:30 EDT
 
 	lunchStart, lunchEnd, confidence := detectLunchBreakNoonCentered(halfHourData, utcOffset)
 

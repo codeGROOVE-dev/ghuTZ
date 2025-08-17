@@ -1138,6 +1138,51 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				adjustments = append(adjustments, fmt.Sprintf("+2 (Eastern high morning activity %d)", morningActivity))
 			}
 			
+			// CRITICAL Eastern pattern: 5pm end-of-day peak (very common)
+			// For UTC-4: 17:00 local = 21:00 UTC
+			// For UTC-5: 17:00 local = 22:00 UTC
+			endOfDayUTC := 21
+			if testOffset == -5 {
+				endOfDayUTC = 22
+			}
+			
+			// Check if 5pm is the peak hour or near-peak
+			if hourCounts[endOfDayUTC] >= 20 {
+				// Strong 5pm activity is classic Eastern pattern
+				easternBonus += 10.0
+				adjustments = append(adjustments, fmt.Sprintf("+10 (Eastern 5pm peak with %d events)", hourCounts[endOfDayUTC]))
+				
+				// Extra bonus if it's THE peak hour
+				isPeak := true
+				for h := 0; h < 24; h++ {
+					if h != endOfDayUTC && hourCounts[h] > hourCounts[endOfDayUTC] {
+						isPeak = false
+						break
+					}
+				}
+				if isPeak {
+					easternBonus += 5.0
+					adjustments = append(adjustments, "+5 (5pm is absolute peak - classic Eastern)")
+				}
+			}
+			
+			// Check for 12pm lunch dip pattern (even if weak)
+			// For UTC-4: 12:00 local = 16:00 UTC
+			// For UTC-5: 12:00 local = 17:00 UTC
+			noonUTC := 16
+			if testOffset == -5 {
+				noonUTC = 17
+			}
+			beforeNoon := noonUTC - 1
+			afterNoon := noonUTC + 1
+			
+			// Even a small dip at noon is meaningful for Eastern
+			if hourCounts[beforeNoon] > hourCounts[noonUTC] && hourCounts[afterNoon] > hourCounts[noonUTC] {
+				dropPercent := float64(hourCounts[beforeNoon] - hourCounts[noonUTC]) / float64(hourCounts[beforeNoon]) * 100
+				easternBonus += 3.0
+				adjustments = append(adjustments, fmt.Sprintf("+3 (Eastern noon dip pattern %.1f%%)", dropPercent))
+			}
+			
 			if easternBonus > 0 {
 				testConfidence += easternBonus
 			}
@@ -1156,6 +1201,17 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			if lunchLocalStart < 10.5 || lunchLocalStart > 14.5 {
 				testConfidence -= 10 // Subtract points for very unusual lunch time
 				adjustments = append(adjustments, fmt.Sprintf("-10 (unusual lunch time %.1f)", lunchLocalStart))
+			}
+			// Extra penalty for pre-11am lunch (too early for most regions)
+			// BUT reduced penalty for UTC+10/+11 as these could be valid morning break patterns
+			if lunchLocalStart < 11.0 {
+				if testOffset >= 10 && testOffset <= 11 {
+					testConfidence -= 2 // Reduced penalty for Pacific timezones
+					adjustments = append(adjustments, fmt.Sprintf("-2 (early lunch at %.1f for UTC+%d)", lunchLocalStart, testOffset))
+				} else {
+					testConfidence -= 5 // Full penalty for other timezones
+					adjustments = append(adjustments, fmt.Sprintf("-5 (lunch before 11am at %.1f)", lunchLocalStart))
+				}
 			}
 			// EXTRA penalty for extremely late lunch (after 3pm)
 			// This catches cases like UTC+1 for AmberArcadia where lunch would be at 5pm
@@ -1201,6 +1257,14 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		case -11, -12: // Pacific ocean (almost no land)
 			testConfidence -= 12 // Large penalty - almost no population
 			adjustments = append(adjustments, "-12 (Pacific ocean almost no land)")
+		}
+		
+		// Special bonus for UTC+10 when there are clear evening activity patterns
+		// This helps identify Sydney/Brisbane over Japan/Korea time
+		if testOffset == 10 && eveningActivity > 50 {
+			australiaBonus := 8.0 // Boost to compete with UTC+9
+			testConfidence += australiaBonus
+			adjustments = append(adjustments, fmt.Sprintf("+%.1f (strong evening activity suggests Australia UTC+10)", australiaBonus))
 		}
 		
 		// Apply European morning activity penalty 

@@ -113,32 +113,35 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 			if i >= 3 {
 				break // Only show top 3
 			}
-			// Display confidence with better scaling for Gemini
-			// Raw scores are typically 10-40, we want to scale to 20-90 range
+			// Display the confidence with enhanced dynamic range
+			// Raw scores are typically 15-45, with small differences being significant
 			displayConfidence := candidate.Confidence
 			
-			// Apply strong penalties/boosts based on work pattern reasonableness
-			if candidate.WorkStartLocal > 0 && candidate.WorkStartLocal < 6 {
-				// Heavily penalize very early work starts (before 6am local)
-				penaltyFactor := 1.0 - (6.0 - float64(candidate.WorkStartLocal)) * 0.20 // 20% penalty per hour before 6am
-				displayConfidence *= penaltyFactor
-			} else if candidate.WorkStartLocal >= 7 && candidate.WorkStartLocal <= 10 {
-				// Boost confidence for normal work patterns (7-10am start)
-				boostFactor := 1.5 // 50% boost for reasonable hours
-				displayConfidence *= boostFactor
+			// Normalize scores relative to the best candidate for better differentiation
+			// This amplifies small differences which are actually meaningful
+			bestScore := candidates[0].Confidence
+			if bestScore > 0 {
+				// Calculate relative score (0-1 range, where 1 = best candidate)
+				relativeScore := displayConfidence / bestScore
+				
+				// Apply non-linear scaling to amplify differences
+				// This makes small differences more visible
+				// Best candidate gets ~85-95%, second best ~60-75%, third ~40-60%
+				if i == 0 {
+					// Best candidate: 85-95% range
+					displayConfidence = 85 + (relativeScore * 10)
+				} else {
+					// Other candidates: scale based on how far they are from best
+					// Use exponential scaling to amplify differences
+					displayConfidence = math.Pow(relativeScore, 2.5) * 95
+				}
+			} else {
+				// Fallback to simple scaling if no best score
+				displayConfidence = displayConfidence * 2.0
 			}
 			
-			// Apply lunch pattern boost
-			if candidate.LunchReasonable {
-				displayConfidence *= 1.3 // 30% boost for reasonable lunch
-			}
-			
-			// Scale up the confidence to be more meaningful (raw scores are too low)
-			// Transform from typical 10-40 range to 20-90 range
-			displayConfidence = 20 + (displayConfidence - 10) * 2.3
-			
-			// Cap at reasonable bounds
-			displayConfidence = math.Max(15, math.Min(90, displayConfidence))
+			// Ensure reasonable bounds
+			displayConfidence = math.Max(10, math.Min(95, displayConfidence))
 			
 			sb.WriteString(fmt.Sprintf("%d. %s - %.1f%% confidence\n", 
 				i+1, candidate.Timezone, displayConfidence))

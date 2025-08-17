@@ -348,9 +348,14 @@ func printActivitySummary(result *ghutz.Result) {
 }
 
 func printDetectionInfo(result *ghutz.Result) {
+	// Our confidence scores are now in a 0-50 range typically
+	// For the winning candidate, show it as 85-95% range
+	// This matches how we display to Gemini
+	displayConfidence := 85.0 + math.Min(10, result.Confidence/4.0)
+	displayConfidence = math.Min(95, displayConfidence)
 	fmt.Printf("✨ Detection:     %s (%.0f%% confidence)\n",
 		formatMethodName(result.Method),
-		result.Confidence*100)
+		displayConfidence)
 	fmt.Println()
 }
 

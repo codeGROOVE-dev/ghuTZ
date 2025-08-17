@@ -44,7 +44,7 @@ func TestAmberArcadiaDelawareDetection(t *testing.T) {
 		14.5: 30,  // 14:30 UTC = 10:30 ET
 		15.0: 37,  // 15:00 UTC = 11:00 ET - peak morning
 		15.5: 24,  // 15:30 UTC = 11:30 ET
-		16.0: 10,  // 16:00 UTC = 12:00 ET - LUNCH START (73% drop)
+		16.0: 10,  // 16:00 UTC = 12:00 ET - LUNCH START
 		16.5: 9,   // 16:30 UTC = 12:30 ET - lunch continues
 		17.0: 11,  // 17:00 UTC = 13:00 ET - after lunch
 		17.5: 15,  // 17:30 UTC = 13:30 ET
@@ -86,7 +86,6 @@ func TestAmberArcadiaDelawareDetection(t *testing.T) {
 	}
 
 	// We expect lunch around noon (12:00-13:00 ET)
-	// The data shows a clear drop from 37 events at 11:00 to 10 at 12:00 (73% drop)
 	if lunchStartLocal < 11.5 || lunchStartLocal > 12.5 {
 		t.Errorf("Lunch start time incorrect: got %.1f ET, expected around 12:00 ET", lunchStartLocal)
 	}

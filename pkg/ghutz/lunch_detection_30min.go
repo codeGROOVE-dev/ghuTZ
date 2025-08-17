@@ -6,14 +6,20 @@ import (
 	"os"
 )
 
+// DetectLunchBreakNoonCentered looks for lunch breaks in the 10am-2:30pm window
+// SIMPLIFIED VERSION - just find ANY drop in activity  
+func DetectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int) (lunchStart, lunchEnd, confidence float64) {
+	return detectLunchBreakNoonCentered(halfHourCounts, utcOffset)
+}
+
 // detectLunchBreakNoonCentered looks for lunch breaks in the 10am-2:30pm window
 // SIMPLIFIED VERSION - just find ANY drop in activity
 func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int) (lunchStart, lunchEnd, confidence float64) {
-	// Write to stderr so it shows up
-	fmt.Fprintf(os.Stderr, "\n=== Lunch Detection for UTC%+d ===\n", utcOffset)
+	// Debug output disabled to reduce clutter
+	// fmt.Fprintf(os.Stderr, "\n=== Lunch Detection for UTC%+d ===\n", utcOffset)
 	
 	// First, check what data we have in the lunch window
-	fmt.Fprintf(os.Stderr, "Activity in lunch window (10am-2:30pm local):\n")
+	// fmt.Fprintf(os.Stderr, "Activity in lunch window (10am-2:30pm local):\n")
 	hasAnyData := false
 	for localHour := 10.0; localHour <= 14.5; localHour += 0.5 {
 		utcHour := localHour - float64(utcOffset)
@@ -24,14 +30,14 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 			utcHour -= 24
 		}
 		
-		if count, exists := halfHourCounts[utcHour]; exists {
-			fmt.Fprintf(os.Stderr, "  %.1f local (%.1f UTC): %d events\n", localHour, utcHour, count)
+		if _, exists := halfHourCounts[utcHour]; exists {
+			// fmt.Fprintf(os.Stderr, "  %.1f local (%.1f UTC): %d events\n", localHour, utcHour, count)
 			hasAnyData = true
 		}
 	}
 	
 	if !hasAnyData {
-		fmt.Fprintf(os.Stderr, "  NO DATA in lunch window!\n")
+		// fmt.Fprintf(os.Stderr, "  NO DATA in lunch window!\n")
 		return -1, -1, 0
 	}
 	// Look for lunch between 10am and 2:30pm local time
@@ -45,8 +51,14 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 		// Check each possible lunch start time
 		for startLocal := 10.0; startLocal <= 14.5-duration; startLocal += 0.5 {
 			// Convert to UTC
+			// Note: utcOffset is negative for positive UTC zones (e.g., -10 for UTC+10)
+			// So startLocal - utcOffset = startLocal - (-10) = startLocal + 10
+			// But for UTC+10, we want local - 10 to get UTC
+			// The correct formula when offset is negative for positive zones is:
+			// startUTC = startLocal + utcOffset (since offset is already negative)
 			startUTC := startLocal - float64(utcOffset)
 			// Normalize to 0-24 range
+			// IMPORTANT: Use modulo to handle day wraparound correctly
 			for startUTC < 0 {
 				startUTC += 24
 			}
@@ -62,14 +74,17 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 			beforeCount := halfHourCounts[beforeUTC]
 			
 			// Get activity during lunch (average)
+			// CRITICAL: Treat missing buckets as 0 events (perfect lunch signal!)
 			lunchTotal := 0
 			lunchBuckets := 0
 			for t := 0.0; t < duration; t += 0.5 {
 				bucket := math.Mod(startUTC+t+24, 24)
+				// Always count the bucket, even if it doesn't exist (0 events)
+				lunchBuckets++
 				if count, exists := halfHourCounts[bucket]; exists {
 					lunchTotal += count
-					lunchBuckets++
 				}
+				// If bucket doesn't exist, it's 0 events (no activity = lunch!)
 			}
 			
 			if lunchBuckets == 0 || beforeCount == 0 {
@@ -81,11 +96,14 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 			// Calculate drop percentage
 			dropRatio := (float64(beforeCount) - avgLunchActivity) / float64(beforeCount)
 			
-			// Check for "quick lunch" pattern: brief dip followed by rebound
+			// Check for "quick lunch" pattern: brief dip followed by strong rebound
 			// This is common for people who grab a quick lunch then have meetings
 			afterUTC := math.Mod(startUTC+duration+24, 24)
 			afterCount := halfHourCounts[afterUTC]
-			isQuickLunch := afterCount > int(avgLunchActivity*1.2) && dropRatio > 0.1
+			
+			// Calculate recovery ratio - compare to pre-lunch activity
+			// Strong recovery means activity returns to near pre-lunch levels
+			recoveryToPreLunch := float64(afterCount) / float64(beforeCount)
 			
 			// Accept ANY drop near noon, with preference for bigger drops
 			// Closer to noon = lower threshold
@@ -99,6 +117,15 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 			
 			// Use the closest distance to any standard lunch time
 			effectiveDistance := math.Min(distanceFromNoon, math.Min(distanceFrom1130, distanceFrom1230))
+			
+			// Strong recovery: activity returns to >60% of pre-lunch level
+			// This indicates lunch is actually over
+			// BUT only consider this a valid lunch pattern if the drop was significant
+			hasStrongRecovery := recoveryToPreLunch > 0.6 && dropRatio > 0.6
+			
+			// Quick lunch detection: requires BOTH significant drop AND recovery
+			// AND should be near standard lunch times to avoid false positives
+			isQuickLunch := recoveryToPreLunch > 0.4 && dropRatio > 0.5 && effectiveDistance < 1.0
 			minThreshold := 0.01 + effectiveDistance*0.02 // 1% at standard times, more penalty farther away
 			
 			// Lower threshold for quick lunch patterns near noon
@@ -107,28 +134,66 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 			}
 			
 			if dropRatio > minThreshold {
-				fmt.Fprintf(os.Stderr, "  Found drop: %.1f local for %.0f min, %.1f%% drop (threshold %.1f%%)\n", 
-					startLocal, duration*60, dropRatio*100, minThreshold*100)
+				// Debug output for wangzhen case
+				if os.Getenv("DEBUG_LUNCH") != "" {
+					fmt.Fprintf(os.Stderr, "  Found drop: %.1f local for %.0f min, %.1f%% drop, initial=%.3f\n", 
+						startLocal, duration*60, dropRatio*100, dropRatio)
+					fmt.Fprintf(os.Stderr, "    Before=%d, Lunch=%.1f, After=%d, Recovery=%.2f\n",
+						beforeCount, avgLunchActivity, afterCount, recoveryToPreLunch)
+					fmt.Fprintf(os.Stderr, "    QuickLunch=%v, StrongRecovery=%v, Noon=%.2f, 1130=%.2f, 1230=%.2f, Eff=%.2f\n",
+						isQuickLunch, hasStrongRecovery, distanceFromNoon, distanceFrom1130, distanceFrom1230, effectiveDistance)
+				}
 				
-				// Prefer 60-minute lunches when drops are similar
-				// A 60-minute lunch with 80% drop is better than 30-minute with 85% drop
+				// Adjust scoring based on lunch duration and recovery pattern
 				effectiveScore := dropRatio
-				if duration == 1.0 { // 60 minutes
-					effectiveScore *= 1.15 // 15% bonus for standard lunch duration
-				} else if duration == 0.5 { // 30 minutes
-					effectiveScore *= 0.95 // 5% penalty for short lunch
+				
+				// CRITICAL: Massive preference for 100% activity drops
+				// This ensures perfect lunch signals always win over partial drops
+				if dropRatio >= 1.0 && effectiveDistance <= 1.0 { // 100% drop within 1 hour of standard time
+					effectiveScore *= 10.0 // 900% bonus for perfect drops near lunch time
+				}
+				
+				// For 30-minute lunches with strong recovery, give a big bonus
+				// This is the clearest signal of a quick lunch break
+				if duration == 0.5 && hasStrongRecovery { // 30 minutes with strong rebound
+					effectiveScore *= 2.0 // 100% bonus for clear quick lunch pattern
+				} else if duration == 0.5 && isQuickLunch { // 30 minutes with moderate rebound
+					effectiveScore *= 1.3 // 30% bonus for quick lunch
+				} else if duration == 1.0 && !hasStrongRecovery { // 60 minutes without strong recovery after
+					effectiveScore *= 1.1 // Small bonus for standard lunch
+				} else if duration == 1.0 && hasStrongRecovery { 
+					// 60 minutes but activity rebounds strongly at 60min mark
+					// This might mean lunch was actually shorter
+					effectiveScore *= 0.8 // 20% penalty - lunch probably ended earlier
+				} else if duration == 0.5 { // 30 minutes without strong recovery
+					effectiveScore *= 0.95 // Small penalty
+				}
+				
+				// MASSIVE bonus for 100% drops (perfect lunch signal)
+				// This ensures 100% drops always win over partial drops
+				if dropRatio >= 1.0 { // 100% drop
+					effectiveScore *= 5.0 // 400% bonus for perfect lunch signal
 				}
 				
 				// VERY strong bonus for lunches at standard times: 12:00 (most common), 11:30, 12:30
 				// This helps prefer standard lunch times over early morning breaks
-				if distanceFromNoon < 0.25 { // 11:45-12:15 range
-					effectiveScore *= 2.0 // 100% bonus for noon lunch (most common)
+				// For 30-min lunch starting at 12:00, midpoint is 12:15, distance is 0.25
+				// So use <= 0.25 to include exact noon starts
+				if distanceFromNoon <= 0.25 { // 11:45-12:15 range (inclusive)
+					// Massive bonus for noon, especially with large drops
+					if dropRatio > 0.8 {
+						effectiveScore *= 3.0 // 200% bonus for massive noon drops
+					} else if dropRatio > 0.6 {
+						effectiveScore *= 2.5 // 150% bonus for large noon drops  
+					} else {
+						effectiveScore *= 2.0 // 100% bonus for noon lunch (most common)
+					}
 					if isQuickLunch {
 						effectiveScore *= 1.3 // Extra 30% bonus for quick lunch at noon
 					}
-				} else if distanceFrom1130 < 0.25 { // 11:15-11:45 range
+				} else if distanceFrom1130 <= 0.25 { // 11:15-11:45 range (inclusive)
 					effectiveScore *= 1.8 // 80% bonus for 11:30 lunch
-				} else if distanceFrom1230 < 0.25 { // 12:15-12:45 range
+				} else if distanceFrom1230 <= 0.25 { // 12:15-12:45 range (inclusive)
 					effectiveScore *= 1.8 // 80% bonus for 12:30 lunch
 				} else if effectiveDistance < 0.5 { // Within 30 minutes of any standard time
 					effectiveScore *= 1.5 // 50% bonus for near-standard lunch
@@ -151,10 +216,18 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 				}
 				
 				if effectiveScore > bestScore {
+					if os.Getenv("DEBUG_LUNCH") != "" {
+						fmt.Fprintf(os.Stderr, "    FINAL SCORE: %.3f (from initial %.3f)\n", effectiveScore, dropRatio)
+						fmt.Fprintf(os.Stderr, "    NEW BEST: %.1f local, %.0f min, score %.3f > %.3f\n", 
+							startLocal, duration*60, effectiveScore, bestScore)
+					}
 					bestScore = effectiveScore
 					bestDrop = dropRatio // Save actual drop ratio for reporting
 					bestStart = startLocal
 					bestDuration = duration
+				} else if os.Getenv("DEBUG_LUNCH") != "" && effectiveScore > 0 {
+					fmt.Fprintf(os.Stderr, "    Not best: %.1f local, score %.3f <= %.3f\n", 
+						startLocal, effectiveScore, bestScore)
 				}
 			}
 		}
@@ -162,12 +235,12 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 	
 	if bestStart < 0 {
 		// No lunch found at all
-		fmt.Fprintf(os.Stderr, "Result: NO LUNCH DETECTED\n")
+		// fmt.Fprintf(os.Stderr, "Result: NO LUNCH DETECTED\n")
 		return -1, -1, 0
 	}
 	
-	fmt.Fprintf(os.Stderr, "Result: LUNCH DETECTED at %.1f local, %.0f min, %.1f%% drop\n", 
-		bestStart, bestDuration*60, bestDrop*100)
+	// fmt.Fprintf(os.Stderr, "Result: LUNCH DETECTED at %.1f local, %.0f min, %.1f%% drop\n", 
+	//	bestStart, bestDuration*60, bestDrop*100)
 	
 	// Convert back to UTC for return
 	startUTC := bestStart - float64(utcOffset)

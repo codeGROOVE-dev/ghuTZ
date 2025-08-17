@@ -88,8 +88,12 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 func findSleepHours(hourCounts map[int]int) []int {
 	// Calculate total activity to determine thresholds
 	totalActivity := 0
+	maxActivity := 0
 	for _, count := range hourCounts {
 		totalActivity += count
+		if count > maxActivity {
+			maxActivity = count
+		}
 	}
 	
 	// If very little data, use default sleep hours
@@ -97,39 +101,52 @@ func findSleepHours(hourCounts map[int]int) []int {
 		return []int{2, 3, 4, 5, 6} // Default UTC sleep hours
 	}
 	
-	// Find the quietest consecutive 5-hour period using a sliding window
-	minSum := totalActivity // Start with max possible
-	minStart := 0
-	windowSize := 5 // Look for 5-hour sleep windows
+	// First, find all hours with very low activity (less than 10% of max hour)
+	threshold := float64(maxActivity) * 0.1
+	if threshold < 2 {
+		threshold = 2 // At least 2 events to not be considered quiet
+	}
 	
-	for start := 0; start < 24; start++ {
-		sum := 0
-		for i := 0; i < windowSize; i++ {
-			hour := (start + i) % 24
-			sum += hourCounts[hour]
-		}
-		
-		if sum < minSum {
-			minSum = sum
-			minStart = start
+	var quietHours []int
+	for hour := 0; hour < 24; hour++ {
+		if float64(hourCounts[hour]) <= threshold {
+			quietHours = append(quietHours, hour)
 		}
 	}
 	
-	// Build the sleep hours array
-	var sleepHours []int
-	for i := 0; i < windowSize; i++ {
-		sleepHours = append(sleepHours, (minStart+i)%24)
+	// If we found 4-12 quiet hours (sleep time), use them
+	// User specified 4-9 hours of sleep is most likely
+	if len(quietHours) >= 4 && len(quietHours) <= 12 {
+		return quietHours
 	}
 	
-	// If the quietest period still has significant activity (>20% of average),
-	// try to find a better window by looking at longer periods
-	avgPerHour := float64(totalActivity) / 24.0
-	quietAvg := float64(minSum) / float64(windowSize)
+	// If we found more than 12 quiet hours, cap at 12
+	if len(quietHours) > 12 {
+		// Find the quietest consecutive 12-hour period
+		bestSum := totalActivity
+		bestStart := 0
+		for start := 0; start < len(quietHours); start++ {
+			sum := 0
+			count := 0
+			for i := start; i < start+12 && i < len(quietHours); i++ {
+				sum += hourCounts[quietHours[i]]
+				count++
+			}
+			if count == 12 && sum < bestSum {
+				bestSum = sum
+				bestStart = start
+			}
+		}
+		return quietHours[bestStart:min(bestStart+12, len(quietHours))]
+	}
 	
-	if quietAvg > avgPerHour*0.3 {
-		// Activity during "sleep" is too high, try finding a 6-hour window
-		windowSize = 6
-		minSum = totalActivity
+	// Otherwise, find the quietest consecutive period using a sliding window
+	// Try different window sizes from 4 to 12 hours (sleep time)
+	bestWindowSize := 4
+	bestSum := totalActivity
+	bestStart := 0
+	
+	for windowSize := 4; windowSize <= 12; windowSize++ {
 		for start := 0; start < 24; start++ {
 			sum := 0
 			for i := 0; i < windowSize; i++ {
@@ -137,18 +154,28 @@ func findSleepHours(hourCounts map[int]int) []int {
 				sum += hourCounts[hour]
 			}
 			
-			if sum < minSum {
-				minSum = sum
-				minStart = start
+			// Prefer longer windows if the activity per hour is similar
+			avgPerHour := float64(sum) / float64(windowSize)
+			bestAvgPerHour := float64(bestSum) / float64(bestWindowSize)
+			
+			// Accept longer window if avg activity per hour is within 20% of best
+			if sum < bestSum || (avgPerHour <= bestAvgPerHour*1.2 && windowSize > bestWindowSize) {
+				bestSum = sum
+				bestStart = start
+				bestWindowSize = windowSize
 			}
 		}
-		
-		// Rebuild sleep hours with the better window
-		sleepHours = []int{}
-		for i := 0; i < windowSize; i++ {
-			sleepHours = append(sleepHours, (minStart+i)%24)
-		}
 	}
+	
+	// Build the sleep hours array
+	var sleepHours []int
+	for i := 0; i < bestWindowSize; i++ {
+		sleepHours = append(sleepHours, (bestStart+i)%24)
+	}
+	
+	// Check if we should extend the quiet period further
+	// If the average activity during quiet hours is very low, we found good sleep hours
+	// Variables removed as they were unused - validation happens through the window selection above
 	
 	return sleepHours
 }

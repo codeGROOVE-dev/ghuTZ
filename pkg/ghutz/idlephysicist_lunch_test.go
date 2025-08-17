@@ -81,8 +81,6 @@ func TestIdlePhysicistLunchDetection(t *testing.T) {
 	}
 	
 	// Check that we detect a lunch break
-	// For UTC-6, the lunch at 13:30 local (19:30 UTC) shows a drop from 12 to 5 events (58.3% drop)
-	// This is the actual lunch break that should be detected
 	
 	if confidence <= 0 {
 		t.Errorf("Failed to detect any lunch break for IdlePhysicist in Mountain Time")
