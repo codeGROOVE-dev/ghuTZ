@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ var (
 	mapsAPIKey   = flag.String("maps-key", "", "Google Maps API key (or set GOOGLE_MAPS_API_KEY)")
 	gcpProject   = flag.String("gcp-project", "", "GCP project ID (or set GCP_PROJECT)")
 	cacheDir     = flag.String("cache-dir", "", "Cache directory (or set CACHE_DIR)")
+	noCache      = flag.Bool("no-cache", false, "Disable caching")
 	verbose      = flag.Bool("verbose", false, "Enable verbose logging")
 	version      = flag.Bool("version", false, "Show version")
 )
@@ -56,6 +58,12 @@ func main() {
 	// Get tokens from environment if not provided as flags
 	if *githubToken == "" {
 		*githubToken = os.Getenv("GITHUB_TOKEN")
+		// If still empty, try to get from gh CLI
+		if *githubToken == "" {
+			if token, err := exec.Command("gh", "auth", "token").Output(); err == nil {
+				*githubToken = strings.TrimSpace(string(token))
+			}
+		}
 	}
 	if *geminiAPIKey == "" {
 		*geminiAPIKey = os.Getenv("GEMINI_API_KEY")
@@ -82,7 +90,10 @@ func main() {
 		ghutz.WithGCPProject(*gcpProject),
 	}
 
-	if *cacheDir != "" {
+	if *noCache {
+		// Disable cache by setting an empty cache dir
+		detectorOpts = append(detectorOpts, ghutz.WithCacheDir(""))
+	} else if *cacheDir != "" {
 		detectorOpts = append(detectorOpts, ghutz.WithCacheDir(*cacheDir))
 	}
 
@@ -121,34 +132,27 @@ func main() {
 
 	// Show histogram by default if activity data is available
 	if result.HourlyActivityUTC != nil {
-		// Calculate UTC offset from the FINAL detected timezone for consistent display
-		// Both histogram and quiet times should be shown in the user's detected timezone
-		utcOffset := 0
-
-		if strings.HasPrefix(result.Timezone, "UTC") {
-			offsetStr := strings.TrimPrefix(result.Timezone, "UTC")
-			if offsetStr == "" {
-				utcOffset = 0 // UTC+0
-			} else if offset, err := strconv.Atoi(offsetStr); err == nil {
-				utcOffset = offset
-			}
-		} else if loc, err := time.LoadLocation(result.Timezone); err == nil {
-			now := time.Now().In(loc)
-			_, offset := now.Zone()
-			utcOffset = offset / 3600
-		}
-
-		histogramOutput := ghutz.GenerateHistogram(result, result.HourlyActivityUTC, utcOffset)
+		histogramOutput := ghutz.GenerateHistogram(result, result.HourlyActivityUTC, result.Timezone)
 		fmt.Print(histogramOutput)
 	}
 }
 
 func printResult(result *ghutz.Result) {
-	// Modern header with emoji
+	printHeader(result)
+	printLocation(result)
+	printTimezone(result)
+	printWorkSchedule(result)
+	printOrganizations(result)
+	printActivitySummary(result)
+	printDetectionInfo(result)
+}
+
+func printHeader(result *ghutz.Result) {
 	fmt.Printf("\n🌍 GitHub User: %s\n", result.Username)
 	fmt.Println(strings.Repeat("─", 50))
+}
 
-	// Location and timezone in a cleaner format
+func printLocation(result *ghutz.Result) {
 	locationStr := ""
 	switch {
 	case result.GeminiSuggestedLocation != "":
@@ -162,137 +166,69 @@ func printResult(result *ghutz.Result) {
 	if locationStr != "" {
 		fmt.Printf("📍 Location:      %s\n", locationStr)
 	}
+}
 
-	// Timezone with GMT offset and current local time
+func printTimezone(result *ghutz.Result) {
 	tzName := result.Timezone
-	gmtOffset := ""
-	currentLocal := ""
-
+	
 	// Try to load the timezone
 	if loc, err := time.LoadLocation(tzName); err == nil {
 		now := time.Now().In(loc)
 		_, offset := now.Zone()
 		offsetHours := offset / 3600
+		var utcOffset string
 		if offsetHours >= 0 {
-			gmtOffset = fmt.Sprintf("GMT+%d", offsetHours)
+			utcOffset = fmt.Sprintf("UTC+%d", offsetHours)
 		} else {
-			gmtOffset = fmt.Sprintf("GMT%d", offsetHours)
+			utcOffset = fmt.Sprintf("UTC%d", offsetHours)
 		}
-		currentLocal = now.Format("15:04")
-		fmt.Printf("🕐 Timezone:      %s (%s, now %s)", tzName, gmtOffset, currentLocal)
+		currentLocal := now.Format("15:04")
+		fmt.Printf("🕐 Timezone:      %s (%s, now %s)", tzName, utcOffset, currentLocal)
 	} else {
 		// Fallback for UTC+/- format
 		fmt.Printf("🕐 Timezone:      %s", result.Timezone)
 	}
 
 	if result.ActivityTimezone != "" && result.ActivityTimezone != result.Timezone {
-		// Convert UTC format to GMT format for consistency
-		activityTz := result.ActivityTimezone
-		if strings.HasPrefix(activityTz, "UTC") {
-			offset := strings.TrimPrefix(activityTz, "UTC")
-			switch {
-			case offset == "":
-				activityTz = "GMT"
-			case strings.HasPrefix(offset, "+"):
-				activityTz = "GMT" + offset
-			default:
-				// Negative offset already has minus sign
-				activityTz = "GMT" + offset
-			}
-		}
-		fmt.Printf("\n                  └─ activity suggests %s", activityTz)
+		fmt.Printf("\n                  └─ activity suggests %s", result.ActivityTimezone)
 	}
 	fmt.Println()
+}
 
-	// Work schedule with relative time indicators
+// Removed - no longer needed since we use UTC throughout
+
+func printWorkSchedule(result *ghutz.Result) {
 	if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
-		// Convert active hours from UTC to final detected timezone for display
-		// Despite the field name "Local", these are stored as UTC values
-		finalOffset := calculateTimezoneOffset(result.Timezone)
+		fmt.Printf("🏃 Active Time:   %s → %s (%s)",
+			formatHour(convertUTCToLocal(result.ActiveHoursLocal.Start, result.Timezone)),
+			formatHour(convertUTCToLocal(result.ActiveHoursLocal.End, result.Timezone)),
+			result.Timezone)
 
-		// Convert UTC to local time
-		activeStartLocal := math.Mod(result.ActiveHoursLocal.Start+float64(finalOffset)+24, 24)
-		activeEndLocal := math.Mod(result.ActiveHoursLocal.End+float64(finalOffset)+24, 24)
-
-		workStartRelative := ""
-		workEndRelative := ""
-
-		// Calculate relative times if we have a valid timezone
-		if loc, err := time.LoadLocation(tzName); err == nil {
-			now := time.Now().In(loc)
-			currentTime := float64(now.Hour()) + float64(now.Minute())/60.0
-
-			// Calculate relative time to work start (using converted local times)
-			hoursToStart := activeStartLocal - currentTime
-			if hoursToStart < 0 {
-				hoursToStart += 24 // Handle next day
-			}
-			if hoursToStart > 12 {
-				// It was yesterday/earlier today
-				hoursToStart -= 24
-			}
-
-			// Calculate relative time to work end (using converted local times)
-			hoursToEnd := activeEndLocal - currentTime
-			if hoursToEnd < 0 && activeEndLocal > activeStartLocal {
-				hoursToEnd += 24 // Handle next day
-			}
-			if hoursToEnd > 12 {
-				// It was yesterday/earlier today
-				hoursToEnd -= 24
-			}
-
-			// Format relative times tersely
-			workStartRelative = formatRelativeTime(hoursToStart)
-			workEndRelative = formatRelativeTime(hoursToEnd)
-		}
-
-		fmt.Printf("🏃 Active Time:   %s → %s",
-			formatHour(activeStartLocal),
-			formatHour(activeEndLocal))
-
-		if workStartRelative != "" && workEndRelative != "" {
-			fmt.Printf(" (%s → %s)", workStartRelative, workEndRelative)
-		}
-
-		if result.LunchHoursLocal.Confidence > 0 {
-			// Convert lunch times from UTC to final detected timezone for display
-			finalOffset := calculateTimezoneOffset(result.Timezone)
-
-			lunchStart := math.Mod(result.LunchHoursLocal.Start+float64(finalOffset)+24, 24)
-			lunchEnd := math.Mod(result.LunchHoursLocal.End+float64(finalOffset)+24, 24)
-
-			fmt.Printf("\n🍽️  Lunch Break:   %s → %s",
-				formatHour(lunchStart),
-				formatHour(lunchEnd))
-			if result.LunchHoursLocal.Confidence < 0.7 {
+		if result.LunchHoursUTC.Confidence > 0 {
+			fmt.Printf("\n🍽️  Lunch Break:   %s → %s (%s)",
+				formatHour(convertUTCToLocal(result.LunchHoursUTC.Start, result.Timezone)),
+				formatHour(convertUTCToLocal(result.LunchHoursUTC.End, result.Timezone)),
+				result.Timezone)
+			if result.LunchHoursUTC.Confidence < 0.7 {
 				fmt.Printf(" (uncertain)")
 			}
 		}
 
 		// Add peak productivity time
 		if result.PeakProductivity.Count > 0 {
-			// Convert peak times from UTC to final detected timezone for display
-			finalOffset := calculateTimezoneOffset(result.Timezone)
-
-			peakStart := math.Mod(result.PeakProductivity.Start+float64(finalOffset)+24, 24)
-			peakEnd := math.Mod(result.PeakProductivity.End+float64(finalOffset)+24, 24)
-
-			fmt.Printf("\n🔥 Activity Peak: %s → %s",
-				formatHour(peakStart),
-				formatHour(peakEnd))
+			fmt.Printf("\n🔥 Activity Peak: %s → %s (%s)",
+				formatHour(convertUTCToLocal(result.PeakProductivity.Start, result.Timezone)),
+				formatHour(convertUTCToLocal(result.PeakProductivity.End, result.Timezone)),
+				result.Timezone)
 		}
 
 		// Add quiet hours (sleep/family time)
 		if len(result.QuietHoursUTC) > 0 {
-			// Calculate UTC offset from the FINAL detected timezone for display
-			// Quiet hours are stored in UTC and should be converted to the user's detected timezone
-			utcOffset := calculateTimezoneOffset(tzName)
-
 			// Convert UTC quiet hours to local hours
-			localQuietHours := make([]int, len(result.QuietHoursUTC))
-			for i, utcHour := range result.QuietHoursUTC {
-				localQuietHours[i] = (utcHour + utcOffset + 24) % 24
+			var localQuietHours []int
+			for _, utcHour := range result.QuietHoursUTC {
+				localHour := int(convertUTCToLocal(float64(utcHour), result.Timezone))
+				localQuietHours = append(localQuietHours, localHour)
 			}
 
 			// Group consecutive quiet hours into ranges
@@ -332,7 +268,7 @@ func printResult(result *ghutz.Result) {
 				ranges = append(ranges, quietRange{currentStart, (currentEnd + 1) % 24})
 			}
 
-			// Format and display ranges
+			// Format and display ranges with timezone
 			if len(ranges) > 0 {
 				var rangeStrings []string
 				for _, r := range ranges {
@@ -340,14 +276,15 @@ func printResult(result *ghutz.Result) {
 						formatHour(float64(r.start)),
 						formatHour(float64(r.end))))
 				}
-				fmt.Printf("\n💤 Quiet Time:    %s", strings.Join(rangeStrings, ", "))
+				fmt.Printf("\n💤 Quiet Time:    %s (%s)", strings.Join(rangeStrings, ", "), result.Timezone)
 			}
 		}
 
 		fmt.Println()
 	}
+}
 
-	// Show all organizations with color-coded counts
+func printOrganizations(result *ghutz.Result) {
 	if len(result.TopOrganizations) > 0 {
 		colors := []string{
 			"\033[34m", // Blue for 1st
@@ -376,8 +313,41 @@ func printResult(result *ghutz.Result) {
 		// Always display organizations on a single line
 		fmt.Printf("🏢 Orgs:          %s\n", orgsStr.String())
 	}
+}
 
-	// Detection method as a subtle footer
+func printActivitySummary(result *ghutz.Result) {
+	if !result.ActivityDateRange.OldestActivity.IsZero() && !result.ActivityDateRange.NewestActivity.IsZero() {
+		// Calculate total events from hourly activity
+		totalEvents := 0
+		if result.HourlyActivityUTC != nil {
+			for _, count := range result.HourlyActivityUTC {
+				totalEvents += count
+			}
+		}
+
+		// Format the date range
+		oldestStr := result.ActivityDateRange.OldestActivity.Format("2006-01-02")
+		newestStr := result.ActivityDateRange.NewestActivity.Format("2006-01-02")
+		
+		if totalEvents > 0 {
+			fmt.Printf("📊 Activity:      %d events from %s to %s",
+				totalEvents,
+				oldestStr,
+				newestStr)
+		} else {
+			fmt.Printf("📊 Activity:      %s to %s",
+				oldestStr,
+				newestStr)
+		}
+
+		if result.ActivityDateRange.TotalDays > 0 {
+			fmt.Printf(" (%d days)", result.ActivityDateRange.TotalDays)
+		}
+		fmt.Println()
+	}
+}
+
+func printDetectionInfo(result *ghutz.Result) {
 	fmt.Printf("✨ Detection:     %s (%.0f%% confidence)\n",
 		formatMethodName(result.Method),
 		result.Confidence*100)
@@ -464,4 +434,21 @@ func formatMethodName(method string) string {
 		return name
 	}
 	return method
+}
+
+// convertUTCToLocal converts a UTC hour (float) to local time using Go's timezone database
+func convertUTCToLocal(utcHour float64, timezone string) float64 {
+	if loc, err := time.LoadLocation(timezone); err == nil {
+		// Use Go's native timezone conversion
+		// We use a reference date in the middle of the year to get consistent DST behavior
+		refDate := time.Date(2024, 8, 15, 0, 0, 0, 0, time.UTC)
+		hour := int(utcHour)
+		min := int((utcHour - float64(hour)) * 60)
+		utcTime := refDate.Add(time.Duration(hour)*time.Hour + time.Duration(min)*time.Minute)
+		localTime := utcTime.In(loc)
+		return float64(localTime.Hour()) + float64(localTime.Minute())/60.0
+	}
+	// Fallback for UTC+/- format
+	offset := calculateTimezoneOffset(timezone)
+	return math.Mod(utcHour+float64(offset)+24, 24)
 }

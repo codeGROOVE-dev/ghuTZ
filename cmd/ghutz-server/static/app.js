@@ -84,6 +84,7 @@ function displayResults(data) {
     document.getElementById('peakRow').style.display = 'none';
     document.getElementById('quietRow').style.display = 'none';
     document.getElementById('orgsRow').style.display = 'none';
+    document.getElementById('activitySummaryRow').style.display = 'none';
     document.getElementById('histogramRow').style.display = 'none';
     document.getElementById('locationRow').style.display = 'none';
     document.getElementById('mapRow').style.display = 'none';
@@ -188,6 +189,35 @@ function displayResults(data) {
         });
         
         document.getElementById('orgsRow').style.display = 'block';
+    }
+
+    // Show activity data summary if available
+    if (data.activity_date_range && data.activity_date_range.oldest_activity && data.activity_date_range.newest_activity) {
+        // Calculate total events from hourly activity
+        let totalEvents = 0;
+        if (data.hourly_activity_utc) {
+            Object.values(data.hourly_activity_utc).forEach(count => {
+                totalEvents += count;
+            });
+        }
+
+        // Format dates
+        const oldestDate = new Date(data.activity_date_range.oldest_activity).toISOString().split('T')[0];
+        const newestDate = new Date(data.activity_date_range.newest_activity).toISOString().split('T')[0];
+        
+        let summaryText = '';
+        if (totalEvents > 0) {
+            summaryText = `${totalEvents} events from ${oldestDate} to ${newestDate}`;
+        } else {
+            summaryText = `${oldestDate} to ${newestDate}`;
+        }
+
+        if (data.activity_date_range.total_days > 0) {
+            summaryText += ` (${data.activity_date_range.total_days} days)`;
+        }
+
+        document.getElementById('activitySummary').textContent = summaryText;
+        document.getElementById('activitySummaryRow').style.display = 'block';
     }
 
     // Draw histogram if activity data is available

@@ -86,96 +86,70 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 
 // findSleepHours identifies likely sleep hours based on activity patterns.
 func findSleepHours(hourCounts map[int]int) []int {
-	// Find continuous blocks of low/no activity
-	type block struct {
-		start  int
-		length int
-		total  int
+	// Calculate total activity to determine thresholds
+	totalActivity := 0
+	for _, count := range hourCounts {
+		totalActivity += count
 	}
-
-	var blocks []block
-	inBlock := false
-	currentBlock := block{}
-
-	// Scan for quiet blocks, wrapping around midnight
-	for i := 0; i < 48; i++ { // Check 48 hours to handle wraparound
-		h := i % 24
-		count := hourCounts[h]
-
-		if count <= 2 { // Very low activity threshold
-			if !inBlock {
-				inBlock = true
-				currentBlock = block{start: h, length: 1, total: count}
-			} else {
-				currentBlock.length++
-				currentBlock.total += count
-			}
-		} else {
-			if inBlock && currentBlock.length >= 3 { // Minimum 3 hours for sleep
-				blocks = append(blocks, currentBlock)
-			}
-			inBlock = false
+	
+	// If very little data, use default sleep hours
+	if totalActivity < 50 {
+		return []int{2, 3, 4, 5, 6} // Default UTC sleep hours
+	}
+	
+	// Find the quietest consecutive 5-hour period using a sliding window
+	minSum := totalActivity // Start with max possible
+	minStart := 0
+	windowSize := 5 // Look for 5-hour sleep windows
+	
+	for start := 0; start < 24; start++ {
+		sum := 0
+		for i := 0; i < windowSize; i++ {
+			hour := (start + i) % 24
+			sum += hourCounts[hour]
+		}
+		
+		if sum < minSum {
+			minSum = sum
+			minStart = start
 		}
 	}
-
-	// Handle wraparound case
-	if inBlock && currentBlock.length >= 3 {
-		// Check if this connects with the first block
-		if len(blocks) > 0 && blocks[0].start < 6 {
-			// Merge with first block
-			firstBlock := blocks[0]
-			lastBlock := currentBlock
-
-			// Adjust for wraparound
-			mergedStart := lastBlock.start
-			mergedLength := lastBlock.length + firstBlock.length
-			mergedTotal := lastBlock.total + firstBlock.total
-
-			// Replace first block with merged block
-			blocks[0] = block{
-				start:  mergedStart,
-				length: mergedLength,
-				total:  mergedTotal,
-			}
-		} else {
-			blocks = append(blocks, currentBlock)
-		}
-	}
-
-	// Find the longest quiet block (most likely sleep)
-	var sleepBlock block
-	maxLength := 0
-	for _, b := range blocks {
-		// Prefer blocks that span typical sleep hours (10 PM - 8 AM UTC)
-		// But adjust for the fact that we don't know timezone yet
-		score := b.length
-		if b.length >= 5 && b.length <= 10 { // Reasonable sleep duration
-			score += 2
-		}
-		if score > maxLength {
-			maxLength = score
-			sleepBlock = b
-		}
-	}
-
-	// Return hours in the sleep block
+	
+	// Build the sleep hours array
 	var sleepHours []int
-	if sleepBlock.length > 0 {
-		for i := 0; i < sleepBlock.length && i < 24; i++ {
-			sleepHours = append(sleepHours, (sleepBlock.start+i)%24)
+	for i := 0; i < windowSize; i++ {
+		sleepHours = append(sleepHours, (minStart+i)%24)
+	}
+	
+	// If the quietest period still has significant activity (>20% of average),
+	// try to find a better window by looking at longer periods
+	avgPerHour := float64(totalActivity) / 24.0
+	quietAvg := float64(minSum) / float64(windowSize)
+	
+	if quietAvg > avgPerHour*0.3 {
+		// Activity during "sleep" is too high, try finding a 6-hour window
+		windowSize = 6
+		minSum = totalActivity
+		for start := 0; start < 24; start++ {
+			sum := 0
+			for i := 0; i < windowSize; i++ {
+				hour := (start + i) % 24
+				sum += hourCounts[hour]
+			}
+			
+			if sum < minSum {
+				minSum = sum
+				minStart = start
+			}
+		}
+		
+		// Rebuild sleep hours with the better window
+		sleepHours = []int{}
+		for i := 0; i < windowSize; i++ {
+			sleepHours = append(sleepHours, (minStart+i)%24)
 		}
 	}
-
-	// If we found very long quiet period (>10 hours), trim it to reasonable sleep hours
-	if len(sleepHours) > 10 {
-		// Keep the middle portion as most likely sleep time
-		start := len(sleepHours)/2 - 4
-		if start < 0 {
-			start = 0
-		}
-		sleepHours = sleepHours[start : start+8]
-	}
-
+	
 	return sleepHours
 }
 

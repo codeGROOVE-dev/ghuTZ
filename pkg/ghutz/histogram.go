@@ -3,7 +3,9 @@ package ghutz
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/fatih/color"
 )
@@ -45,15 +47,40 @@ func getOrgColorFunc(org string, topOrgs []struct {
 	return color.New(color.FgHiBlack)
 }
 
+// convertUTCToLocal converts a UTC hour (float) to local time using Go's timezone database
+func convertUTCToLocal(utcHour float64, timezone string) float64 {
+	if loc, err := time.LoadLocation(timezone); err == nil {
+		// Use Go's native timezone conversion
+		today := time.Now().UTC().Truncate(24 * time.Hour)
+		hour := int(utcHour)
+		min := int((utcHour - float64(hour)) * 60)
+		utcTime := today.Add(time.Duration(hour)*time.Hour + time.Duration(min)*time.Minute)
+		localTime := utcTime.In(loc)
+		return float64(localTime.Hour()) + float64(localTime.Minute())/60.0
+	}
+	// Fallback for UTC+/- format
+	if strings.HasPrefix(timezone, "UTC") {
+		offsetStr := strings.TrimPrefix(timezone, "UTC")
+		if offsetStr == "" {
+			return utcHour // UTC+0
+		}
+		if offset, err := strconv.Atoi(offsetStr); err == nil {
+			return math.Mod(utcHour+float64(offset)+24, 24)
+		}
+	}
+	return utcHour // No conversion possible
+}
+
+
 // GenerateHistogram creates a visual representation of user activity.
-func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) string {
+func GenerateHistogram(result *Result, hourCounts map[int]int, timezone string) string {
 	var output strings.Builder
 
 	// Check if we have organization data
 	hasOrgData := result.HourlyOrganizationActivity != nil && len(result.HourlyOrganizationActivity) > 0
 
 	// Modern, clean header
-	output.WriteString("📊 Activity Pattern\n")
+	output.WriteString("📊 Activity Pattern (30-minute resolution)\n")
 	output.WriteString(strings.Repeat("─", 50) + "\n")
 
 	// Count total events for confidence indicator
@@ -68,9 +95,21 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 		output.WriteString(strings.Repeat("─", 50) + "\n")
 	}
 
-	// Find max activity for scaling
+	// Find max activity for scaling (need to check both hourly and half-hourly data)
 	maxActivity := 0
+	// First check hourly data
 	for _, count := range hourCounts {
+		if count > maxActivity {
+			maxActivity = count
+		}
+	}
+	// Use the half-hour data (always available)
+	halfHourCounts := result.HalfHourlyActivityUTC
+	if halfHourCounts == nil || len(halfHourCounts) == 0 {
+		return output.String() + "No half-hour activity data available\n"
+	}
+	
+	for _, count := range halfHourCounts {
 		if count > maxActivity {
 			maxActivity = count
 		}
@@ -80,80 +119,74 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 		return output.String() + "No activity data available\n"
 	}
 
-	// Build the histogram with redesigned layout
-	for localHour := range 24 {
-		// Convert local hour to UTC
-		// For UTC-6: 10:00 AM local becomes UTC 16:00 (10 - (-6) = 16)
-		utcHour := localHour - utcOffset
-		if utcHour < 0 {
-			utcHour += 24
-		}
-		if utcHour >= 24 {
-			utcHour -= 24
-		}
+	// Build the histogram with 30-minute buckets in UTC order
+	for utcHour := 0; utcHour < 24; utcHour++ {
+		// Process both half-hour buckets for each hour
+		for halfHour := 0; halfHour < 2; halfHour++ {
+			bucket := float64(utcHour) + float64(halfHour)*0.5
+			count := halfHourCounts[bucket]
+			
+			// Convert UTC time to local time for display
+			localTime := convertUTCToLocal(bucket, timezone)
+			localHour := int(localTime)
+			localMin := int((localTime - float64(localHour)) * 60)
 
-		count := hourCounts[utcHour]
+			// Determine what type of hour this is first
+			hourType := ""
+			hourColor := color.New(color.Reset) // Default no color
 
-		// Determine what type of hour this is first
-		hourType := ""
-		hourColor := color.New(color.Reset) // Default no color
-
-		// Check if it's a quiet/sleep hour
-		for _, qh := range result.QuietHoursUTC {
-			// Convert UTC quiet hour to local time
-			// For UTC-6: UTC hour 2 becomes local hour 20 (2 + (-6) = -4 + 24 = 20)
-			localQuietHour := qh + utcOffset
-			if localQuietHour < 0 {
-				localQuietHour += 24
+			// Check if it's a quiet/sleep hour using 30-minute resolution
+			// First try the new SleepBucketsUTC if available
+			if len(result.SleepBucketsUTC) > 0 {
+				for _, sleepBucket := range result.SleepBucketsUTC {
+					if bucket == sleepBucket {
+						hourType = "z"
+						hourColor = color.New(color.FgBlue)
+						break
+					}
+				}
+			} else {
+				// Fall back to hourly quiet hours for backward compatibility
+				for _, qh := range result.QuietHoursUTC {
+					// Convert UTC quiet hour to local time using consistent conversion
+					localQuietTime := convertUTCToLocal(float64(qh), timezone)
+					localQuietHour := int(localQuietTime)
+					if localHour == localQuietHour {
+						hourType = "z"
+						hourColor = color.New(color.FgBlue)
+						break
+					}
+				}
 			}
-			if localQuietHour >= 24 {
-				localQuietHour -= 24
+
+			// Check for peak time (with 30-minute precision)
+			if hourType == "" && result.PeakProductivity.Count > 0 {
+				// Convert peak times from UTC to display timezone using consistent conversion
+				peakStart := convertUTCToLocal(result.PeakProductivity.Start, timezone)
+				peakEnd := convertUTCToLocal(result.PeakProductivity.End, timezone)
+
+				// Check if the current 30-minute bucket overlaps with peak time
+				if localTime >= peakStart && localTime < peakEnd {
+					hourType = "^"
+					hourColor = color.New(color.FgYellow)
+				}
 			}
-			if localHour == localQuietHour {
-				hourType = "z"
-				hourColor = color.New(color.FgBlue)
-				break
+
+			// Check for lunch hour (with 30-minute precision)
+			if hourType == "" && (result.LunchHoursUTC.Start != 0 || result.LunchHoursUTC.End != 0) {
+				// Convert lunch times from UTC to display timezone using consistent conversion
+				lunchStart := convertUTCToLocal(result.LunchHoursUTC.Start, timezone)
+				lunchEnd := convertUTCToLocal(result.LunchHoursUTC.End, timezone)
+
+				// Check if the current 30-minute bucket overlaps with lunch time
+				if localTime >= lunchStart && localTime < lunchEnd {
+					hourType = "L"
+					hourColor = color.New(color.FgGreen)
+				}
 			}
-		}
 
-		// Check for peak time first (highest priority)
-		if hourType == "" && result.PeakProductivity.Count > 0 {
-			// Convert peak times from UTC to display timezone
-			peakStart := math.Mod(result.PeakProductivity.Start+float64(utcOffset)+24, 24)
-			peakEnd := math.Mod(result.PeakProductivity.End+float64(utcOffset)+24, 24)
-			localHourFloat := float64(localHour)
-
-			// Check if the current hour overlaps with peak time
-			hourStart := localHourFloat
-			hourEnd := localHourFloat + 1.0
-
-			// Check for overlap between [hourStart, hourEnd) and [peakStart, peakEnd)
-			if hourEnd > peakStart && hourStart < peakEnd {
-				hourType = "^"
-				hourColor = color.New(color.FgYellow)
-			}
-		}
-
-		// Check for lunch hour
-		if hourType == "" && (result.LunchHoursLocal.Start != 0 || result.LunchHoursLocal.End != 0) {
-			// Convert lunch times from UTC to display timezone
-			lunchStartHour := math.Mod(result.LunchHoursLocal.Start+float64(utcOffset)+24, 24)
-			lunchEndHour := math.Mod(result.LunchHoursLocal.End+float64(utcOffset)+24, 24)
-			localHourFloat := float64(localHour)
-
-			// Check if the current hour block overlaps with lunch time
-			hourStart := localHourFloat
-			hourEnd := localHourFloat + 1.0
-
-			// Check for overlap between [hourStart, hourEnd) and [lunchStart, lunchEnd)
-			if hourEnd > lunchStartHour && hourStart < lunchEndHour {
-				hourType = "L"
-				hourColor = color.New(color.FgGreen)
-			}
-		}
-
-		// Start building the line
-		line := fmt.Sprintf("%02d:00 ", localHour)
+			// Start building the line with 30-minute precision
+			line := fmt.Sprintf("%02d:%02d ", localHour, localMin)
 
 		// Add hour type indicator with fixed width (single character + space)
 		if hourType != "" {
@@ -171,11 +204,8 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 
 		// Create visual bar
 		if count > 0 {
-			// Scale to max 20 characters for the bar
-			barLength := (count * 20) / maxActivity
-			if barLength == 0 {
-				barLength = 1 // Ensure at least one character for any activity
-			}
+			// Use event count directly as bar length
+			barLength := count
 
 			if hasOrgData && result.HourlyOrganizationActivity[utcHour] != nil {
 				// Build color-coded bar based on organization activity
@@ -221,6 +251,7 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, utcOffset int) st
 		}
 
 		output.WriteString(line + "\n")
+		}
 	}
 
 	return output.String()

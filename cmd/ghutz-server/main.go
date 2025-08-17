@@ -473,6 +473,33 @@ func handleAPIDetect(detector *ghutz.Detector, logger *slog.Logger) http.Handler
 
 		logger.Info("Detection successful", "username", req.Username, "timezone", result.Timezone, "method", result.Method)
 
+		// Log detailed result information for debugging
+		logger.Debug("Detection result details",
+			"username", req.Username,
+			"location", result.Location,
+			"location_name", result.LocationName,
+			"gemini_suggested_location", result.GeminiSuggestedLocation,
+			"top_organizations_count", len(result.TopOrganizations),
+			"confidence", result.TimezoneConfidence,
+			"activity_date_range", result.ActivityDateRange,
+			"hourly_activity_count", len(result.HourlyActivityUTC))
+		
+		// Log the top organizations if present
+		if len(result.TopOrganizations) > 0 {
+			var orgNames []string
+			for _, org := range result.TopOrganizations {
+				orgNames = append(orgNames, fmt.Sprintf("%s(%d)", org.Name, org.Count))
+			}
+			logger.Info("Top organizations detected", 
+				"username", req.Username, 
+				"organizations", strings.Join(orgNames, ", "))
+		}
+
+		// Marshal to JSON for logging the full response
+		if jsonBytes, err := json.MarshalIndent(result, "", "  "); err == nil {
+			logger.Debug("Full JSON response", "username", req.Username, "response", string(jsonBytes))
+		}
+
 		writer.Header().Set("Content-Type", "application/json")
 
 		// SECURITY: Restrictive CORS - only allow same origin by default

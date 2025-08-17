@@ -22,15 +22,18 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 			var result geminiResponse
 			if err := json.Unmarshal(cachedData, &result); err != nil {
 				d.logger.Debug("Failed to unmarshal cached Gemini response", "error", err)
-			} else if result.Timezone != "" {
-				// Validate the cached result has actual data
+			} else if result.DetectedTimezone != "" || result.Timezone != "" {
+				// Validate the cached result has actual data (check both new and old format)
+				tz := result.DetectedTimezone
+				if tz == "" {
+					tz = result.Timezone
+				}
 				d.logger.Debug("Using cached Gemini response",
-					"timezone", result.Timezone,
-					"confidence", result.Confidence)
+					"timezone", tz,
+					"confidence", result.ConfidenceLevel)
 				return &result, nil
 			} else {
-				d.logger.Warn("Cached Gemini response is invalid/empty, fetching fresh",
-					"timezone", result.Timezone)
+				d.logger.Warn("Cached Gemini response is invalid/empty, fetching fresh")
 				// Continue to make a fresh API call
 			}
 		}
@@ -99,45 +102,51 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 	}
 
 	// Configure generation
-	maxTokens := int32(100)
+	maxTokens := int32(2000) // Increased to prevent truncation for pro models
 	if verbose {
-		maxTokens = 300
+		maxTokens = 2500
 	}
 
 	temperature := float32(0.1)
+	
+	// Pro models require thinking, others can have 0
+	// -1 enables dynamic thinking for pro models
+	var thinkingBudget int32
+	if strings.Contains(modelName, "pro") {
+		thinkingBudget = -1 // Dynamic thinking for pro models
+	} else {
+		thinkingBudget = 0 // Disable thinking for faster responses on other models
+	}
+	
 	genConfig := &genai.GenerateContentConfig{
 		Temperature:      &temperature,
 		MaxOutputTokens:  maxTokens,
 		ResponseMIMEType: "application/json",
+		ThinkingConfig: &genai.ThinkingConfig{
+			IncludeThoughts: false,
+			ThinkingBudget:  &thinkingBudget,
+		},
 		ResponseSchema: &genai.Schema{
 			Type: genai.TypeObject,
 			Properties: map[string]*genai.Schema{
-				"timezone": {
+				"detected_timezone": {
 					Type:        genai.TypeString,
-					Description: "IANA timezone identifier",
+					Description: "IANA timezone identifier like America/New_York",
 				},
-				"offset_utc": {
+				"detected_location": {
 					Type:        genai.TypeString,
-					Description: "UTC offset like UTC-5 or UTC+1",
+					Description: "City and region like 'New York, New York' or 'Denver, Colorado'",
 				},
-				"confidence": {
-					Type:        genai.TypeNumber,
-					Description: "Confidence score between 0 and 1",
-				},
-				"location_source": {
+				"confidence_level": {
 					Type:        genai.TypeString,
-					Description: "Source of location determination",
+					Description: "Confidence level: exactly one of 'high', 'medium', or 'low'",
 				},
-				"dst": {
+				"detection_reasoning": {
 					Type:        genai.TypeString,
-					Description: "Daylight saving time observation status",
-				},
-				"error": {
-					Type:        genai.TypeString,
-					Description: "Error message if timezone cannot be determined",
+					Description: "2-3 sentences explaining the detection logic and key evidence",
 				},
 			},
-			Required: []string{"timezone", "offset_utc", "confidence"},
+			Required: []string{"detected_timezone", "detected_location", "confidence_level", "detection_reasoning"},
 		},
 	}
 
@@ -178,20 +187,44 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 	}
 
 	// Extract text from response
-	if resp == nil || len(resp.Candidates) == 0 {
-		return nil, fmt.Errorf("no response from Gemini API")
+	if resp == nil {
+		d.logger.Error("Gemini API returned nil response")
+		return nil, fmt.Errorf("nil response from Gemini API")
+	}
+	
+	if len(resp.Candidates) == 0 {
+		d.logger.Error("Gemini API returned no candidates", 
+			"usage", resp.UsageMetadata,
+			"model", modelName)
+		return nil, fmt.Errorf("no candidates in Gemini API response")
 	}
 
 	candidate := resp.Candidates[0]
+	
+	// Log candidate details
+	d.logger.Debug("Gemini candidate details",
+		"finish_reason", candidate.FinishReason,
+		"safety_ratings", candidate.SafetyRatings,
+		"content_parts_count", len(candidate.Content.Parts))
+	
+	if candidate.Content == nil {
+		d.logger.Error("Gemini candidate has nil content")
+		return nil, fmt.Errorf("nil content in Gemini response")
+	}
+	
 	if len(candidate.Content.Parts) == 0 {
+		d.logger.Error("Gemini candidate has no content parts",
+			"finish_reason", candidate.FinishReason)
 		return nil, fmt.Errorf("empty response from Gemini API")
 	}
 
 	// Get the JSON response
 	jsonText := ""
-	for _, part := range candidate.Content.Parts {
+	for i, part := range candidate.Content.Parts {
+		d.logger.Debug("Examining part", "index", i, "has_text", part.Text != "")
 		if part.Text != "" {
 			jsonText = part.Text
+			d.logger.Debug("Found text in part", "index", i, "text_length", len(part.Text))
 			break
 		}
 	}
@@ -200,9 +233,12 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 		return nil, fmt.Errorf("no text in Gemini response")
 	}
 
-	if verbose {
-		d.logger.Debug("Gemini raw response", "response", jsonText)
+	// Always log raw response for debugging (truncate if too long)
+	responsePreview := jsonText
+	if len(responsePreview) > 500 {
+		responsePreview = responsePreview[:500] + "..."
 	}
+	d.logger.Debug("Gemini raw response", "response_preview", responsePreview, "full_length", len(jsonText))
 
 	// Parse the JSON response
 	var geminiResp geminiResponse
@@ -210,19 +246,30 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 		d.logger.Warn("failed to parse Gemini JSON response", "error", err, "raw", jsonText)
 		return nil, fmt.Errorf("failed to parse Gemini response: %w", err)
 	}
+	
+	// Always log the parsed response for debugging
+	d.logger.Debug("Parsed Gemini response", 
+		"timezone", geminiResp.DetectedTimezone,
+		"location", geminiResp.DetectedLocation,
+		"confidence", geminiResp.ConfidenceLevel,
+		"reasoning_length", len(geminiResp.DetectionReasoning))
 
 	// Clean up timezone if needed
-	geminiResp.Timezone = strings.TrimSpace(geminiResp.Timezone)
-	geminiResp.OffsetUTC = strings.TrimSpace(geminiResp.OffsetUTC)
+	geminiResp.DetectedTimezone = strings.TrimSpace(geminiResp.DetectedTimezone)
+	geminiResp.DetectedLocation = strings.TrimSpace(geminiResp.DetectedLocation)
 
 	// Cache the successful response if available
-	if d.cache != nil && geminiResp.Timezone != "" {
+	tz := geminiResp.DetectedTimezone
+	if tz == "" {
+		tz = geminiResp.Timezone // Fallback for old format
+	}
+	if d.cache != nil && tz != "" {
 		responseJSON, err := json.Marshal(geminiResp)
 		if err == nil {
 			if err := d.cache.SetAPICall(cacheKey, []byte(prompt), responseJSON); err != nil {
 				d.logger.Debug("Failed to cache Gemini response", "error", err)
 			} else {
-				d.logger.Debug("Cached Gemini response", "timezone", geminiResp.Timezone)
+				d.logger.Debug("Cached Gemini response", "timezone", tz)
 			}
 		}
 	}

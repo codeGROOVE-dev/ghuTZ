@@ -77,6 +77,7 @@ type Result struct {
 	Location                   *Location              `json:"location,omitempty"`
 	HourlyOrganizationActivity map[int]map[string]int `json:"hourly_organization_activity,omitempty"`
 	HourlyActivityUTC          map[int]int            `json:"hourly_activity_utc"`
+	HalfHourlyActivityUTC      map[float64]int        `json:"half_hourly_activity_utc,omitempty"`
 	Method                     string                 `json:"method"`
 	LocationName               string                 `json:"location_name,omitempty"`
 	GeminiSuggestedLocation    string                 `json:"gemini_suggested_location,omitempty"`
@@ -98,14 +99,14 @@ type Result struct {
 		Name  string `json:"name"`
 		Count int    `json:"count"`
 	} `json:"top_organizations"`
-	QuietHoursUTC []int `json:"quiet_hours_utc,omitempty"` // Organization name
-	// Activity count
+	QuietHoursUTC []int `json:"quiet_hours_utc,omitempty"` // Hourly resolution (legacy)
+	SleepBucketsUTC []float64 `json:"sleep_buckets_utc,omitempty"` // 30-minute resolution sleep periods
 
-	LunchHoursLocal struct {
+	LunchHoursUTC struct {
 		Start      float64 `json:"start"`
 		End        float64 `json:"end"`
 		Confidence float64 `json:"confidence"`
-	} `json:"lunch_hours_local,omitempty"`
+	} `json:"lunch_hours_utc,omitempty"`
 	PeakProductivity struct {
 		Start float64 `json:"start"`
 		End   float64 `json:"end"`
@@ -119,6 +120,7 @@ type Result struct {
 	TimezoneConfidence float64 `json:"timezone_confidence,omitempty"`
 	Confidence         float64 `json:"confidence"` // Lunch start time in UTC (supports 30-min increments)
 	// Work end time in UTC (supports 30-min increments)
+	TimezoneCandidates []TimezoneCandidate `json:"timezone_candidates,omitempty"` // Top timezone candidates
 }
 
 // Location represents geographic coordinates.
@@ -160,8 +162,10 @@ type Issue struct {
 
 // Comment represents a GitHub comment.
 type Comment struct {
-	CreatedAt time.Time `json:"created_at"`
-	Type      string    `json:"type"` // "issue" or "commit"
+	CreatedAt  time.Time `json:"created_at"`
+	Type       string    `json:"type"` // "issue" or "commit"
+	Body       string    `json:"body"`
+	Repository string    `json:"repository"` // owner/repo format
 }
 
 // Organization represents a GitHub organization.
@@ -173,25 +177,39 @@ type Organization struct {
 
 // Repository represents a GitHub repository with location indicators.
 type Repository struct {
-	Name            string `json:"name"`
-	FullName        string `json:"full_name"`
-	Description     string `json:"description"`
-	Language        string `json:"language"`
-	HTMLURL         string `json:"html_url"`
-	StargazersCount int    `json:"stargazers_count"`
-	IsPinned        bool   `json:"is_pinned"`
+	Name            string    `json:"name"`
+	FullName        string    `json:"full_name"`
+	Description     string    `json:"description"`
+	Language        string    `json:"language"`
+	HTMLURL         string    `json:"html_url"`
+	StargazersCount int       `json:"stargazers_count"`
+	IsPinned        bool      `json:"is_pinned"`
+	IsFork          bool      `json:"is_fork"`
+	CreatedAt       time.Time `json:"created_at"`
+	PushedAt        time.Time `json:"pushed_at"`
 }
 
 // ActivityData holds all activity data for timezone detection.
 type ActivityData struct {
-	PullRequests []PullRequest
-	Issues       []Issue
-	Comments     []Comment
+	PullRequests   []PullRequest
+	Issues         []Issue
+	Comments       []Comment
+	StarredRepos   []Repository
 }
 
 // TimezoneCandidate represents a timezone detection result with evidence.
 type TimezoneCandidate struct {
-	Timezone   string
-	Evidence   []string
-	Confidence float64
+	Timezone         string  `json:"timezone"`
+	Offset           float64 `json:"offset"` // UTC offset in hours (e.g., -5, 5.5, 5.75)
+	Confidence       float64 `json:"confidence"`
+	EveningActivity  int     `json:"evening_activity"`
+	LunchReasonable  bool    `json:"lunch_reasonable"`
+	WorkHoursNormal  bool    `json:"work_hours_normal"`
+	LunchLocalTime   float64 `json:"lunch_local_time"`   // Local time of detected lunch (e.g., 12.5 = 12:30pm)
+	WorkStartLocal   int     `json:"work_start_local"`   // Local hour when work starts
+	SleepMidLocal    float64 `json:"sleep_mid_local"`     // Local time of mid-sleep point
+	LunchDipStrength float64 `json:"lunch_dip_strength"`  // Percentage of activity drop during lunch
+	LunchStartUTC    float64 `json:"lunch_start_utc"`    // UTC time of lunch start (for reuse)
+	LunchEndUTC      float64 `json:"lunch_end_utc"`      // UTC time of lunch end (for reuse)
+	LunchConfidence  float64 `json:"lunch_confidence"`   // Confidence of lunch detection (for reuse)
 }

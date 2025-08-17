@@ -2,7 +2,31 @@ package ghutz
 
 import (
 	"fmt"
+	"strings"
+	"time"
 )
+
+// offsetFromNamedTimezone converts IANA timezone name to current UTC offset
+func offsetFromNamedTimezone(tzName string) int {
+	// Handle UTC offset strings like "UTC-4" or "UTC+8"
+	if strings.HasPrefix(tzName, "UTC") {
+		var offset int
+		fmt.Sscanf(tzName, "UTC%d", &offset)
+		return offset
+	}
+	
+	// Load the IANA timezone location
+	loc, err := time.LoadLocation(tzName)
+	if err != nil {
+		// Default to 0 if we can't parse the timezone
+		return 0
+	}
+	
+	// Get current offset for this timezone
+	now := time.Now()
+	_, offset := now.In(loc).Zone()
+	return offset / 3600 // Convert seconds to hours
+}
 
 // timezoneFromOffset converts a UTC offset to a timezone string.
 func timezoneFromOffset(offsetHours int) string {
@@ -24,18 +48,18 @@ func generateAlternativeTimezones(primaryTz string, workStart float64) []Timezon
 		// Eastern US alternatives
 		candidates = append(candidates, TimezoneCandidate{
 			Timezone:   "America/Toronto",
-			Evidence:   []string{"Similar activity pattern to Eastern US", "Adjacent timezone"},
+			Offset:     -5, // Same as Eastern
 			Confidence: 0.7,
 		})
 		candidates = append(candidates, TimezoneCandidate{
 			Timezone:   "America/Montreal",
-			Evidence:   []string{"Similar activity pattern to Eastern US", "Same timezone"},
+			Offset:     -5, // Same as Eastern
 			Confidence: 0.7,
 		})
 		if workStart > 10 {
 			candidates = append(candidates, TimezoneCandidate{
 				Timezone:   "America/Chicago",
-				Evidence:   []string{"Later work start time suggests Central timezone"},
+				Offset:     -6, // Central
 				Confidence: 0.6,
 			})
 		}
@@ -44,12 +68,12 @@ func generateAlternativeTimezones(primaryTz string, workStart float64) []Timezon
 		// Pacific US alternatives
 		candidates = append(candidates, TimezoneCandidate{
 			Timezone:   "America/Vancouver",
-			Evidence:   []string{"Similar activity pattern to Pacific US", "Same timezone"},
+			Offset:     -8, // Same as Pacific
 			Confidence: 0.7,
 		})
 		candidates = append(candidates, TimezoneCandidate{
 			Timezone:   "America/Tijuana",
-			Evidence:   []string{"Similar activity pattern to Pacific US", "Adjacent timezone"},
+			Offset:     -8, // Same as Pacific
 			Confidence: 0.6,
 		})
 
@@ -57,12 +81,12 @@ func generateAlternativeTimezones(primaryTz string, workStart float64) []Timezon
 		// UK alternatives
 		candidates = append(candidates, TimezoneCandidate{
 			Timezone:   "Europe/Dublin",
-			Evidence:   []string{"Similar activity pattern to UK", "Same timezone (most of year)"},
+			Offset:     0, // Same as UK
 			Confidence: 0.7,
 		})
 		candidates = append(candidates, TimezoneCandidate{
 			Timezone:   "Europe/Lisbon",
-			Evidence:   []string{"Similar activity pattern to UK", "Same timezone (most of year)"},
+			Offset:     0, // Same as UK
 			Confidence: 0.6,
 		})
 
@@ -70,17 +94,17 @@ func generateAlternativeTimezones(primaryTz string, workStart float64) []Timezon
 		// Central European alternatives
 		candidates = append(candidates, TimezoneCandidate{
 			Timezone:   "Europe/Brussels",
-			Evidence:   []string{"Similar activity pattern to Central Europe", "Same timezone"},
+			Offset:     1, // CET
 			Confidence: 0.7,
 		})
 		candidates = append(candidates, TimezoneCandidate{
 			Timezone:   "Europe/Copenhagen",
-			Evidence:   []string{"Similar activity pattern to Central Europe", "Same timezone"},
+			Offset:     1, // CET
 			Confidence: 0.7,
 		})
 		candidates = append(candidates, TimezoneCandidate{
 			Timezone:   "Europe/Stockholm",
-			Evidence:   []string{"Similar activity pattern to Central Europe", "Same timezone"},
+			Offset:     1, // CET
 			Confidence: 0.7,
 		})
 
@@ -88,7 +112,7 @@ func generateAlternativeTimezones(primaryTz string, workStart float64) []Timezon
 		// Japan alternatives
 		candidates = append(candidates, TimezoneCandidate{
 			Timezone:   "Asia/Seoul",
-			Evidence:   []string{"Similar activity pattern to Japan", "Same timezone"},
+			Offset:     9, // Same as Japan
 			Confidence: 0.6,
 		})
 
@@ -96,12 +120,12 @@ func generateAlternativeTimezones(primaryTz string, workStart float64) []Timezon
 		// Australian alternatives
 		candidates = append(candidates, TimezoneCandidate{
 			Timezone:   "Australia/Brisbane",
-			Evidence:   []string{"Similar activity pattern to Eastern Australia", "Adjacent timezone"},
+			Offset:     10, // AEST
 			Confidence: 0.6,
 		})
 		candidates = append(candidates, TimezoneCandidate{
 			Timezone:   "Pacific/Auckland",
-			Evidence:   []string{"Similar activity pattern", "2-hour offset from Eastern Australia"},
+			Offset:     12, // NZST
 			Confidence: 0.5,
 		})
 	}
@@ -111,13 +135,13 @@ func generateAlternativeTimezones(primaryTz string, workStart float64) []Timezon
 		if workStart >= 6 && workStart <= 8 {
 			candidates = append(candidates, TimezoneCandidate{
 				Timezone:   "Early riser timezone",
-				Evidence:   []string{fmt.Sprintf("Work starts at %.0f:00 local time", workStart)},
+				Offset:     0, // Unknown
 				Confidence: 0.3,
 			})
 		} else if workStart >= 10 && workStart <= 12 {
 			candidates = append(candidates, TimezoneCandidate{
 				Timezone:   "Late starter timezone",
-				Evidence:   []string{fmt.Sprintf("Work starts at %.0f:00 local time", workStart)},
+				Offset:     0, // Unknown
 				Confidence: 0.3,
 			})
 		}

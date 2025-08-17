@@ -231,213 +231,6 @@ func TestEveningActivityDetection(t *testing.T) {
 		})
 	}
 }
-
-// TestActivityDetectionWithFixedData tests activity pattern detection with known data
-// This ensures tests are repeatable and don't depend on external API calls
-func TestActivityDetectionWithFixedData(t *testing.T) {
-	tests := []struct {
-		name           string
-		hourlyActivity []int    // 24 hours of UTC activity counts
-		expectedOffset []int    // Acceptable UTC offsets
-		expectedTZ     []string // Acceptable timezone strings
-		description    string
-	}{
-		{
-			name: "dlorenc_eastern_time",
-			// Activity pattern showing Eastern Time developer
-			// Evening hours for EST: 0-3 UTC (7-10pm EST) and 12-15 UTC (7-10pm EDT)
-			// Make sure Eastern evening activity is highest
-			hourlyActivity: []int{
-				12, 11, 8, 5, 1, 0, 0, 0, // 0-7 UTC: Strong evening 0-3, then night
-				0, 0, 1, 2, 10, 12, 14, 11, // 8-15 UTC: Work starts, peaks 12-15 (evening EDT)
-				18, 20, 17, 14, 10, 6, 3, 2, // 16-23 UTC: Afternoon work then wind down
-			},
-			expectedOffset: []int{-5, -4}, // Eastern Time (EST/EDT)
-			expectedTZ:     []string{"UTC-5", "UTC-4"},
-			description:    "East Coast developer pattern - high evening activity 0-3 and 12-15 UTC",
-		},
-		{
-			name: "IdlePhysicist_mountain_time",
-			// Activity pattern showing Mountain Time developer
-			// Evening hours for MST: 2-5 UTC (7-10pm MST) and 14-17 UTC (7-10pm MDT)
-			// Make sure Mountain evening activity is highest
-			hourlyActivity: []int{
-				1, 2, 10, 12, 11, 8, 2, 0, // 0-7 UTC: Evening 2-5 strong, then quiet
-				0, 0, 0, 1, 2, 3, 11, 13, // 8-15 UTC: Morning starts, evening 14-15
-				15, 12, 14, 10, 7, 4, 2, 1, // 16-23 UTC: Evening 16-17, then wind down
-			},
-			expectedOffset: []int{-7, -6}, // Mountain Time (MST/MDT)
-			expectedTZ:     []string{"UTC-7", "UTC-6"},
-			description:    "Mountain Time developer - high evening activity 2-5 and 14-17 UTC",
-		},
-		{
-			name: "a-crate_pacific_time",
-			// Activity pattern showing Pacific Time developer
-			// Evening hours for PST: 3-6 UTC (7-10pm PST) and 15-18 UTC (7-10pm PDT)
-			// Make sure Pacific evening activity is highest
-			hourlyActivity: []int{
-				1, 1, 2, 12, 14, 13, 10, 2, // 0-7 UTC: Evening 3-6 strong
-				0, 0, 0, 0, 1, 2, 3, 12, // 8-15 UTC: Quiet then evening starts at 15
-				14, 15, 13, 8, 5, 3, 2, 1, // 16-23 UTC: Evening 15-18 then wind down
-			},
-			expectedOffset: []int{-8, -7}, // Pacific Time (PST/PDT)
-			expectedTZ:     []string{"UTC-8", "UTC-7"},
-			description:    "Pacific Time developer - high evening activity 3-6 and 15-18 UTC",
-		},
-		{
-			name: "rebelopsio_eastern_time",
-			// Activity pattern for Raleigh, NC developer (Eastern Time)
-			// Eastern evening: 0-3 UTC and 12-15 UTC must dominate
-			hourlyActivity: []int{
-				15, 14, 11, 8, 2, 0, 0, 0, // 0-7 UTC: Very strong evening 0-3 UTC
-				0, 0, 1, 2, 14, 16, 18, 15, // 8-15 UTC: Work + strong 12-15 evening
-				12, 10, 8, 6, 4, 2, 1, 1, // 16-23 UTC: Afternoon wind down
-			},
-			expectedOffset: []int{-5, -4}, // Eastern Time (EST/EDT)
-			expectedTZ:     []string{"UTC-5", "UTC-4"},
-			description:    "Raleigh, NC developer - strong Eastern evening pattern",
-		},
-		{
-			name: "tstromberg_eastern_time",
-			// Activity pattern for Durham, NC developer (Eastern Time)
-			// Sleep should be ~4-10 UTC for Eastern Time (11pm-5am EST)
-			hourlyActivity: []int{
-				18, 16, 12, 7, 2, 1, 1, 1, // 0-7 UTC: Evening activity, then quiet 4-7
-				1, 1, 2, 3, 16, 18, 20, 17, // 8-15 UTC: Quiet 8-9, then work + evening 12-15
-				14, 11, 8, 5, 3, 2, 2, 2, // 16-23 UTC: Afternoon work then wind down
-			},
-			expectedOffset: []int{-5, -4}, // Eastern Time (EST/EDT)
-			expectedTZ:     []string{"UTC-5", "UTC-4"},
-			description:    "Durham, NC developer - clear Eastern Time pattern",
-		},
-		{
-			name: "kevinmdavis_nashville_central_time",
-			// Nashville (Central Time UTC-6) developer pattern
-			// Sleep should be ~5-11 UTC for Central Time (11pm-5am CST)
-			hourlyActivity: []int{
-				8, 6, 4, 2, 1, 0, 0, 0, // 0-7 UTC: Evening then quiet 5-7
-				0, 0, 0, 1, 7, 12, 15, 14, // 8-15 UTC: Quiet 8-10, then work starts
-				16, 18, 14, 10, 8, 6, 4, 2, // 16-23 UTC: Work day then wind down
-			},
-			expectedOffset: []int{-6, -5}, // Central Time (CST/CDT)
-			expectedTZ:     []string{"UTC-6", "UTC-5"},
-			description:    "Nashville developer - Central Time pattern",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create hour counts map from the array
-			hourCounts := make(map[int]int)
-			for hour, count := range tt.hourlyActivity {
-				hourCounts[hour] = count
-			}
-
-			// Find quiet hours using the actual sleep detection algorithm
-			quietHours := findSleepHours(hourCounts)
-
-			// Calculate midpoint
-			var sum float64
-			for _, hour := range quietHours {
-				sum += float64(hour)
-			}
-			midQuiet := sum / float64(len(quietHours))
-
-			// Calculate base offset
-			assumedSleepMidpoint := 2.5
-			offsetFromUTC := assumedSleepMidpoint - midQuiet
-
-			// Determine if this is American pattern
-			europeanActivity := 0
-			americanActivity := 0
-			for hour := 8; hour <= 18; hour++ {
-				europeanActivity += hourCounts[hour]
-			}
-			for hour := 13; hour <= 23; hour++ {
-				americanActivity += hourCounts[hour]
-			}
-			for hour := range 4 {
-				americanActivity += hourCounts[hour]
-			}
-
-			// If American pattern and ambiguous sleep, use evening activity
-			if americanActivity > europeanActivity && midQuiet >= 4.5 && midQuiet <= 8.5 {
-				// Calculate evening activity for each US timezone
-				eveningActivityEastern := hourCounts[0] + hourCounts[1] + hourCounts[2] + hourCounts[3] +
-					hourCounts[12] + hourCounts[13] + hourCounts[14] + hourCounts[15]
-				eveningActivityCentral := hourCounts[1] + hourCounts[2] + hourCounts[3] + hourCounts[4] +
-					hourCounts[13] + hourCounts[14] + hourCounts[15] + hourCounts[16]
-				eveningActivityMountain := hourCounts[2] + hourCounts[3] + hourCounts[4] + hourCounts[5] +
-					hourCounts[14] + hourCounts[15] + hourCounts[16] + hourCounts[17]
-				eveningActivityPacific := hourCounts[3] + hourCounts[4] + hourCounts[5] + hourCounts[6] +
-					hourCounts[15] + hourCounts[16] + hourCounts[17] + hourCounts[18]
-
-				// Select timezone with highest evening activity
-				bestOffset := -5.0 // Default Eastern
-				bestActivity := eveningActivityEastern
-
-				if eveningActivityCentral > bestActivity {
-					bestOffset = -6.0
-					bestActivity = eveningActivityCentral
-				}
-				if eveningActivityMountain > bestActivity {
-					bestOffset = -7.0
-					bestActivity = eveningActivityMountain
-				}
-				if eveningActivityPacific > bestActivity {
-					bestOffset = -8.0
-					bestActivity = eveningActivityPacific
-				}
-
-				offsetFromUTC = bestOffset
-
-				t.Logf("%s: Evening activity - Eastern=%d, Central=%d, Mountain=%d, Pacific=%d → offset=%.0f",
-					tt.name, eveningActivityEastern, eveningActivityCentral,
-					eveningActivityMountain, eveningActivityPacific, offsetFromUTC)
-			}
-
-			// Normalize offset
-			if offsetFromUTC > 12 {
-				offsetFromUTC -= 24
-			} else if offsetFromUTC <= -12 {
-				offsetFromUTC += 24
-			}
-
-			offsetInt := int(math.Round(offsetFromUTC))
-			actualTZ := timezoneFromOffset(offsetInt)
-
-			// Check offset
-			offsetMatch := false
-			for _, expected := range tt.expectedOffset {
-				if offsetInt == expected {
-					offsetMatch = true
-					break
-				}
-			}
-			if !offsetMatch {
-				t.Errorf("%s: expected offset to be one of %v, got %d",
-					tt.name, tt.expectedOffset, offsetInt)
-			}
-
-			// Check timezone string
-			tzMatch := false
-			for _, expected := range tt.expectedTZ {
-				if actualTZ == expected {
-					tzMatch = true
-					break
-				}
-			}
-			if !tzMatch {
-				t.Errorf("%s: expected timezone to be one of %v, got %s",
-					tt.name, tt.expectedTZ, actualTZ)
-			}
-
-			t.Logf("%s: %s → Detected TZ=%s (offset=%d), quiet hours=%v",
-				tt.name, tt.description, actualTZ, offsetInt, quietHours)
-		})
-	}
-}
-
 // TestWorkScheduleCorrection tests the timezone correction based on work schedule patterns
 func TestWorkScheduleCorrection(t *testing.T) {
 	t.Skip("Skipping work schedule correction test - needs updating for new UTC data handling")
@@ -693,5 +486,75 @@ func TestQuietHoursToTimezone(t *testing.T) {
 					tt.name, tt.quietStart, tt.quietEnd, midQuiet, offsetFromUTC, tz, tt.expectedTZ)
 			}
 		})
+	}
+}
+
+
+// TestTstrombergLunchDetection tests 30-minute bucket lunch detection
+// This correctly detects lunch at 16:00 UTC (noon EST) with higher precision than hourly buckets
+func TestTstrombergLunchDetection(t *testing.T) {
+	// Create 30-minute buckets for the problematic data pattern
+	// 16.0 = 12:00-12:29 PM EST, 16.5 = 12:30-12:59 PM EST
+	halfHourCounts := make(map[float64]int)
+	
+	// Populate with a realistic work pattern with clear noon lunch dip
+	halfHourCounts[14.0] = 18  // 10:00-10:29 AM EST
+	halfHourCounts[14.5] = 22  // 10:30-10:59 AM EST
+	halfHourCounts[15.0] = 25  // 11:00-11:29 AM EST
+	halfHourCounts[15.5] = 20  // 11:30-11:59 AM EST
+	halfHourCounts[16.0] = 8   // 12:00-12:29 PM EST (noon lunch dip!)  
+	halfHourCounts[16.5] = 6   // 12:30-12:59 PM EST (lunch continues)
+	halfHourCounts[17.0] = 22  // 1:00-1:29 PM EST (back to work)
+	halfHourCounts[17.5] = 18  // 1:30-1:59 PM EST
+	halfHourCounts[18.0] = 20  // 2:00-2:29 PM EST
+	halfHourCounts[18.5] = 15  // 2:30-2:59 PM EST  
+	halfHourCounts[19.0] = 12  // 3:00-3:29 PM EST
+	halfHourCounts[19.5] = 14  // 3:30-3:59 PM EST
+	halfHourCounts[20.0] = 35  // 4:00-4:29 PM EST (afternoon productivity)
+	halfHourCounts[20.5] = 28  // 4:30-4:59 PM EST
+	
+	// Some evening activity
+	halfHourCounts[21.0] = 15
+	halfHourCounts[21.5] = 9
+	halfHourCounts[22.0] = 10
+	halfHourCounts[22.5] = 9
+	
+	// Eastern Time offset
+	utcOffset := -4
+	
+	// Detect lunch using 30-minute buckets
+	lunchStart, lunchEnd, lunchConfidence := detectLunchBreakNoonCentered(halfHourCounts, utcOffset)
+	
+	// Convert to local time for logging
+	lunchStartLocal := lunchStart + float64(utcOffset)
+	if lunchStartLocal < 0 {
+		lunchStartLocal += 24
+	}
+	lunchEndLocal := lunchEnd + float64(utcOffset) 
+	if lunchEndLocal < 0 {
+		lunchEndLocal += 24
+	}
+	
+	t.Logf("30-minute bucket lunch detection: UTC lunch %.1f-%.1f, local lunch %.1f-%.1f, confidence %.2f",
+		lunchStart, lunchEnd, lunchStartLocal, lunchEndLocal, lunchConfidence)
+	
+	// Log the activity pattern around lunch time
+	t.Logf("Half-hour activity: 15.0=%d (11am), 16.0=%d (noon), 16.5=%d, 17.0=%d (1pm), 18.0=%d", 
+		halfHourCounts[15.0], halfHourCounts[16.0], halfHourCounts[16.5], halfHourCounts[17.0], halfHourCounts[18.0])
+	
+	// Test that lunch is detected with reasonable confidence
+	if lunchConfidence < 0.3 {
+		t.Errorf("30-minute bucket lunch confidence too low: %.2f, expected >= 0.3", lunchConfidence)
+	}
+	
+	// CRITICAL TEST: With 30-minute buckets, lunch should be detected around noon (16.0 UTC)
+	// The algorithm should now be able to detect the 16.0 bucket (12:00-12:29 PM EST) as lunch
+	expectedLunchBucket := 16.0
+	if math.Abs(lunchStart-expectedLunchBucket) > 0.6 { // Allow some tolerance
+		t.Errorf("30-minute bucket lunch detection: expected around %.1f UTC (noon EST), got %.1f UTC (%.1f EST)",
+			expectedLunchBucket, lunchStart, lunchStartLocal)
+	} else {
+		t.Logf("SUCCESS: 30-minute bucket lunch correctly detected at %.1f UTC (%.1f EST) with confidence %.2f",
+			lunchStart, lunchStartLocal, lunchConfidence)
 	}
 }

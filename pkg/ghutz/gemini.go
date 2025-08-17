@@ -3,22 +3,31 @@ package ghutz
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 type geminiResponse struct {
-	Timezone       string
-	OffsetUTC      string
-	Confidence     float64
-	LocationSource string
-	DST            string
-	Error          string
+	DetectedTimezone   string `json:"detected_timezone"`
+	DetectedLocation   string `json:"detected_location"`
+	ConfidenceLevel    string `json:"confidence_level"` // "high", "medium", or "low"
+	DetectionReasoning string `json:"detection_reasoning"`
+	
+	// Fallback fields for old format (deprecated)
+	Timezone       string      `json:"timezone,omitempty"`
+	Location       string      `json:"location,omitempty"`
+	LocationSource string      `json:"location_source,omitempty"`
+	Confidence     interface{} `json:"confidence,omitempty"`
+	Reasoning      string      `json:"reasoning,omitempty"`
 }
 
 // queryUnifiedGeminiForTimezone queries Gemini AI for timezone detection.
+// Returns: timezone, reasoning, confidence, location, unused, error
 func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]interface{}, verbose bool) (string, string, float64, string, string, error) {
 	// Check if we have activity data for confidence scoring later
 	hasActivityData := false
@@ -33,22 +42,87 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	promptTemplate := unifiedGeminiPrompt()
 	prompt := fmt.Sprintf(promptTemplate, evidence)
 
-	if verbose {
-		d.logger.Debug("querying Gemini with comprehensive context", "prompt_length", len(prompt))
+	// Check if DEBUG logging is enabled (which means verbose mode)
+	if d.logger.Enabled(ctx, slog.LevelDebug) {
+		// Output the Gemini prompt with beautiful formatting
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "🤖 Gemini API Request\n")
+		fmt.Fprintf(os.Stderr, "──────────────────────────────────────────────────\n")
+		fmt.Fprintf(os.Stderr, "📊 Model:         %s\n", d.geminiModel)
+		fmt.Fprintf(os.Stderr, "📝 Prompt Length: %d characters\n", len(prompt))
+		fmt.Fprintf(os.Stderr, "──────────────────────────────────────────────────\n")
+		fmt.Fprintf(os.Stderr, "📋 Prompt:\n%s\n", prompt)
+		fmt.Fprintf(os.Stderr, "──────────────────────────────────────────────────\n\n")
 	}
 
-	resp, err := d.callGeminiWithSDK(ctx, prompt, verbose)
+	// Pass verbose if DEBUG logging is enabled
+	isVerbose := d.logger.Enabled(ctx, slog.LevelDebug)
+	resp, err := d.callGeminiWithSDK(ctx, prompt, isVerbose)
 	if err != nil {
 		return "", "", 0, "", "", fmt.Errorf("Gemini API call failed: %w", err)
 	}
 
-	// Check for API error
-	if resp.Error != "" {
-		return "", "", 0, "", "", fmt.Errorf("Gemini returned error: %s", resp.Error)
+	// Handle both new and old response formats
+	timezone := resp.DetectedTimezone
+	if timezone == "" {
+		timezone = resp.Timezone // Fallback to old field
 	}
-
-	// Calculate confidence based on response and available data
-	confidence := resp.Confidence
+	
+	location := resp.DetectedLocation
+	if location == "" {
+		location = resp.LocationSource // Fallback to old field
+		if location == "" {
+			location = resp.Location // Another fallback
+		}
+	}
+	
+	reasoning := resp.DetectionReasoning
+	if reasoning == "" {
+		reasoning = resp.Reasoning // Fallback to old field
+	}
+	
+	// Parse confidence from string or number
+	confidence := 0.5
+	if resp.ConfidenceLevel != "" {
+		switch strings.ToLower(resp.ConfidenceLevel) {
+		case "high":
+			confidence = 0.85
+		case "medium":
+			confidence = 0.6
+		case "low":
+			confidence = 0.3
+		default:
+			confidence = 0.5
+		}
+	} else if resp.Confidence != nil {
+		// Handle old format with numeric confidence
+		switch v := resp.Confidence.(type) {
+		case float64:
+			confidence = v
+		case string:
+			switch strings.ToLower(v) {
+			case "high":
+				confidence = 0.85
+			case "medium":
+				confidence = 0.6
+			case "low":
+				confidence = 0.3
+			}
+		}
+	}
+	
+	// Check if DEBUG logging is enabled (which means verbose mode)
+	if d.logger.Enabled(ctx, slog.LevelDebug) {
+		// Output the Gemini response with beautiful formatting
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "✨ Gemini API Response\n")
+		fmt.Fprintf(os.Stderr, "──────────────────────────────────────────────────\n")
+		fmt.Fprintf(os.Stderr, "🕐 Timezone:      %s\n", timezone)
+		fmt.Fprintf(os.Stderr, "📍 Location:      %s\n", location)
+		fmt.Fprintf(os.Stderr, "🎯 Confidence:    %s (%.0f%%)\n", resp.ConfidenceLevel, confidence*100)
+		fmt.Fprintf(os.Stderr, "💭 Reasoning:     %s\n", reasoning)
+		fmt.Fprintf(os.Stderr, "──────────────────────────────────────────────────\n\n")
+	}
 
 	// Adjust confidence based on data availability
 	if !hasActivityData && confidence > 0.7 {
@@ -61,7 +135,8 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 		confidence = math.Min(0.9, confidence*1.1)
 	}
 
-	return resp.Timezone, resp.OffsetUTC, confidence, resp.LocationSource, resp.DST, nil
+	// Return timezone, reasoning, confidence, location, empty DST
+	return timezone, reasoning, confidence, location, "", nil
 }
 
 
@@ -78,6 +153,14 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 		d.logger.Debug("could not fetch user for Gemini analysis", "username", username)
 		return nil
 	}
+	
+	// Debug log user data
+	d.logger.Debug("fetched user for Gemini", 
+		"username", username,
+		"name", user.Name,
+		"location", user.Location,
+		"company", user.Company,
+		"bio", user.Bio)
 
 	// Prepare comprehensive context for Gemini
 	contextData := make(map[string]interface{})
@@ -97,28 +180,61 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 			contextData["hour_counts"] = activityResult.HourlyActivityUTC
 		}
 		
-		// Add active hours if available
-		if activityResult.ActiveHoursLocal.Start > 0 || activityResult.ActiveHoursLocal.End > 0 {
-			contextData["work_hours"] = []float64{
-				activityResult.ActiveHoursLocal.Start,
-				activityResult.ActiveHoursLocal.End,
+		// Add timezone candidates for unified analysis
+		if activityResult.TimezoneCandidates != nil && len(activityResult.TimezoneCandidates) > 0 {
+			contextData["timezone_candidates"] = activityResult.TimezoneCandidates
+		}
+		
+		// Add activity date range information
+		if activityResult.ActivityDateRange.TotalDays > 0 {
+			// Calculate total events from hourly activity
+			totalEvents := 0
+			if activityResult.HourlyActivityUTC != nil {
+				for _, count := range activityResult.HourlyActivityUTC {
+					totalEvents += count
+				}
+			}
+			
+			contextData["activity_date_range"] = map[string]interface{}{
+				"oldest":      activityResult.ActivityDateRange.OldestActivity,
+				"newest":      activityResult.ActivityDateRange.NewestActivity,
+				"total_days":  activityResult.ActivityDateRange.TotalDays,
+				"total_events": totalEvents,
 			}
 		}
 		
-		// Add lunch break if detected
-		if activityResult.LunchHoursLocal.Confidence > 0 {
-			contextData["lunch_break"] = []float64{
-				activityResult.LunchHoursLocal.Start,
-				activityResult.LunchHoursLocal.End,
-			}
-			contextData["lunch_confidence"] = activityResult.LunchHoursLocal.Confidence
-		}
-		
-		// Add peak productivity if available
-		if activityResult.PeakProductivity.Count > 0 {
-			contextData["peak_productivity"] = []float64{
-				activityResult.PeakProductivity.Start,
-				activityResult.PeakProductivity.End,
+		// Add activity timezone result
+		if activityResult.ActivityTimezone != "" {
+			contextData["activity_timezone"] = activityResult.ActivityTimezone
+			
+			// Extract offset from activity timezone (e.g., "UTC-5" -> -5)
+			if strings.HasPrefix(activityResult.ActivityTimezone, "UTC") {
+				offsetStr := strings.TrimPrefix(activityResult.ActivityTimezone, "UTC")
+				if offset, err := strconv.Atoi(offsetStr); err == nil {
+					contextData["utc_offset"] = offset
+					
+					// Hours are already in UTC (despite the field names saying "Local")
+					if activityResult.ActiveHoursLocal.Start > 0 || activityResult.ActiveHoursLocal.End > 0 {
+						startUTC := int(activityResult.ActiveHoursLocal.Start)
+						endUTC := int(activityResult.ActiveHoursLocal.End)
+						contextData["work_hours_utc"] = []int{startUTC, endUTC}
+					}
+					
+					// Lunch break is already in UTC
+					if activityResult.LunchHoursUTC.Confidence > 0 {
+						lunchStartUTC := int(activityResult.LunchHoursUTC.Start)
+						lunchEndUTC := int(activityResult.LunchHoursUTC.End)
+						contextData["lunch_break_utc"] = []int{lunchStartUTC, lunchEndUTC}
+						contextData["lunch_confidence"] = activityResult.LunchHoursUTC.Confidence
+					}
+					
+					// Peak productivity is already in UTC
+					if activityResult.PeakProductivity.Count > 0 {
+						peakStartUTC := int(activityResult.PeakProductivity.Start)
+						peakEndUTC := int(activityResult.PeakProductivity.End)
+						contextData["peak_productivity_utc"] = []int{peakStartUTC, peakEndUTC}
+					}
+				}
 			}
 		}
 	}
@@ -127,11 +243,13 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	wg := sync.WaitGroup{}
 	var organizations []Organization
 	var repos []Repository
+	var starredRepos []Repository
 	var pullRequests []PullRequest
 	var issues []Issue
+	var comments []Comment
 
 	// Fetch organizations
-	wg.Add(1)
+	wg.Add(6) // Total goroutines: orgs, repos, PRs, issues, comments, starred
 	go func() {
 		defer wg.Done()
 		orgs, err := d.fetchOrganizations(ctx, username)
@@ -141,11 +259,16 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	}()
 
 	// Fetch repositories
-	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		pinnedRepos, _ := d.fetchPinnedRepositories(ctx, username)
-		popularRepos, _ := d.fetchPopularRepositories(ctx, username)
+		pinnedRepos, err := d.fetchPinnedRepositories(ctx, username)
+		if err != nil {
+			d.logger.Debug("failed to fetch pinned repositories", "error", err)
+		}
+		popularRepos, err := d.fetchPopularRepositories(ctx, username)
+		if err != nil {
+			d.logger.Debug("failed to fetch popular repositories", "error", err)
+		}
 
 		// Combine and deduplicate
 		repoMap := make(map[string]Repository)
@@ -164,7 +287,6 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	}()
 
 	// Fetch recent PRs
-	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		prs, err := d.fetchPullRequests(ctx, username)
@@ -183,7 +305,6 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	}()
 
 	// Fetch recent issues
-	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		iss, err := d.fetchIssues(ctx, username)
@@ -201,6 +322,24 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 		}
 	}()
 
+	// Fetch recent comments
+	go func() {
+		defer wg.Done()
+		cmts, err := d.fetchUserComments(ctx, username)
+		if err == nil {
+			comments = cmts
+		}
+	}()
+
+	// Fetch starred repositories
+	go func() {
+		defer wg.Done()
+		_, starred, err := d.fetchStarredRepositories(ctx, username)
+		if err == nil {
+			starredRepos = starred
+		}
+	}()
+
 	wg.Wait()
 
 	// Add to context
@@ -210,12 +349,32 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	if len(repos) > 0 {
 		contextData["repositories"] = repos
 	}
+	if len(starredRepos) > 0 {
+		contextData["starred_repositories"] = starredRepos
+	}
 	if len(pullRequests) > 0 {
 		contextData["pull_requests"] = pullRequests
 	}
 	if len(issues) > 0 {
 		contextData["issues"] = issues
 	}
+	if len(comments) > 0 {
+		contextData["comments"] = comments
+	}
+	
+	// Collect commit message samples for Gemini to analyze
+	commitSamples := collectCommitMessageSamples(events, 15)
+	if len(commitSamples) > 0 {
+		contextData["commit_message_samples"] = commitSamples
+	}
+	
+	// Collect text samples from PRs/issues for Gemini to analyze  
+	textSamples := collectTextSamples(pullRequests, issues, comments, 10)
+	if len(textSamples) > 0 {
+		contextData["text_samples"] = textSamples
+	}
+	
+	// Skip collaborator analysis to reduce API calls
 
 	// Check for location field and try to geocode
 	var detectedLocation *Location
@@ -245,17 +404,67 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 		if len(tlds) > 0 {
 			contextData["country_tlds"] = tlds
 		}
-	}
-
-	// Name-based hints
-	if user.Name != "" {
-		if isPolishName(user.Name) {
-			contextData["name_hint"] = "Polish name detected - likely in Poland (Europe/Warsaw)"
+		
+		// Follow Mastodon links to get comprehensive profile data
+		for _, socialURL := range socialURLs {
+			// Check if URL is a Mastodon instance
+			// More authoritative: check if the bio contains [MASTODON] provider tag
+			// or if URL contains common Mastodon patterns
+			isMastodon := false
+			
+			// First check if the bio indicates this is a Mastodon link (from GraphQL provider field)
+			if strings.Contains(user.Bio, "[MASTODON] " + socialURL) {
+				isMastodon = true
+			} else if strings.Contains(socialURL, "/@") {
+				// Fallback: Mastodon URLs typically have /@username pattern
+				// This is more authoritative than hardcoding specific domains
+				isMastodon = true
+			}
+			
+			if isMastodon {
+				d.logger.Debug("following Mastodon link", "url", socialURL)
+				// Try API first, falls back to HTML scraping if needed
+				mastodonData := fetchMastodonProfileViaAPI(ctx, socialURL, d.logger)
+				if mastodonData != nil {
+					// Store all Mastodon profile data
+					contextData["mastodon_profile"] = mastodonData
+					
+					// Process all discovered websites
+					for _, website := range mastodonData.Websites {
+						// If we didn't already have a blog URL, use the first website
+						if user.Blog == "" {
+							user.Blog = website
+						}
+						
+						// Fetch content from each Mastodon-discovered website
+						websiteContent := d.fetchWebsiteContent(ctx, website)
+						if websiteContent != "" {
+							// Store website content with the URL as key
+							if websiteContents, ok := contextData["mastodon_website_contents"].(map[string]string); ok {
+								websiteContents[website] = websiteContent
+							} else {
+								contextData["mastodon_website_contents"] = map[string]string{
+									website: websiteContent,
+								}
+							}
+							d.logger.Debug("fetched Mastodon website content", "website", website, "content_length", len(websiteContent))
+						}
+					}
+					
+					d.logger.Debug("extracted comprehensive Mastodon data", 
+						"mastodon", socialURL, 
+						"websites", len(mastodonData.Websites),
+						"fields", len(mastodonData.ProfileFields),
+						"hashtags", len(mastodonData.Hashtags))
+				}
+			}
 		}
 	}
 
+	// Let Gemini figure out name patterns on its own from the provided name
+
 	// Query Gemini with all context
-	timezone, offsetStr, confidence, locationSource, dstInfo, err := d.queryUnifiedGeminiForTimezone(ctx, contextData, false)
+	timezone, reasoning, confidence, location, _, err := d.queryUnifiedGeminiForTimezone(ctx, contextData, false)
 	if err != nil {
 		d.logger.Debug("Gemini analysis failed", "error", err)
 		return nil
@@ -271,35 +480,40 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 		Username:                username,
 		Timezone:                timezone,
 		TimezoneConfidence:      confidence,
+		Confidence:              confidence,  // Set both fields for compatibility
 		Method:                  "gemini_analysis",
-		GeminiSuggestedLocation: locationSource,
-		GeminiReasoning:         fmt.Sprintf("Gemini AI analysis (%s)", locationSource),
+		GeminiSuggestedLocation: location,
+		GeminiReasoning:         reasoning,
 	}
 
-	// Add offset and DST information to reasoning
-	if offsetStr != "" || (dstInfo != "" && dstInfo != "unknown") {
-		reasoning := []string{result.GeminiReasoning}
-		if offsetStr != "" {
-			reasoning = append(reasoning, fmt.Sprintf("UTC offset: %s", offsetStr))
-		}
-		if dstInfo != "" && dstInfo != "unknown" {
-			reasoning = append(reasoning, fmt.Sprintf("DST: %s", dstInfo))
-		}
-		result.GeminiReasoning = strings.Join(reasoning, "; ")
-	}
-
-	// If we have coordinates, add them
+	// If we have coordinates from user's profile location, add them
 	if detectedLocation != nil {
 		result.Location = detectedLocation
+	} else if location != "" && location != "unknown" {
+		// Try to geocode the Gemini-suggested location
+		if coords, err := d.geocodeLocation(ctx, location); err == nil {
+			result.Location = coords
+			result.LocationName = location
+			d.logger.Debug("successfully geocoded Gemini location", "username", username, 
+				"location", location, "lat", coords.Latitude, "lng", coords.Longitude)
+		} else {
+			d.logger.Debug("failed to geocode Gemini location", "username", username, 
+				"location", location, "error", err)
+		}
 	}
 
 	// Merge with activity result if available
 	if activityResult != nil {
 		result.ActiveHoursLocal = activityResult.ActiveHoursLocal
 		result.QuietHoursUTC = activityResult.QuietHoursUTC
+		result.SleepBucketsUTC = activityResult.SleepBucketsUTC // Include 30-minute resolution sleep periods
 		result.HourlyActivityUTC = activityResult.HourlyActivityUTC
-		result.LunchHoursLocal = activityResult.LunchHoursLocal
+		result.HalfHourlyActivityUTC = activityResult.HalfHourlyActivityUTC
+		result.LunchHoursUTC = activityResult.LunchHoursUTC
 		result.PeakProductivity = activityResult.PeakProductivity
+		result.TopOrganizations = activityResult.TopOrganizations
+		result.HourlyOrganizationActivity = activityResult.HourlyOrganizationActivity
+		result.ActivityDateRange = activityResult.ActivityDateRange
 	}
 
 	return result

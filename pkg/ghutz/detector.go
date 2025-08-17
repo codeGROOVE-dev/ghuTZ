@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/codeGROOVE-dev/retry"
+	md "github.com/JohannesKaufmann/html-to-markdown/v2"
 )
 
 // SECURITY: GitHub token patterns for validation.
@@ -173,17 +174,116 @@ func (d *Detector) Close() error {
 
 // mergeActivityData copies activity analysis data into the result.
 func mergeActivityData(result, activityResult *Result) {
+	mergeActivityDataWithLogger(result, activityResult, slog.Default())
+}
+
+// mergeActivityDataWithLogger copies activity analysis data into the result.
+func mergeActivityDataWithLogger(result, activityResult *Result, logger *slog.Logger) {
 	if activityResult == nil || result == nil {
 		return
 	}
+	
+	// Log to see what's being merged
+	logger.Debug("mergeActivityData called",
+		"result.Timezone", result.Timezone,
+		"activityResult.Timezone", activityResult.Timezone,
+		"has_candidates", activityResult.TimezoneCandidates != nil)
 	result.ActivityTimezone = activityResult.ActivityTimezone
 	result.QuietHoursUTC = activityResult.QuietHoursUTC
+	result.SleepBucketsUTC = activityResult.SleepBucketsUTC
 	result.ActiveHoursLocal = activityResult.ActiveHoursLocal
-	result.LunchHoursLocal = activityResult.LunchHoursLocal
+	result.LunchHoursUTC = activityResult.LunchHoursUTC
 	result.PeakProductivity = activityResult.PeakProductivity
 	result.TopOrganizations = activityResult.TopOrganizations
 	result.HourlyActivityUTC = activityResult.HourlyActivityUTC
+	result.HalfHourlyActivityUTC = activityResult.HalfHourlyActivityUTC
 	result.HourlyOrganizationActivity = activityResult.HourlyOrganizationActivity
+	result.TimezoneCandidates = activityResult.TimezoneCandidates
+	
+	// Always use the lunch times for the final chosen timezone
+	// First check if we already calculated lunch for this timezone in our candidates
+	// This is needed because Gemini might pick a named timezone like America/Los_Angeles
+	// but our activity analysis used UTC-8, and they might have different lunch calculations
+	if result.HalfHourlyActivityUTC != nil && result.TimezoneCandidates != nil {
+		// Calculate timezone offset for the new timezone
+		newOffset := offsetFromNamedTimezone(result.Timezone)
+		oldOffset := offsetFromNamedTimezone(activityResult.Timezone)
+		
+		logger.Debug("mergeActivityData checking candidates",
+			"result.Timezone", result.Timezone,
+			"activityResult.Timezone", activityResult.Timezone,
+			"newOffset", newOffset,
+			"oldOffset", oldOffset,
+			"num_candidates", len(result.TimezoneCandidates))
+		
+		// Check if we have this timezone in our candidates (to reuse calculation)
+		lunchFound := false
+		
+		// For timezones with DST, check both possible offsets
+		// e.g., America/Los_Angeles could be -7 (PDT) or -8 (PST)
+		// We prefer the current offset (newOffset) first
+		possibleOffsets := []int{newOffset}
+		if result.Timezone == "America/Los_Angeles" {
+			// Currently August, so PDT (-7) is active
+			possibleOffsets = []int{-7, -8}
+		} else if result.Timezone == "America/New_York" {
+			// Currently August, so EDT (-4) is active
+			possibleOffsets = []int{-4, -5}
+		} else if result.Timezone == "America/Chicago" {
+			// Currently August, so CDT (-5) is active
+			possibleOffsets = []int{-5, -6}
+		} else if result.Timezone == "America/Denver" {
+			// Currently August, so MDT (-6) is active
+			possibleOffsets = []int{-6, -7}
+		}
+		
+		// Look through all candidates for a matching offset
+		// We check offsets in order of preference (current DST offset first)
+		for _, offset := range possibleOffsets {
+			for _, candidate := range result.TimezoneCandidates {
+				if int(candidate.Offset) == offset && candidate.LunchStartUTC >= 0 {
+					// Reuse the lunch calculation from this candidate
+					logger.Debug("reusing lunch from candidate",
+						"timezone", result.Timezone,
+						"candidate_offset", candidate.Offset,
+						"lunch_start_utc", candidate.LunchStartUTC,
+						"lunch_end_utc", candidate.LunchEndUTC,
+						"lunch_confidence", candidate.LunchConfidence)
+					result.LunchHoursUTC = struct {
+						Start      float64 `json:"start"`
+						End        float64 `json:"end"`
+						Confidence float64 `json:"confidence"`
+					}{
+						Start:      candidate.LunchStartUTC,
+						End:        candidate.LunchEndUTC,
+						Confidence: candidate.LunchConfidence,
+					}
+					lunchFound = true
+					break
+				}
+			}
+			if lunchFound {
+				break
+			}
+		}
+		
+		// If we didn't find a pre-calculated lunch, calculate it now
+		if !lunchFound {
+			logger.Debug("no matching candidate lunch found, calculating new lunch",
+				"timezone", result.Timezone,
+				"offset", newOffset)
+			lunchStart, lunchEnd, lunchConfidence := detectLunchBreakNoonCentered(result.HalfHourlyActivityUTC, newOffset)
+			result.LunchHoursUTC = struct {
+				Start      float64 `json:"start"`
+				End        float64 `json:"end"`
+				Confidence float64 `json:"confidence"`
+			}{
+				Start:      lunchStart,
+				End:        lunchEnd,
+				Confidence: lunchConfidence,
+			}
+		}
+	}
 }
 
 func (d *Detector) Detect(ctx context.Context, username string) (*Result, error) {
@@ -246,12 +346,9 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	d.logger.Debug("trying Gemini analysis with contextual data", "username", username, "has_activity_data", activityResult != nil)
 	if result := d.tryUnifiedGeminiAnalysisWithEvents(ctx, username, activityResult, events); result != nil {
 		result.Name = fullName
+		// Use mergeActivityData to properly handle lunch time reuse from candidates
+		mergeActivityDataWithLogger(result, activityResult, d.logger)
 		if activityResult != nil {
-			// Preserve activity data in the final result
-			result.ActivityTimezone = activityResult.ActivityTimezone
-			result.QuietHoursUTC = activityResult.QuietHoursUTC
-			result.ActiveHoursLocal = activityResult.ActiveHoursLocal
-			result.LunchHoursLocal = activityResult.LunchHoursLocal
 			d.logger.Info("timezone detected with Gemini + activity", "username", username,
 				"activity_timezone", activityResult.Timezone, "final_timezone", result.Timezone)
 		} else {
@@ -485,7 +582,15 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 		return ""
 	}
 
-	return string(body)
+	// Convert HTML to markdown for better text extraction
+	markdown, err := md.ConvertString(string(body))
+	if err != nil {
+		// If conversion fails, return the raw HTML
+		d.logger.Debug("failed to convert HTML to markdown", "url", blogURL, "error", err)
+		return string(body)
+	}
+
+	return markdown
 }
 
 // formatEvidenceForGemini formats contextual data into a readable, structured format for Gemini analysis.
