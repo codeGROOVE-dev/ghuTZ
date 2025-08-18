@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -32,7 +33,7 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	}
 
 	// Format all evidence into a comprehensive prompt
-	evidence := d.formatEvidenceForGeminiImproved(contextData)
+	evidence := d.formatEvidenceForGemini(contextData)
 
 	// Use the unified prompt template and inject evidence
 	promptTemplate := gemini.UnifiedPrompt()
@@ -208,12 +209,17 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		contextData["starred_repositories"] = userCtx.StarredRepos
 	}
 
-	// Filter recent PRs
+	// Filter recent PRs and collect contributed repositories
 	var recentPRs []github.PullRequest
+	contributedRepos := make(map[string]int) // repo -> contribution count
 	cutoff := time.Now().AddDate(0, -3, 0)
 	for _, pr := range userCtx.PullRequests {
 		if pr.CreatedAt.After(cutoff) {
 			recentPRs = append(recentPRs, pr)
+			// Track contributed repositories (not owned by user)
+			if pr.RepoName != "" && !strings.HasPrefix(pr.RepoName, userCtx.Username+"/") {
+				contributedRepos[pr.RepoName]++
+			}
 			if len(recentPRs) >= 20 {
 				break
 			}
@@ -223,11 +229,15 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		contextData["pull_requests"] = recentPRs
 	}
 
-	// Filter recent issues
+	// Filter recent issues and collect more contributed repositories
 	var recentIssues []github.Issue
 	for _, issue := range userCtx.Issues {
 		if issue.CreatedAt.After(cutoff) {
 			recentIssues = append(recentIssues, issue)
+			// Track contributed repositories (not owned by user)
+			if issue.RepoName != "" && !strings.HasPrefix(issue.RepoName, userCtx.Username+"/") {
+				contributedRepos[issue.RepoName]++
+			}
 			if len(recentIssues) >= 20 {
 				break
 			}
@@ -235,6 +245,20 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	}
 	if len(recentIssues) > 0 {
 		contextData["issues"] = recentIssues
+	}
+	
+	// Add contributed repositories to context (repos user has contributed to but doesn't own)
+	if len(contributedRepos) > 0 {
+		// Convert map to sorted slice for consistent output
+		var contribs []repoContribution
+		for repo, count := range contributedRepos {
+			contribs = append(contribs, repoContribution{Name: repo, Count: count})
+		}
+		// Sort by contribution count (descending)
+		sort.Slice(contribs, func(i, j int) bool {
+			return contribs[i].Count > contribs[j].Count
+		})
+		contextData["contributed_repositories"] = contribs
 	}
 
 	if len(userCtx.Comments) > 0 {
