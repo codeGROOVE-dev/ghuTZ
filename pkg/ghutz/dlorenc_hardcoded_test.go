@@ -4,6 +4,7 @@ import (
 	"testing"
 	
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/timezone"
 )
 
 // TestDlorencHardcodedTimezoneDetection tests dlorenc's timezone detection
@@ -110,7 +111,7 @@ func TestDlorencHardcodedTimezoneDetection(t *testing.T) {
 	}
 	
 	// Test peak productivity detection
-	peakStart, peakEnd, peakCount := detectPeakProductivityWithHalfHours(halfHourlyData, -4)
+	peakStart, peakEnd, peakCount := timezone.DetectPeakProductivityWithHalfHours(halfHourlyData, -4)
 	
 	t.Logf("Peak productivity: %.1f-%.1f UTC with %d events", peakStart, peakEnd, peakCount)
 	

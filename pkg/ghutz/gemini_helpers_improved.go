@@ -6,6 +6,7 @@ import (
 	"time"
 	
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/timezone"
 )
 
 // formatEvidenceForGeminiImproved formats detection evidence for Gemini API analysis with better structure.
@@ -164,7 +165,7 @@ func (d *Detector) formatEvidenceForGeminiImproved(contextData map[string]interf
 	}
 
 	// Timezone candidates with Canadian timezone info
-	if candidates, ok := contextData["timezone_candidates"].([]TimezoneCandidate); ok && len(candidates) > 0 {
+	if candidates, ok := contextData["timezone_candidates"].([]timezone.TimezoneCandidate); ok && len(candidates) > 0 {
 		sb.WriteString("Timezone Analysis:\n")
 		sb.WriteString("NOTE: Canadian timezones include:\n")
 		sb.WriteString("- Pacific (BC): UTC-8/UTC-7\n")

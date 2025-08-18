@@ -8,6 +8,7 @@ import (
 	"time"
 	
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/timezone"
 )
 
 // formatEvidenceForGemini formats detection evidence for Gemini API analysis.
@@ -110,7 +111,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	}
 	
 	// Use unified timezone candidates if available
-	if candidates, ok := contextData["timezone_candidates"].([]TimezoneCandidate); ok && len(candidates) > 0 {
+	if candidates, ok := contextData["timezone_candidates"].([]timezone.TimezoneCandidate); ok && len(candidates) > 0 {
 		sb.WriteString("\nTimezone Candidates (unified analysis):\n")
 		for i, candidate := range candidates {
 			if i >= 5 {
@@ -188,7 +189,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	// The activity timezone is now the same as the top candidate, no conflict to report
 	
 	// Check for potential mismatches between profile and detected timezone
-	if candidates, ok := contextData["timezone_candidates"].([]TimezoneCandidate); ok && len(candidates) > 0 {
+	if candidates, ok := contextData["timezone_candidates"].([]timezone.TimezoneCandidate); ok && len(candidates) > 0 {
 		topCandidate := candidates[0]
 		
 		// Check if website content suggests different location than detected

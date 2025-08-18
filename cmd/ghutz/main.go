@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/ghutz"
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/timezone"
 )
 
 var (
@@ -30,7 +31,7 @@ var (
 )
 
 // getCandidateRank returns the 1-based rank of a candidate in the list
-func getCandidateRank(target ghutz.TimezoneCandidate, candidates []ghutz.TimezoneCandidate) int {
+func getCandidateRank(target timezone.TimezoneCandidate, candidates []timezone.TimezoneCandidate) int {
 	for i, c := range candidates {
 		if c.Offset == target.Offset {
 			return i + 1

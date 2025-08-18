@@ -4,6 +4,7 @@ import (
 	"testing"
 	
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/timezone"
 )
 
 // TestTstrombergHardcodedDataDetectsEasternTime tests tstromberg's timezone detection
@@ -74,7 +75,7 @@ func TestTstrombergHardcodedDataDetectsEasternTime(t *testing.T) {
 	}
 	
 	// Test peak productivity detection
-	peakStart, peakEnd, peakCount := detectPeakProductivityWithHalfHours(halfHourlyData, -4)
+	peakStart, peakEnd, peakCount := timezone.DetectPeakProductivityWithHalfHours(halfHourlyData, -4)
 	
 	t.Logf("Peak productivity: %.1f-%.1f UTC with %d events", peakStart, peakEnd, peakCount)
 	

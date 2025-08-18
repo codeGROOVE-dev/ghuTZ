@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/timezone"
 )
 
 // offsetFromNamedTimezone converts IANA timezone name to current UTC offset
@@ -40,25 +42,25 @@ func timezoneFromOffset(offsetHours int) string {
 }
 
 // generateAlternativeTimezones generates alternative timezone candidates based on work patterns.
-func generateAlternativeTimezones(primaryTz string, workStart float64) []TimezoneCandidate {
-	candidates := []TimezoneCandidate{}
+func generateAlternativeTimezones(primaryTz string, workStart float64) []timezone.TimezoneCandidate {
+	candidates := []timezone.TimezoneCandidate{}
 
 	// Map common timezone patterns to their alternatives
 	switch primaryTz {
 	case "America/New_York", "US/Eastern":
 		// Eastern US alternatives
-		candidates = append(candidates, TimezoneCandidate{
+		candidates = append(candidates, timezone.TimezoneCandidate{
 			Timezone:   "America/Toronto",
 			Offset:     -5, // Same as Eastern
 			Confidence: 0.7,
 		})
-		candidates = append(candidates, TimezoneCandidate{
+		candidates = append(candidates, timezone.TimezoneCandidate{
 			Timezone:   "America/Montreal",
 			Offset:     -5, // Same as Eastern
 			Confidence: 0.7,
 		})
 		if workStart > 10 {
-			candidates = append(candidates, TimezoneCandidate{
+			candidates = append(candidates, timezone.TimezoneCandidate{
 				Timezone:   "America/Chicago",
 				Offset:     -6, // Central
 				Confidence: 0.6,
@@ -67,12 +69,12 @@ func generateAlternativeTimezones(primaryTz string, workStart float64) []Timezon
 
 	case "America/Los_Angeles", "US/Pacific":
 		// Pacific US alternatives
-		candidates = append(candidates, TimezoneCandidate{
+		candidates = append(candidates, timezone.TimezoneCandidate{
 			Timezone:   "America/Vancouver",
 			Offset:     -8, // Same as Pacific
 			Confidence: 0.7,
 		})
-		candidates = append(candidates, TimezoneCandidate{
+		candidates = append(candidates, timezone.TimezoneCandidate{
 			Timezone:   "America/Tijuana",
 			Offset:     -8, // Same as Pacific
 			Confidence: 0.6,
@@ -80,12 +82,12 @@ func generateAlternativeTimezones(primaryTz string, workStart float64) []Timezon
 
 	case "Europe/London":
 		// UK alternatives
-		candidates = append(candidates, TimezoneCandidate{
+		candidates = append(candidates, timezone.TimezoneCandidate{
 			Timezone:   "Europe/Dublin",
 			Offset:     0, // Same as UK
 			Confidence: 0.7,
 		})
-		candidates = append(candidates, TimezoneCandidate{
+		candidates = append(candidates, timezone.TimezoneCandidate{
 			Timezone:   "Europe/Lisbon",
 			Offset:     0, // Same as UK
 			Confidence: 0.6,
@@ -93,17 +95,17 @@ func generateAlternativeTimezones(primaryTz string, workStart float64) []Timezon
 
 	case "Europe/Berlin", "Europe/Amsterdam", "Europe/Paris":
 		// Central European alternatives
-		candidates = append(candidates, TimezoneCandidate{
+		candidates = append(candidates, timezone.TimezoneCandidate{
 			Timezone:   "Europe/Brussels",
 			Offset:     1, // CET
 			Confidence: 0.7,
 		})
-		candidates = append(candidates, TimezoneCandidate{
+		candidates = append(candidates, timezone.TimezoneCandidate{
 			Timezone:   "Europe/Copenhagen",
 			Offset:     1, // CET
 			Confidence: 0.7,
 		})
-		candidates = append(candidates, TimezoneCandidate{
+		candidates = append(candidates, timezone.TimezoneCandidate{
 			Timezone:   "Europe/Stockholm",
 			Offset:     1, // CET
 			Confidence: 0.7,
@@ -111,7 +113,7 @@ func generateAlternativeTimezones(primaryTz string, workStart float64) []Timezon
 
 	case "Asia/Tokyo":
 		// Japan alternatives
-		candidates = append(candidates, TimezoneCandidate{
+		candidates = append(candidates, timezone.TimezoneCandidate{
 			Timezone:   "Asia/Seoul",
 			Offset:     9, // Same as Japan
 			Confidence: 0.6,
@@ -119,12 +121,12 @@ func generateAlternativeTimezones(primaryTz string, workStart float64) []Timezon
 
 	case "Australia/Sydney", "Australia/Melbourne":
 		// Australian alternatives
-		candidates = append(candidates, TimezoneCandidate{
+		candidates = append(candidates, timezone.TimezoneCandidate{
 			Timezone:   "Australia/Brisbane",
 			Offset:     10, // AEST
 			Confidence: 0.6,
 		})
-		candidates = append(candidates, TimezoneCandidate{
+		candidates = append(candidates, timezone.TimezoneCandidate{
 			Timezone:   "Pacific/Auckland",
 			Offset:     12, // NZST
 			Confidence: 0.5,
@@ -134,13 +136,13 @@ func generateAlternativeTimezones(primaryTz string, workStart float64) []Timezon
 	// Add generic alternatives based on work start time if no specific match
 	if len(candidates) == 0 {
 		if workStart >= 6 && workStart <= 8 {
-			candidates = append(candidates, TimezoneCandidate{
+			candidates = append(candidates, timezone.TimezoneCandidate{
 				Timezone:   "Early riser timezone",
 				Offset:     0, // Unknown
 				Confidence: 0.3,
 			})
 		} else if workStart >= 10 && workStart <= 12 {
-			candidates = append(candidates, TimezoneCandidate{
+			candidates = append(candidates, timezone.TimezoneCandidate{
 				Timezone:   "Late starter timezone",
 				Offset:     0, // Unknown
 				Confidence: 0.3,

@@ -59,6 +59,7 @@ DETECTION PRIORITIES (subject to above constraint):
 
 5. LINGUISTIC HINTS:
    - British vs American spelling
+   - Spanish words would strongly suggest living in a Spanish-speaking country
    - Date formats (DD/MM vs MM/DD)
    - Country TLD domains (.ca, .fi, .de)
 

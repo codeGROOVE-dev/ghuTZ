@@ -4,6 +4,7 @@ import (
 	"testing"
 	
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/timezone"
 )
 
 // TestACrateHardcodedTimezoneDetection tests a-crate's timezone detection
@@ -103,7 +104,7 @@ func TestACrateHardcodedTimezoneDetection(t *testing.T) {
 	}
 	
 	// Test peak productivity detection
-	peakStart, peakEnd, peakCount := detectPeakProductivityWithHalfHours(halfHourlyData, -8)
+	peakStart, peakEnd, peakCount := timezone.DetectPeakProductivityWithHalfHours(halfHourlyData, -8)
 	
 	t.Logf("Peak productivity: %.1f-%.1f UTC with %d events", peakStart, peakEnd, peakCount)
 	
