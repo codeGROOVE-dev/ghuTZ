@@ -115,7 +115,7 @@ type Result struct {
 	Location                   *Location              `json:"location,omitempty"`
 	HourlyOrganizationActivity map[int]map[string]int `json:"hourly_organization_activity,omitempty"`
 	HourlyActivityUTC          map[int]int            `json:"hourly_activity_utc"`
-	HalfHourlyActivityUTC      map[float64]int        `json:"half_hourly_activity_utc,omitempty"`
+	HalfHourlyActivityUTC      map[float64]int        `json:"-"`
 	Method                     string                 `json:"method"`
 	LocationName               string                 `json:"location_name,omitempty"`
 	GeminiSuggestedLocation    string                 `json:"gemini_suggested_location,omitempty"`
