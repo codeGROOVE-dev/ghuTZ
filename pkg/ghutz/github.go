@@ -128,9 +128,12 @@ func (d *Detector) fetchUserGists(ctx context.Context, username string) ([]time.
 }
 
 func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]PullRequest, error) {
+	return d.fetchPullRequestsWithLimit(ctx, username, 2)
+}
+
+func (d *Detector) fetchPullRequestsWithLimit(ctx context.Context, username string, maxPages int) ([]PullRequest, error) {
 	var allPRs []PullRequest
 	const perPage = 100
-	const maxPages = 2 // Fetch up to 200 PRs
 	
 	for page := 1; page <= maxPages; page++ {
 		apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:pr&sort=created&order=desc&per_page=%d&page=%d", 
@@ -222,9 +225,12 @@ func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]Pu
 }
 
 func (d *Detector) fetchIssues(ctx context.Context, username string) ([]Issue, error) {
+	return d.fetchIssuesWithLimit(ctx, username, 2)
+}
+
+func (d *Detector) fetchIssuesWithLimit(ctx context.Context, username string, maxPages int) ([]Issue, error) {
 	var allIssues []Issue
 	const perPage = 100
-	const maxPages = 2 // Fetch up to 200 issues
 	
 	for page := 1; page <= maxPages; page++ {
 		apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:issue&sort=created&order=desc&per_page=%d&page=%d", 
@@ -368,6 +374,9 @@ func (d *Detector) fetchUserWithGraphQL(ctx context.Context, username string) *G
 		}
 	}()
 
+	// Check if response was from cache
+	fromCache := resp.Header.Get("X-From-Cache") == "true"
+
 	var result struct {
 		Data struct {
 			User struct {
@@ -442,7 +451,7 @@ func (d *Detector) fetchUserWithGraphQL(ctx context.Context, username string) *G
 	}
 
 	d.logger.Debug("fetched user via GraphQL", "username", username, "name", user.Name, 
-		"blog", user.Blog, "social_accounts", len(result.Data.User.SocialAccounts.Nodes))
+		"blog", user.Blog, "social_accounts", len(result.Data.User.SocialAccounts.Nodes), "cache", fromCache)
 
 	return user
 }
@@ -599,6 +608,7 @@ func (d *Detector) fetchUserComments(ctx context.Context, username string) ([]Co
 
 func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]Organization, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/users/%s/orgs", username)
+	d.logger.Debug("fetching organizations from API", "url", apiURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
@@ -623,6 +633,10 @@ func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]O
 			d.logger.Debug("failed to close response body", "error", err)
 		}
 	}()
+	
+	// Check if response was from cache
+	fromCache := resp.Header.Get("X-From-Cache") == "true"
+	d.logger.Debug("organizations API response", "username", username, "cache", fromCache, "status", resp.StatusCode)
 
 	if resp.StatusCode != http.StatusOK {
 		body, err := io.ReadAll(resp.Body)
@@ -632,8 +646,20 @@ func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]O
 		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
+	// Read the response body first for debugging
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response body: %w", err)
+	}
+	
+	previewLen := 100
+	if len(body) < previewLen {
+		previewLen = len(body)
+	}
+	d.logger.Debug("organizations API raw response", "username", username, "body_len", len(body), "body_preview", string(body[:previewLen]))
+	
 	var orgs []Organization
-	if err := json.NewDecoder(resp.Body).Decode(&orgs); err != nil {
+	if err := json.Unmarshal(body, &orgs); err != nil {
 		return nil, fmt.Errorf("decoding response: %w", err)
 	}
 

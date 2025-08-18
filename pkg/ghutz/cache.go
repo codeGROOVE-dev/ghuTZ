@@ -75,13 +75,13 @@ func (c *OtterCache) Get(url string) ([]byte, string, bool) {
 
 	entry, found := c.cache.GetIfPresent(key)
 	if !found {
-		c.logger.Info("CACHE MISS", "url", url, "reason", "not_found")
+		c.logger.Info("🤦🤦🤦 CACHE MISS 🤦🤦🤦", "url", url, "reason", "not_found")
 		return nil, "", false
 	}
 
 	// Check if expired (otter should handle this, but double-check for safety)
 	if time.Now().After(entry.ExpiresAt) {
-		c.logger.Info("CACHE MISS", "url", url, "reason", "expired", "expired_at", entry.ExpiresAt)
+		c.logger.Info("🤦🤦🤦 CACHE MISS 🤦🤦🤦", "url", url, "reason", "expired", "expired_at", entry.ExpiresAt)
 		c.cache.Invalidate(key)
 		return nil, "", false
 	}
@@ -133,13 +133,13 @@ func (c *OtterCache) APICall(url string, requestBody []byte) ([]byte, bool) {
 
 	entry, found := c.cache.GetIfPresent(key)
 	if !found {
-		c.logger.Info("API CACHE MISS", "url", url, "reason", "not_found")
+		c.logger.Info("🤦🤦🤦 API CACHE MISS 🤦🤦🤦", "url", url, "reason", "not_found")
 		return nil, false
 	}
 
 	// Check if expired (otter should handle this, but double-check for safety)
 	if time.Now().After(entry.ExpiresAt) {
-		c.logger.Info("API CACHE MISS", "url", url, "reason", "expired", "expired_at", entry.ExpiresAt)
+		c.logger.Info("🤦🤦🤦 API CACHE MISS 🤦🤦🤦", "url", url, "reason", "expired", "expired_at", entry.ExpiresAt)
 		c.cache.Invalidate(key)
 		return nil, false
 	}
@@ -305,11 +305,6 @@ func (c *OtterCache) Clean() error {
 
 // CachedHTTPDo performs an HTTP request with caching support.
 func (d *Detector) cachedHTTPDo(ctx context.Context, req *http.Request) (*http.Response, error) {
-	// Only cache GET requests
-	if req.Method != http.MethodGet {
-		return d.retryableHTTPDo(ctx, req)
-	}
-
 	// If cache is not available, fall back to non-cached request
 	if d.cache == nil {
 		return d.retryableHTTPDo(ctx, req)
@@ -317,7 +312,69 @@ func (d *Detector) cachedHTTPDo(ctx context.Context, req *http.Request) (*http.R
 
 	url := req.URL.String()
 
-	// Check cache
+	// Handle POST requests (like GraphQL) with request body as part of cache key
+	if req.Method == http.MethodPost {
+		// Read the request body for cache key generation
+		var requestBody []byte
+		if req.Body != nil {
+			var err error
+			requestBody, err = io.ReadAll(req.Body)
+			if err != nil {
+				return nil, fmt.Errorf("reading request body: %w", err)
+			}
+			// Replace the body with a new reader since we consumed it
+			req.Body = io.NopCloser(bytes.NewReader(requestBody))
+		}
+
+		// Check cache for POST requests
+		cachedData, found := d.cache.APICall(url, requestBody)
+		if found {
+			// Create a response from cached data
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewReader(cachedData)),
+				Header:     make(http.Header),
+				Request:    req,
+			}
+			resp.Header.Set("X-From-Cache", "true")
+			return resp, nil
+		}
+
+		// Make the actual request
+		resp, err := d.retryableHTTPDo(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+
+		// Only cache successful responses
+		if resp.StatusCode == http.StatusOK {
+			// Read the response body
+			body, err := io.ReadAll(resp.Body)
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				d.logger.Debug("failed to close response body", "error", closeErr)
+			}
+			if err != nil {
+				return nil, err
+			}
+
+			// Cache the response
+			if err := d.cache.SetAPICall(url, requestBody, body); err != nil {
+				d.logger.Debug("cache set failed", "url", url, "error", err)
+			}
+
+			// Replace the response body with a new reader
+			resp.Body = io.NopCloser(bytes.NewReader(body))
+		}
+
+		return resp, nil
+	}
+
+	// Handle GET requests
+	if req.Method != http.MethodGet {
+		return d.retryableHTTPDo(ctx, req)
+	}
+
+	// Check cache for GET requests
 	cachedData, etag, found := d.cache.Get(url)
 	if found {
 		// Create a response from cached data

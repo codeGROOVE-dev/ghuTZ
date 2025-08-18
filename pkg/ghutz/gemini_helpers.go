@@ -3,6 +3,7 @@ package ghutz
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 )
@@ -478,11 +479,17 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 			sb.WriteString(fmt.Sprintf("Bio: %s\n", mastodonProfile.Bio))
 		}
 		
-		// Profile fields (key-value pairs)
+		// Profile fields (key-value pairs) - sort keys for deterministic output
 		if len(mastodonProfile.ProfileFields) > 0 {
 			sb.WriteString("Profile Fields:\n")
-			for key, value := range mastodonProfile.ProfileFields {
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", key, value))
+			// Sort keys for deterministic iteration order
+			var fieldKeys []string
+			for key := range mastodonProfile.ProfileFields {
+				fieldKeys = append(fieldKeys, key)
+			}
+			sort.Strings(fieldKeys)
+			for _, key := range fieldKeys {
+				sb.WriteString(fmt.Sprintf("- %s: %s\n", key, mastodonProfile.ProfileFields[key]))
 			}
 		}
 		

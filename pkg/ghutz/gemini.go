@@ -140,6 +140,256 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 }
 
 
+// tryUnifiedGeminiAnalysisWithContext attempts timezone detection using Gemini AI with UserContext
+func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, userCtx *UserContext, activityResult *Result) *Result {
+	// Skip if no Gemini API key
+	if d.geminiAPIKey == "" {
+		d.logger.Debug("skipping Gemini analysis - no API key configured")
+		return nil
+	}
+
+	if userCtx.User == nil {
+		d.logger.Debug("could not fetch user for Gemini analysis", "username", userCtx.Username)
+		return nil
+	}
+
+	// Prepare comprehensive context for Gemini
+	contextData := make(map[string]interface{})
+	contextData["user"] = userCtx.User
+	contextData["recent_events"] = userCtx.Events
+
+	// Add activity result if available
+	if activityResult != nil {
+		contextData["activity_result"] = activityResult
+		
+		if activityResult.QuietHoursUTC != nil {
+			contextData["quiet_hours"] = activityResult.QuietHoursUTC
+		}
+		
+		if activityResult.HourlyActivityUTC != nil {
+			contextData["hour_counts"] = activityResult.HourlyActivityUTC
+		}
+		
+		if activityResult.TimezoneCandidates != nil && len(activityResult.TimezoneCandidates) > 0 {
+			contextData["timezone_candidates"] = activityResult.TimezoneCandidates
+		}
+		
+		if activityResult.ActivityDateRange.TotalDays > 0 {
+			totalEvents := 0
+			if activityResult.HourlyActivityUTC != nil {
+				for _, count := range activityResult.HourlyActivityUTC {
+					totalEvents += count
+				}
+			}
+			
+			contextData["activity_date_range"] = map[string]interface{}{
+				"oldest":      activityResult.ActivityDateRange.OldestActivity,
+				"newest":      activityResult.ActivityDateRange.NewestActivity,
+				"total_days":  activityResult.ActivityDateRange.TotalDays,
+				"total_events": totalEvents,
+			}
+		}
+		
+		if activityResult.ActivityTimezone != "" {
+			contextData["activity_timezone"] = activityResult.ActivityTimezone
+			
+			if strings.HasPrefix(activityResult.ActivityTimezone, "UTC") {
+				offsetStr := strings.TrimPrefix(activityResult.ActivityTimezone, "UTC")
+				if offset, err := strconv.Atoi(offsetStr); err == nil {
+					contextData["utc_offset"] = offset
+					
+					if activityResult.ActiveHoursLocal.Start > 0 || activityResult.ActiveHoursLocal.End > 0 {
+						startUTC := int(activityResult.ActiveHoursLocal.Start)
+						endUTC := int(activityResult.ActiveHoursLocal.End)
+						contextData["work_hours_utc"] = []int{startUTC, endUTC}
+					}
+					
+					if activityResult.LunchHoursUTC.Confidence > 0 {
+						lunchStartUTC := int(activityResult.LunchHoursUTC.Start)
+						lunchEndUTC := int(activityResult.LunchHoursUTC.End)
+						contextData["lunch_break_utc"] = []int{lunchStartUTC, lunchEndUTC}
+						contextData["lunch_confidence"] = activityResult.LunchHoursUTC.Confidence
+					}
+					
+					if activityResult.PeakProductivity.Count > 0 {
+						peakStartUTC := int(activityResult.PeakProductivity.Start)
+						peakEndUTC := int(activityResult.PeakProductivity.End)
+						contextData["peak_productivity_utc"] = []int{peakStartUTC, peakEndUTC}
+					}
+				}
+			}
+		}
+	}
+
+	// Use data from UserContext instead of fetching again
+	if len(userCtx.Organizations) > 0 {
+		contextData["organizations"] = userCtx.Organizations
+	}
+	if len(userCtx.Repositories) > 0 {
+		contextData["repositories"] = userCtx.Repositories
+	}
+	if len(userCtx.StarredRepos) > 0 {
+		contextData["starred_repositories"] = userCtx.StarredRepos
+	}
+	
+	// Filter recent PRs
+	var recentPRs []PullRequest
+	cutoff := time.Now().AddDate(0, -3, 0)
+	for _, pr := range userCtx.PullRequests {
+		if pr.CreatedAt.After(cutoff) {
+			recentPRs = append(recentPRs, pr)
+			if len(recentPRs) >= 20 {
+				break
+			}
+		}
+	}
+	if len(recentPRs) > 0 {
+		contextData["pull_requests"] = recentPRs
+	}
+	
+	// Filter recent issues
+	var recentIssues []Issue
+	for _, issue := range userCtx.Issues {
+		if issue.CreatedAt.After(cutoff) {
+			recentIssues = append(recentIssues, issue)
+			if len(recentIssues) >= 20 {
+				break
+			}
+		}
+	}
+	if len(recentIssues) > 0 {
+		contextData["issues"] = recentIssues
+	}
+	
+	if len(userCtx.Comments) > 0 {
+		contextData["comments"] = userCtx.Comments
+	}
+	
+	// Collect commit message samples for Gemini to analyze
+	commitSamples := collectCommitMessageSamples(userCtx.Events, 15)
+	if len(commitSamples) > 0 {
+		contextData["commit_message_samples"] = commitSamples
+	}
+	
+	// Collect text samples from PRs/issues for Gemini to analyze  
+	textSamples := collectTextSamples(recentPRs, recentIssues, userCtx.Comments, 10)
+	if len(textSamples) > 0 {
+		contextData["text_samples"] = textSamples
+	}
+
+	// Check for location field and try to geocode
+	var detectedLocation *Location
+	if userCtx.User.Location != "" {
+		if loc, err := d.geocodeLocation(ctx, userCtx.User.Location); err == nil {
+			detectedLocation = loc
+			contextData["location"] = loc
+		}
+	}
+
+	// Try to extract additional context from profile
+	if userCtx.User.Blog != "" {
+		// Try to fetch website content for more context
+		websiteContent := d.fetchWebsiteContent(ctx, userCtx.User.Blog)
+		if websiteContent != "" {
+			contextData["website_content"] = websiteContent
+		}
+	}
+
+	// Extract social media URLs
+	socialURLs := extractSocialMediaURLs(userCtx.User)
+	if len(socialURLs) > 0 {
+		contextData["social_media_urls"] = socialURLs
+
+		// Check for country TLDs
+		tlds := extractCountryTLDs(socialURLs...)
+		if len(tlds) > 0 {
+			contextData["country_tlds"] = tlds
+		}
+		
+		// Follow Mastodon links to get comprehensive profile data
+		for _, socialURL := range socialURLs {
+			isMastodon := false
+			
+			if strings.Contains(userCtx.User.Bio, "[MASTODON] " + socialURL) {
+				isMastodon = true
+			} else if strings.Contains(socialURL, "/@") {
+				isMastodon = true
+			}
+			
+			if isMastodon {
+				d.logger.Debug("following Mastodon link", "url", socialURL)
+				mastodonData := fetchMastodonProfileViaAPI(ctx, socialURL, d.logger)
+				if mastodonData != nil {
+					contextData["mastodon_profile"] = mastodonData
+					
+					for _, website := range mastodonData.Websites {
+						if userCtx.User.Blog == "" {
+							userCtx.User.Blog = website
+						}
+						
+						websiteContent := d.fetchWebsiteContent(ctx, website)
+						if websiteContent != "" {
+							if websiteContents, ok := contextData["mastodon_website_contents"].(map[string]string); ok {
+								websiteContents[website] = websiteContent
+							} else {
+								contextData["mastodon_website_contents"] = map[string]string{
+									website: websiteContent,
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Query Gemini with all context
+	timezone, reasoning, confidence, location, _, err := d.queryUnifiedGeminiForTimezone(ctx, contextData, false)
+	if err != nil {
+		d.logger.Debug("Gemini analysis failed", "error", err)
+		return nil
+	}
+
+	if confidence < 0.3 {
+		d.logger.Debug("Gemini confidence too low", "confidence", confidence)
+		return nil
+	}
+
+	result := &Result{
+		Username:                userCtx.Username,
+		Timezone:                timezone,
+		TimezoneConfidence:      confidence,
+		Confidence:              confidence,
+		Method:                  "gemini_analysis",
+		GeminiSuggestedLocation: location,
+		GeminiReasoning:         reasoning,
+	}
+
+	if detectedLocation != nil {
+		result.Location = detectedLocation
+	} else if location != "" && location != "unknown" {
+		if coords, err := d.geocodeLocation(ctx, location); err == nil {
+			result.Location = coords
+			result.LocationName = location
+		}
+	}
+
+	if activityResult != nil {
+		result.ActiveHoursLocal = activityResult.ActiveHoursLocal
+		result.QuietHoursUTC = activityResult.QuietHoursUTC
+		result.SleepBucketsUTC = activityResult.SleepBucketsUTC
+		result.HourlyActivityUTC = activityResult.HourlyActivityUTC
+		result.HalfHourlyActivityUTC = activityResult.HalfHourlyActivityUTC
+		result.LunchHoursUTC = activityResult.LunchHoursUTC
+		result.PeakProductivity = activityResult.PeakProductivity
+		result.TopOrganizations = activityResult.TopOrganizations
+		result.HourlyOrganizationActivity = activityResult.HourlyOrganizationActivity
+		result.ActivityDateRange = activityResult.ActivityDateRange
+	}
+
+	return result
+}
+
 // tryUnifiedGeminiAnalysisWithEvents attempts timezone detection using Gemini AI with event context.
 func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, username string, activityResult *Result, events []PublicEvent) *Result {
 	// Skip if no Gemini API key

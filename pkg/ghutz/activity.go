@@ -31,6 +31,11 @@ func aggregateHalfHoursToHours(halfHourCounts map[float64]int) map[int]int {
 	return hourCounts
 }
 
+// tryActivityPatternsWithContext performs activity pattern analysis using UserContext
+func (d *Detector) tryActivityPatternsWithContext(ctx context.Context, userCtx *UserContext) *Result {
+	return d.tryActivityPatternsWithEvents(ctx, userCtx.Username, userCtx.Events)
+}
+
 func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username string, events []PublicEvent) *Result {
 	// Collect all timestamps first (we'll deduplicate and limit later)
 	type timestampEntry struct {
@@ -201,6 +206,61 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			"prs", len(additionalData.PullRequests),
 			"issues", len(additionalData.Issues),
 			"comments", len(additionalData.Comments))
+		
+		// Check if we still need more data after initial fetch
+		// Only fetch additional pages of PRs/issues if we're still under threshold
+		if len(allTimestamps) < targetDataPoints {
+			d.logger.Debug("still need more data, fetching additional PR/issue pages", "username", username,
+				"current_count", len(allTimestamps), "target", targetDataPoints)
+			
+			// Fetch second page of PRs and issues (expensive API calls)
+			extraData := d.fetchSupplementalActivityWithDepth(ctx, username, 2)
+			
+			// Only add the NEW data from pages 2+ (first 100 already included)
+			prCount := len(additionalData.PullRequests)
+			issueCount := len(additionalData.Issues)
+			
+			// Add new PRs (beyond first 100)
+			if len(extraData.PullRequests) > prCount {
+				newPRs := extraData.PullRequests[prCount:]
+				for _, pr := range newPRs {
+					org := ""
+					if pr.Repository != "" {
+						if idx := strings.Index(pr.Repository, "/"); idx > 0 {
+							org = pr.Repository[:idx]
+						}
+					}
+					allTimestamps = append(allTimestamps, timestampEntry{
+						time:   pr.CreatedAt,
+						source: "pr",
+						org:    org,
+					})
+				}
+				d.logger.Debug("added additional PRs", "username", username, "count", len(newPRs))
+			}
+			
+			// Add new issues (beyond first 100)
+			if len(extraData.Issues) > issueCount {
+				newIssues := extraData.Issues[issueCount:]
+				for _, issue := range newIssues {
+					org := ""
+					if issue.Repository != "" {
+						if idx := strings.Index(issue.Repository, "/"); idx > 0 {
+							org = issue.Repository[:idx]
+						}
+					}
+					allTimestamps = append(allTimestamps, timestampEntry{
+						time:   issue.CreatedAt,
+						source: "issue",
+						org:    org,
+					})
+				}
+				d.logger.Debug("added additional issues", "username", username, "count", len(newIssues))
+			}
+			
+			d.logger.Debug("final timestamp count after extra fetch", "username", username,
+				"total", len(allTimestamps))
+		}
 	}
 
 	// Sort timestamps by recency (newest first) before applying time windows
@@ -1836,6 +1896,13 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 
 // fetchSupplementalActivity fetches additional activity data when events are insufficient.
 func (d *Detector) fetchSupplementalActivity(ctx context.Context, username string) *ActivityData {
+	// Default to fetching only first page of PRs/issues
+	return d.fetchSupplementalActivityWithDepth(ctx, username, 1)
+}
+
+// fetchSupplementalActivityWithDepth fetches additional activity data with control over depth.
+// maxPages controls how many pages of PRs/issues to fetch (1 = first 100, 2 = up to 200)
+func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, username string, maxPages int) *ActivityData {
 	type result struct {
 		prs          []PullRequest
 		issues       []Issue
@@ -1857,7 +1924,7 @@ func (d *Detector) fetchSupplementalActivity(ctx context.Context, username strin
 		// Fetch PRs
 		go func() {
 			defer wg.Done()
-			if prs, err := d.fetchPullRequests(ctx, username); err == nil {
+			if prs, err := d.fetchPullRequestsWithLimit(ctx, username, maxPages); err == nil {
 				res.prs = prs
 			} else {
 				d.logger.Debug("failed to fetch PRs", "username", username, "error", err)
@@ -1867,7 +1934,7 @@ func (d *Detector) fetchSupplementalActivity(ctx context.Context, username strin
 		// Fetch Issues
 		go func() {
 			defer wg.Done()
-			if issues, err := d.fetchIssues(ctx, username); err == nil {
+			if issues, err := d.fetchIssuesWithLimit(ctx, username, maxPages); err == nil {
 				res.issues = issues
 			} else {
 				d.logger.Debug("failed to fetch issues", "username", username, "error", err)

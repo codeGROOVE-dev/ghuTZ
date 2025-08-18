@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,6 +34,23 @@ var (
 	timezoneJSONRegex     = regexp.MustCompile(`"timezone":"([^"]+)"`)
 	timezoneFieldRegex    = regexp.MustCompile(`timezone:([^,}]+)`)
 )
+
+// UserContext holds all fetched data for a user to avoid redundant API calls
+type UserContext struct {
+	Username          string
+	User              *GitHubUser
+	Events            []PublicEvent
+	Organizations     []Organization
+	Repositories      []Repository // User's own repos
+	StarredRepos      []Repository // Repos the user has starred
+	PullRequests      []PullRequest
+	Issues            []Issue
+	Comments          []Comment
+	Gists             []time.Time // Gist timestamps
+	Commits           []time.Time // Commit timestamps
+	ProfileHTML       string       // Cached profile HTML
+	FromCache         map[string]bool // Track which data was from cache
+}
 
 type Detector struct {
 	githubToken   string
@@ -286,6 +304,104 @@ func mergeActivityDataWithLogger(result, activityResult *Result, logger *slog.Lo
 	}
 }
 
+// fetchAllUserData fetches all data for a user at once to avoid redundant API calls
+func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserContext {
+	userCtx := &UserContext{
+		Username:  username,
+		FromCache: make(map[string]bool),
+	}
+
+	// Fetch user profile (with GraphQL for social accounts)
+	d.logger.Debug("checking user profile", "username", username)
+	userCtx.User = d.fetchUser(ctx, username)
+
+	// Fetch public events
+	d.logger.Debug("checking public events", "username", username)
+	events, err := d.fetchPublicEvents(ctx, username)
+	if err != nil {
+		d.logger.Debug("failed to fetch public events", "error", err)
+		events = []PublicEvent{}
+	}
+	userCtx.Events = events
+
+	// Fetch profile HTML for scraping
+	d.logger.Debug("checking profile HTML", "username", username)
+	userCtx.ProfileHTML = d.fetchProfileHTML(ctx, username)
+
+	// Fetch organizations
+	orgs, err := d.fetchOrganizations(ctx, username)
+	if err == nil {
+		userCtx.Organizations = orgs
+		d.logger.Debug("fetched organizations", "username", username, "count", len(orgs))
+	} else {
+		d.logger.Debug("failed to fetch organizations", "username", username, "error", err)
+	}
+
+	// Fetch repositories (pinned and popular)
+	d.logger.Debug("checking repositories", "username", username)
+	pinnedRepos, _ := d.fetchPinnedRepositories(ctx, username)
+	popularRepos, _ := d.fetchPopularRepositories(ctx, username)
+	
+	// Combine and deduplicate repos
+	repoMap := make(map[string]Repository)
+	for _, repo := range pinnedRepos {
+		repoMap[repo.FullName] = repo
+	}
+	for _, repo := range popularRepos {
+		if _, exists := repoMap[repo.FullName]; !exists {
+			repoMap[repo.FullName] = repo
+		}
+	}
+	// Sort repo names for deterministic order
+	var repoNames []string
+	for name := range repoMap {
+		repoNames = append(repoNames, name)
+	}
+	sort.Strings(repoNames)
+	for _, name := range repoNames {
+		userCtx.Repositories = append(userCtx.Repositories, repoMap[name])
+	}
+
+	// Fetch starred repositories
+	d.logger.Debug("checking starred repositories", "username", username)
+	_, starredRepos, _ := d.fetchStarredRepositories(ctx, username)
+	userCtx.StarredRepos = starredRepos
+
+	// Fetch pull requests
+	d.logger.Debug("checking pull requests", "username", username)
+	prs, _ := d.fetchPullRequests(ctx, username)
+	userCtx.PullRequests = prs
+
+	// Fetch issues
+	d.logger.Debug("checking issues", "username", username)
+	issues, _ := d.fetchIssues(ctx, username)
+	userCtx.Issues = issues
+
+	// Fetch comments
+	d.logger.Debug("checking comments", "username", username)
+	comments, _ := d.fetchUserComments(ctx, username)
+	userCtx.Comments = comments
+
+	// Fetch gists
+	d.logger.Debug("checking gists", "username", username)
+	gists, _ := d.fetchUserGists(ctx, username)
+	userCtx.Gists = gists
+
+	// Log summary
+	d.logger.Info("fetched all user data",
+		"username", username,
+		"events", len(userCtx.Events),
+		"orgs", len(userCtx.Organizations),
+		"repos", len(userCtx.Repositories),
+		"starred", len(userCtx.StarredRepos),
+		"prs", len(userCtx.PullRequests),
+		"issues", len(userCtx.Issues),
+		"comments", len(userCtx.Comments),
+		"gists", len(userCtx.Gists))
+
+	return userCtx
+}
+
 func (d *Detector) Detect(ctx context.Context, username string) (*Result, error) {
 	if username == "" {
 		return nil, errors.New("username cannot be empty")
@@ -306,27 +422,22 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 
 	d.logger.Info("detecting timezone", "username", username)
 
-	// Fetch user profile to get the full name
-	var fullName string
-	if user := d.fetchUser(ctx, username); user != nil && user.Name != "" {
-		fullName = user.Name
-		d.logger.Debug("fetched user full name", "username", username, "name", fullName)
-	}
+	// Fetch ALL data at once to avoid redundant API calls
+	userCtx := d.fetchAllUserData(ctx, username)
 
-	// Fetch public events once and share between analyses
-	events, err := d.fetchPublicEvents(ctx, username)
-	if err != nil {
-		d.logger.Debug("failed to fetch public events", "username", username, "error", err)
-		events = []PublicEvent{}
+	// Get the full name from the fetched user
+	var fullName string
+	if userCtx.User != nil && userCtx.User.Name != "" {
+		fullName = userCtx.User.Name
 	}
 
 	// Always perform activity analysis for fun and comparison
 	d.logger.Debug("performing activity pattern analysis", "username", username)
-	activityResult := d.tryActivityPatternsWithEvents(ctx, username, events)
+	activityResult := d.tryActivityPatternsWithContext(ctx, userCtx)
 
 	// Try quick detection methods first
 	d.logger.Debug("trying profile HTML scraping", "username", username)
-	if result := d.tryProfileScraping(ctx, username); result != nil {
+	if result := d.tryProfileScrapingWithContext(ctx, userCtx); result != nil {
 		d.logger.Info("detected from profile HTML", "username", username, "timezone", result.Timezone)
 		result.Name = fullName
 		mergeActivityData(result, activityResult)
@@ -335,7 +446,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	d.logger.Debug("profile HTML scraping failed", "username", username)
 
 	d.logger.Debug("trying location field analysis", "username", username)
-	if result := d.tryLocationField(ctx, username); result != nil {
+	if result := d.tryLocationFieldWithContext(ctx, userCtx); result != nil {
 		d.logger.Info("detected from location field", "username", username, "timezone", result.Timezone, "location", result.LocationName)
 		result.Name = fullName
 		mergeActivityData(result, activityResult)
@@ -344,7 +455,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	d.logger.Debug("location field analysis failed", "username", username)
 
 	d.logger.Debug("trying Gemini analysis with contextual data", "username", username, "has_activity_data", activityResult != nil)
-	if result := d.tryUnifiedGeminiAnalysisWithEvents(ctx, username, activityResult, events); result != nil {
+	if result := d.tryUnifiedGeminiAnalysisWithContext(ctx, userCtx, activityResult); result != nil {
 		result.Name = fullName
 		// Use mergeActivityData to properly handle lunch time reuse from candidates
 		mergeActivityDataWithLogger(result, activityResult, d.logger)
@@ -591,6 +702,98 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 	}
 
 	return markdown
+}
+
+// tryProfileScrapingWithContext tries to extract timezone from profile HTML using UserContext
+func (d *Detector) tryProfileScrapingWithContext(ctx context.Context, userCtx *UserContext) *Result {
+	html := userCtx.ProfileHTML
+	if html == "" {
+		return nil
+	}
+
+	// Check if user exists - look for 404 indicators in HTML
+	if strings.Contains(html, "This is not the web page you are looking for") {
+		d.logger.Info("GitHub user not found", "username", userCtx.Username)
+		return &Result{
+			Username:   userCtx.Username,
+			Timezone:   "UTC",
+			Confidence: 0,
+			Method:     "user_not_found",
+		}
+	}
+
+	// Try extracting timezone from HTML using pre-compiled regex patterns
+	patterns := []*regexp.Regexp{
+		timezoneDataAttrRegex,
+		timezoneFieldRegex,
+		timezoneJSONRegex,
+	}
+
+	for _, re := range patterns {
+		if matches := re.FindStringSubmatch(html); len(matches) > 1 {
+			tz := strings.TrimSpace(matches[1])
+			if tz != "" && tz != "UTC" {
+				return &Result{
+					Username:   userCtx.Username,
+					Timezone:   tz,
+					Confidence: 0.95,
+					Method:     "github_profile",
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// tryLocationFieldWithContext tries to detect timezone from user location field using UserContext
+func (d *Detector) tryLocationFieldWithContext(ctx context.Context, userCtx *UserContext) *Result {
+	if userCtx.User == nil || userCtx.User.Location == "" {
+		d.logger.Debug("no location field found", "username", userCtx.Username)
+		return nil
+	}
+
+	d.logger.Debug("analyzing location field", "username", userCtx.Username, "location", userCtx.User.Location)
+
+	// Check if location is too vague for geocoding
+	location := strings.ToLower(strings.TrimSpace(userCtx.User.Location))
+	vagueLocations := []string{
+		"united states", "usa", "us", "america",
+		"canada", "europe", "asia", "africa", "australia",
+		"remote", "worldwide", "global", "earth", "world",
+		"internet", "online", "cyberspace", "metaverse",
+		"home", "somewhere", "everywhere", "nowhere",
+	}
+
+	for _, vague := range vagueLocations {
+		if location == vague {
+			d.logger.Debug("location too vague for geocoding", "location", location)
+			return nil
+		}
+	}
+
+	// Try to geocode the location
+	coords, err := d.geocodeLocation(ctx, userCtx.User.Location)
+	if err != nil {
+		d.logger.Debug("geocoding failed", "location", userCtx.User.Location, "error", err)
+		return nil
+	}
+
+	// Get timezone from coordinates
+	tz, err := d.timezoneForCoordinates(ctx, coords.Latitude, coords.Longitude)
+	if err != nil {
+		d.logger.Debug("timezone lookup failed", "lat", coords.Latitude, "lng", coords.Longitude, "error", err)
+		return nil
+	}
+
+	return &Result{
+		Username:     userCtx.Username,
+		Timezone:     tz,
+		Location:     coords,
+		LocationName: userCtx.User.Location,
+		Confidence:   0.8,
+		Method:       "location_field",
+	}
 }
 
 // formatEvidenceForGemini formats contextual data into a readable, structured format for Gemini analysis.
