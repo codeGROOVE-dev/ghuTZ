@@ -295,14 +295,6 @@ func (c *OtterCache) Stats() map[string]interface{} {
 	}
 }
 
-// Clean is kept for backward compatibility but is now a no-op since otter handles TTL automatically.
-func (c *OtterCache) Clean() error {
-	// Otter automatically removes expired entries, so this is a no-op
-	stats := c.Stats()
-	c.logger.Debug("cache stats", "stats", stats)
-	return nil
-}
-
 // HTTPClient interface for making HTTP requests
 type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)

@@ -91,8 +91,12 @@ func (c *Client) GeocodeLocation(ctx context.Context, location string) (*Locatio
 		return nil, err
 	}
 
+	bodyPreviewLen := 200
+	if len(body) < bodyPreviewLen {
+		bodyPreviewLen = len(body)
+	}
 	c.logger.Debug("geocoding API raw response", "location", location, "status", resp.StatusCode,
-		"content_type", resp.Header.Get("Content-Type"), "body_preview", string(body[:min(200, len(body))]))
+		"content_type", resp.Header.Get("Content-Type"), "body_preview", string(body[:bodyPreviewLen]))
 
 	if err := json.Unmarshal(body, &result); err != nil {
 		c.logger.Debug("geocoding JSON parse error", "location", location, "error", err, "full_body", string(body))
@@ -181,11 +185,4 @@ func (c *Client) TimezoneForCoordinates(ctx context.Context, lat, lng float64) (
 	}
 
 	return result.TimeZoneID, nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
