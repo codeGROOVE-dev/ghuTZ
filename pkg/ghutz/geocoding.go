@@ -12,7 +12,7 @@ func (d *Detector) geocodeLocation(ctx context.Context, location string) (*Locat
 	// Create a custom HTTP client that uses our caching mechanism
 	cachedClient := &cachedHTTPClient{
 		detector: d,
-		ctx:      ctx,
+		doFunc:   func(req *http.Request) (*http.Response, error) { return d.cachedHTTPDo(ctx, req) },
 	}
 	client := googlemaps.NewClient(d.mapsAPIKey, cachedClient, d.logger)
 	geoLoc, err := client.GeocodeLocation(ctx, location)
@@ -30,7 +30,7 @@ func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64)
 	// Create a custom HTTP client that uses our caching mechanism
 	cachedClient := &cachedHTTPClient{
 		detector: d,
-		ctx:      ctx,
+		doFunc:   func(req *http.Request) (*http.Response, error) { return d.cachedHTTPDo(ctx, req) },
 	}
 	client := googlemaps.NewClient(d.mapsAPIKey, cachedClient, d.logger)
 	return client.TimezoneForCoordinates(ctx, lat, lng)
@@ -39,10 +39,10 @@ func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64)
 // cachedHTTPClient wraps the Detector's cachedHTTPDo method to implement HTTPClient interface
 type cachedHTTPClient struct {
 	detector *Detector
-	ctx      context.Context
+	doFunc   func(*http.Request) (*http.Response, error)
 }
 
 func (c *cachedHTTPClient) Do(req *http.Request) (*http.Response, error) {
-	return c.detector.cachedHTTPDo(c.ctx, req)
+	return c.doFunc(req)
 }
 
