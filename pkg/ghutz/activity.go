@@ -641,33 +641,40 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	
 	
 	// Evaluate multiple timezone offsets to find the best candidates
-	// Test a wider range (±5 hours) to avoid missing the correct timezone
-	// when initial detection is influenced by evening activity patterns
-	minOffset := offsetInt - 5
-	maxOffset := offsetInt + 5
-	
-	// But still respect global bounds
-	if minOffset < -12 {
-		minOffset = -12
-	}
-	if maxOffset > 14 {
-		maxOffset = 14
-	}
+	// CRITICAL: Always test both American AND European timezones
+	// Always test ALL possible UTC offsets from -12 to +14
+	// This ensures --force-offset works for any valid timezone
+	minOffset := -12
+	maxOffset := 14
 	
 	for testOffset := minOffset; testOffset <= maxOffset; testOffset++ {
 		
 		// Calculate metrics for this offset
 		// 1. Lunch timing analysis
 		testLunchStart, testLunchEnd, testLunchConf := detectLunchBreakNoonCentered(halfHourCounts, testOffset)
+		
+		// Debug UTC-6 specifically
+		if testOffset == -6 && username == "kevinmdavis" {
+			if testLunchStart >= 0 {
+				d.logger.Info("UTC-6 lunch detected for kevin", 
+					"start_utc", testLunchStart, 
+					"end_utc", testLunchEnd,
+					"start_local", math.Mod(testLunchStart+float64(testOffset)+24, 24),
+					"confidence", testLunchConf)
+			} else {
+				d.logger.Info("UTC-6 NO lunch detected for kevin")
+			}
+		}
 		lunchLocalStart := math.Mod(testLunchStart+float64(testOffset)+24, 24)
 		
 		// Work start time (needed to validate lunch)
 		testWorkStart := (activeStart + testOffset + 24) % 24
 		
-		// Find first activity in this timezone (more accurate than activeStart which uses initial offset)
+		// Find first SIGNIFICANT activity in this timezone (more accurate than activeStart which uses initial offset)
+		// Look for sustained activity (>5 events) not just any blip
 		firstActivityLocal := 24.0
 		for utcHour := 0; utcHour < 24; utcHour++ {
-			if hourCounts[utcHour] > 0 {
+			if hourCounts[utcHour] > 5 {  // Changed from > 0 to > 5 for significant activity
 				localHour := float64((utcHour + testOffset + 24) % 24)
 				if localHour < firstActivityLocal {
 					firstActivityLocal = localHour
@@ -684,13 +691,6 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			testLunchConf >= 0.3 &&
 			lunchLocalStart >= firstActivityLocal + 1.0 // At least 1 hour after first activity
 		
-		// Debug for UTC-4
-		if testOffset == -4 && testLunchStart >= 0 {
-			fmt.Printf("UTC-4 lunch found: start=%.1f UTC (%.1f local), conf=%.2f, reasonable=%v\n", 
-				testLunchStart, lunchLocalStart, testLunchConf, lunchReasonable)
-		} else if testOffset == -4 {
-			fmt.Printf("UTC-4 NO lunch found (returned -1)\n")
-		}
 		
 		// Calculate lunch dip strength
 		lunchDipStrength := 0.0
@@ -715,7 +715,8 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		
 		// 3. Work hours analysis
 		// testWorkStart already calculated above for lunch validation
-		workReasonable := testWorkStart >= 6 && testWorkStart <= 10 // Allow 6am starts for early risers
+		// Check if work hours are reasonable based on ACTUAL first activity, not initial guess
+		workReasonable := firstActivityLocal >= 6 && firstActivityLocal <= 10 // Allow 6am starts for early risers
 		
 		// 4. Evening activity (7-11pm local)
 		// To convert local hour to UTC: UTC = local - offset
@@ -833,13 +834,18 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		// Lunch timing - 15 points max (strong signal when clear)
 		if lunchReasonable {
 			lunchScore := 0.0
-			if lunchLocalStart >= 11.5 && lunchLocalStart <= 13.5 {
-				// 11:30am to 1:30pm are all equally good lunch times
-				lunchScore = 12 // Perfect lunch timing (includes 1:30pm for IdlePhysicist)
-				adjustments = append(adjustments, fmt.Sprintf("+12 (perfect lunch 11:30am-1:30pm, at %.1f)", lunchLocalStart))
+			// CRITICAL: Noon (12:00) is the most common lunch time globally
+			if lunchLocalStart >= 11.75 && lunchLocalStart <= 12.25 {
+				// Within 15 minutes of noon - STRONGEST signal
+				lunchScore = 15 // Perfect noon timing gets maximum bonus
+				adjustments = append(adjustments, fmt.Sprintf("+15 (perfect noon lunch, at %.1f)", lunchLocalStart))
+			} else if lunchLocalStart >= 11.5 && lunchLocalStart <= 13.5 {
+				// 11:30am to 1:30pm are good lunch times
+				lunchScore = 10 // Good lunch timing
+				adjustments = append(adjustments, fmt.Sprintf("+10 (good lunch 11:30am-1:30pm, at %.1f)", lunchLocalStart))
 			} else if lunchLocalStart >= 11.0 && lunchLocalStart <= 14.0 {
-				lunchScore = 10 // Good lunch timing (11am-2pm)
-				adjustments = append(adjustments, fmt.Sprintf("+10 (good lunch 11am-2pm, at %.1f)", lunchLocalStart))
+				lunchScore = 8 // Acceptable lunch timing (11am-2pm)
+				adjustments = append(adjustments, fmt.Sprintf("+8 (acceptable lunch 11am-2pm, at %.1f)", lunchLocalStart))
 			} else if lunchLocalStart >= 10.5 && lunchLocalStart <= 14.5 {
 				lunchScore = 6 // Acceptable lunch timing
 				adjustments = append(adjustments, fmt.Sprintf("+6 (acceptable lunch 10:30am-2:30pm, at %.1f)", lunchLocalStart))
@@ -847,9 +853,16 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				lunchScore = 2 // Lunch detected but unusual timing
 				adjustments = append(adjustments, fmt.Sprintf("+2 (unusual lunch timing at %.1f)", lunchLocalStart))
 			}
-			// Boost score based on dip strength (up to 3 bonus points for strong drops)
-			// A 50%+ drop like IdlePhysicist's 58.3% is a very strong signal
-			dipBonus := math.Min(3, lunchDipStrength*6)
+			// Boost score based on dip strength (up to 5 bonus points for strong drops)
+			// An 85%+ drop like Kevin's noon lunch is an EXTREMELY strong signal
+			dipBonus := 0.0
+			if lunchDipStrength >= 0.8 {
+				dipBonus = 5.0 // Massive bonus for 80%+ drops
+			} else if lunchDipStrength >= 0.6 {
+				dipBonus = 3.0 // Good bonus for 60%+ drops
+			} else if lunchDipStrength >= 0.4 {
+				dipBonus = 1.5 // Small bonus for 40%+ drops
+			}
 			if dipBonus > 0 {
 				adjustments = append(adjustments, fmt.Sprintf("+%.1f (lunch dip strength %.1f%%)", dipBonus, lunchDipStrength*100))
 			}
@@ -873,30 +886,38 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		}
 		
 		// Work hours - 8 points max, with penalties for too-early starts
-		if workReasonable {
-			if testWorkStart >= 7 && testWorkStart <= 9 {
+		// CRITICAL: Use firstActivityLocal which is calculated per-timezone, not testWorkStart
+		if workReasonable && firstActivityLocal < 24 {
+			actualWorkStart := int(firstActivityLocal)
+			if actualWorkStart >= 7 && actualWorkStart <= 9 {
 				testConfidence += 8 // Good work start (7-9am)
-				adjustments = append(adjustments, fmt.Sprintf("+8 (good work start %dam)", testWorkStart))
-			} else if testWorkStart == 6 {
+				adjustments = append(adjustments, fmt.Sprintf("+8 (good work start %dam)", actualWorkStart))
+			} else if actualWorkStart == 6 {
 				testConfidence += 4 // 6am is early but some people do it
 				adjustments = append(adjustments, "+4 (early 6am work start)")
-			} else if testWorkStart >= 5 && testWorkStart <= 10 {
+			} else if actualWorkStart >= 5 && actualWorkStart <= 10 {
 				testConfidence += 2 // Acceptable but unusual
-				adjustments = append(adjustments, fmt.Sprintf("+2 (unusual work start %dam)", testWorkStart))
+				adjustments = append(adjustments, fmt.Sprintf("+2 (unusual work start %dam)", actualWorkStart))
 			} else {
 				testConfidence += 1 // Work hours detected but very unusual
-				adjustments = append(adjustments, fmt.Sprintf("+1 (very unusual work start %dam)", testWorkStart))
+				adjustments = append(adjustments, fmt.Sprintf("+1 (very unusual work start %dam)", actualWorkStart))
 			}
-		} else {
+		} else if firstActivityLocal < 24 {
 			// Apply STRONG penalty for unreasonable work hours
-			if testWorkStart >= 0 && testWorkStart < 6 {
-				// Starting work before 6am is highly suspicious
-				testConfidence -= 10 // Strong penalty for pre-6am starts
-				adjustments = append(adjustments, fmt.Sprintf("-10 (suspicious pre-6am start %dam)", testWorkStart))
-				if testWorkStart < 5 {
-					testConfidence -= 5 // Extra penalty for pre-5am starts
-					adjustments = append(adjustments, fmt.Sprintf("-5 (extra penalty for pre-5am start %dam)", testWorkStart))
+			actualWorkStart := int(firstActivityLocal)
+			if actualWorkStart >= 0 && actualWorkStart < 5 {
+				// Starting work before 5am is absurd - massive penalty
+				testConfidence -= 30 // HUGE penalty for pre-5am starts
+				adjustments = append(adjustments, fmt.Sprintf("-30 (absurd pre-5am start %dam)", actualWorkStart))
+				if actualWorkStart < 2 {
+					// Midnight to 2am? Even more absurd
+					testConfidence -= 20 // Additional massive penalty
+					adjustments = append(adjustments, fmt.Sprintf("-20 (extra penalty for midnight-%dam start)", actualWorkStart))
 				}
+			} else if actualWorkStart == 5 {
+				// 5am is very early but some people do it - moderate penalty
+				testConfidence -= 8
+				adjustments = append(adjustments, "-8 (very early 5am start)")
 			}
 		}
 		
@@ -976,11 +997,15 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				testConfidence += peakBonus
 			}
 			
-			// PENALTY for late peak activity (after 5pm)
-			// Peak productivity after 5pm is unusual for any timezone
-			if peakLocalHour >= 17 {
-				testConfidence -= 10 // Strong penalty for late peak
-				adjustments = append(adjustments, fmt.Sprintf("-10 (late peak at %dpm)", peakLocalHour-12))
+			// REDUCED PENALTY for late peak activity (5-7pm)
+			// Some people do their best work in the evening, especially remote workers
+			// Only penalize peaks after 7pm as those are truly unusual
+			if peakLocalHour >= 19 {
+				testConfidence -= 10 // Strong penalty for very late peak (after 7pm)
+				adjustments = append(adjustments, fmt.Sprintf("-10 (very late peak at %dpm)", peakLocalHour-12))
+			} else if peakLocalHour >= 17 {
+				testConfidence -= 3 // Small penalty for 5-7pm peak (could be valid)
+				adjustments = append(adjustments, fmt.Sprintf("-3 (evening peak at %dpm)", peakLocalHour-12))
 			}
 			
 			// PENALTY for very late work start (after 2pm)
@@ -1007,8 +1032,8 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				pacificBonus += 10.0 // Strong morning peak (astrojerms has 43 at 18:00)
 				adjustments = append(adjustments, fmt.Sprintf("+10 (Pacific strong morning peak %d/%d)", morning18, morning19))
 			} else if morning18 > 20 || morning19 > 10 {
-				pacificBonus += 6.0 // Good morning activity
-				adjustments = append(adjustments, fmt.Sprintf("+6 (Pacific good morning %d/%d)", morning18, morning19))
+				pacificBonus += 3.0 // Reduced: Moderate morning activity (was 6)
+				adjustments = append(adjustments, fmt.Sprintf("+3 (Pacific moderate morning %d/%d)", morning18, morning19))
 			}
 			
 			// Lunch dip at 20 UTC (noon Pacific) - astrojerms pattern
@@ -1020,12 +1045,13 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			}
 			
 			// Work starts early: 14-16 UTC (6-8am Pacific)
+			// BUT ONLY if actual work start is reasonable (not midnight!)
 			early14 := hourCounts[14] // 6am Pacific
 			early15 := hourCounts[15] // 7am Pacific
 			early16 := hourCounts[16] // 8am Pacific
-			if early14 > 0 || early15 > 5 || early16 > 10 {
-				pacificBonus += 5.0 // Early morning start (6-8am Pacific)
-				adjustments = append(adjustments, fmt.Sprintf("+5 (Pacific early start %d/%d/%d)", early14, early15, early16))
+			if (early14 > 0 || early15 > 5 || early16 > 10) && firstActivityLocal >= 5 && firstActivityLocal <= 8 {
+				pacificBonus += 2.0 // Reduced: Early morning start (was 5)
+				adjustments = append(adjustments, fmt.Sprintf("+2 (Pacific early start %d/%d/%d)", early14, early15, early16))
 			}
 			
 			// Low late evening activity: 0-4 UTC (4-8pm Pacific)
@@ -1146,24 +1172,12 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				endOfDayUTC = 22
 			}
 			
-			// Check if 5pm is the peak hour or near-peak
-			if hourCounts[endOfDayUTC] >= 20 {
-				// Strong 5pm activity is classic Eastern pattern
-				easternBonus += 10.0
-				adjustments = append(adjustments, fmt.Sprintf("+10 (Eastern 5pm peak with %d events)", hourCounts[endOfDayUTC]))
-				
-				// Extra bonus if it's THE peak hour
-				isPeak := true
-				for h := 0; h < 24; h++ {
-					if h != endOfDayUTC && hourCounts[h] > hourCounts[endOfDayUTC] {
-						isPeak = false
-						break
-					}
-				}
-				if isPeak {
-					easternBonus += 5.0
-					adjustments = append(adjustments, "+5 (5pm is absolute peak - classic Eastern)")
-				}
+			// 5pm activity is NOT a good signal - many people are commuting
+			// Only give a small bonus if there's VERY high activity suggesting they work on the train/from home
+			if hourCounts[endOfDayUTC] >= 30 {
+				// Unusually high 5pm activity might indicate remote work or train commute coding
+				easternBonus += 2.0
+				adjustments = append(adjustments, fmt.Sprintf("+2 (High 5pm activity %d - possible remote work)", hourCounts[endOfDayUTC]))
 			}
 			
 			// Check for 12pm lunch dip pattern (even if weak)
@@ -1185,6 +1199,76 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			
 			if easternBonus > 0 {
 				testConfidence += easternBonus
+			}
+		}
+		
+		// South American timezone pattern recognition (UTC-3)
+		// Brazil, Argentina, Uruguay, etc. have distinct patterns
+		if testOffset == -3 {
+			southAmericaBonus := 0.0
+			// Debug: check what values we have
+			d.logger.Debug("UTC-3 check", "username", username, "hour21", hourCounts[21])
+			
+			// UTC-3 typically has lunch at 12:00-1:00pm (not early like US)
+			// Check for noon lunch pattern
+			if lunchLocalStart >= 11.5 && lunchLocalStart <= 13.0 && testLunchConf > 0.5 {
+				southAmericaBonus += 6.0
+				adjustments = append(adjustments, fmt.Sprintf("+6 (South America noon lunch at %.1f)", lunchLocalStart))
+			}
+			
+			// CRITICAL: 6pm end-of-day peak is common in South America
+			// For UTC-3: 18:00 local = 21:00 UTC
+			endOfDayUTC := 21
+			
+			// Check if 6pm has significant activity
+			if hourCounts[endOfDayUTC] >= 20 {
+				// Strong 6pm activity is typical for Brazil/Argentina
+				southAmericaBonus += 8.0
+				adjustments = append(adjustments, fmt.Sprintf("+8 (South America 6pm peak with %d events)", hourCounts[endOfDayUTC]))
+				
+				// If 21:00 UTC is a peak hour, that's very strong for UTC-3
+				isPeak := true
+				for h := 0; h < 24; h++ {
+					if h != endOfDayUTC && hourCounts[h] > hourCounts[endOfDayUTC] {
+						isPeak = false
+						break
+					}
+				}
+				if isPeak {
+					southAmericaBonus += 4.0
+					adjustments = append(adjustments, "+4 (6pm is peak hour - typical South America)")
+				}
+			}
+			
+			// Morning start pattern - South Americans often start 8-9am (not as early as US)
+			morningStartUTC := 11 // 8am local in UTC-3
+			lateStartUTC := 12    // 9am local in UTC-3
+			
+			if hourCounts[morningStartUTC] > 10 || hourCounts[lateStartUTC] > 10 {
+				southAmericaBonus += 3.0
+				adjustments = append(adjustments, "+3 (South America 8-9am work start)")
+			}
+			
+			// Check for evening activity (7-10pm) - common in South America
+			eveningActivity := 0
+			for h := 22; h <= 24; h++ { // 7-9pm local
+				if h < 24 {
+					eveningActivity += hourCounts[h]
+				}
+			}
+			eveningActivity += hourCounts[0] + hourCounts[1] // 9-11pm local
+			
+			if eveningActivity > 40 {
+				southAmericaBonus += 2.0
+				adjustments = append(adjustments, fmt.Sprintf("+2 (South America evening activity %d events)", eveningActivity))
+			}
+			
+			// Population center bonus - Brazil/Argentina are major tech hubs
+			southAmericaBonus += 2.0
+			adjustments = append(adjustments, "+2 (South America population centers)")
+			
+			if southAmericaBonus > 0 {
+				testConfidence += southAmericaBonus
 			}
 		}
 		
@@ -1224,27 +1308,62 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		// Note: Work start penalty is now applied globally based on firstActivityLocal
 		// in the peak activity timing section above
 		
-		// Apply population-based adjustments for timezone likelihood (reduced)
+		// Apply statistics-based population adjustments for Americas tech workers
+		// Based on Stack Overflow surveys, GitHub data, and tech employment statistics
+		// Total tech workers by timezone (approximate):
+		// Pacific (UTC-8/-7): ~950K workers (37% of US) - SF Bay, Seattle, LA, Portland
+		// Eastern (UTC-5/-4): ~900K workers (35% of US) - NYC, Boston, DC, Atlanta, Toronto
+		// Central (UTC-6): ~500K workers (20% of US) - Austin, Chicago, Dallas, Houston
+		// Mountain (UTC-7/-6): ~200K workers (8% of US) - Denver, Phoenix, SLC
+		// Brazil/Argentina (UTC-3): ~300K workers - São Paulo, Buenos Aires, Rio
+		
 		switch testOffset {
-		case -8, -7: // Pacific Time (many tech companies)
-			testConfidence += 3 // Good boost for Pacific
-			adjustments = append(adjustments, "+3 (Pacific population boost)")
-		case -4, -5: // Eastern Time (large population)
-			testConfidence += 2 // Moderate boost for Eastern
-			adjustments = append(adjustments, "+2 (Eastern population boost)")
-		case -6: // Central Time
-			testConfidence += 1 // Small boost for Central
-			adjustments = append(adjustments, "+1 (Central population boost)")
-		case -3: // Atlantic Time (parts of Canada, Brazil, Argentina)
-			// No adjustment - reasonable population
+		case -8: // Pacific Standard Time
+			testConfidence += 4.5 // Highest concentration: Silicon Valley effect
+			adjustments = append(adjustments, "+4.5 (Pacific - 37% of US tech)")
+		case -7: // Pacific Daylight / Mountain Standard
+			// Could be Pacific (summer) or Mountain (winter)
+			// Weight toward Pacific since it's 4.6x larger than Mountain
+			testConfidence += 3.5 // Weighted average
+			adjustments = append(adjustments, "+3.5 (PDT/MST - mixed Pacific/Mountain)")
+		case -5: // Eastern Standard / Central Daylight
+			// Could be Eastern (winter) or Central (summer)
+			// Eastern is 1.8x larger than Central
+			testConfidence += 3.5 // Weighted average
+			adjustments = append(adjustments, "+3.5 (EST/CDT - mixed Eastern/Central)")
+		case -4: // Eastern Daylight Time
+			testConfidence += 4.0 // Second highest: NYC, Boston, DC
+			adjustments = append(adjustments, "+4.0 (Eastern - 35% of US tech)")
+		case -6: // Central Standard / Mountain Daylight
+			// Could be Central (winter) or Mountain (summer)
+			// Central is 2.5x larger than Mountain
+			testConfidence += 2.0 // Weighted average
+			adjustments = append(adjustments, "+2.0 (CST/MDT - mixed Central/Mountain)")
+		case -3: // Brazil/Argentina Time
+			testConfidence += 2.0 // Major South American tech hubs
+			adjustments = append(adjustments, "+2.0 (Brazil/Argentina tech hubs)")
 		case -2, -1: // Atlantic ocean timezones (Azores, Cape Verde, etc.)
 			testConfidence -= 10 // Significant penalty - very few developers
 			adjustments = append(adjustments, "-10 (Atlantic ocean low population)")
 		case 0: // UTC/GMT (UK, Portugal, Iceland, West Africa)
 			// No penalty - significant population
+			// Check for European commute pattern (quiet hour at 17-18 UTC = 17-18 local)
+			if hourCounts[17] < 5 && hourCounts[18] > 10 {
+				testConfidence += 5.0 // Bonus for commute pattern
+				adjustments = append(adjustments, "+5 (European commute pattern 17:00)")
+			}
 		case 1, 2: // European timezones
 			testConfidence += 0.5 // Small boost for European developers
 			adjustments = append(adjustments, "+0.5 (European population boost)")
+			// Check for European commute pattern
+			commuteHourUTC := 17 - testOffset // 17:00 local in UTC
+			if commuteHourUTC >= 0 && commuteHourUTC < 24 {
+				nextHourUTC := (commuteHourUTC + 1) % 24
+				if hourCounts[commuteHourUTC] < 5 && hourCounts[nextHourUTC] > 10 {
+					testConfidence += 5.0 // Bonus for commute pattern
+					adjustments = append(adjustments, fmt.Sprintf("+5 (European commute at %d:00 UTC)", commuteHourUTC))
+				}
+			}
 		case 8, 9: // China, Singapore, Australia
 			testConfidence += 0.5 // Small boost for Asian developers
 			adjustments = append(adjustments, "+0.5 (Asian population boost)")
@@ -1321,10 +1440,9 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		}
 	}
 	
-	// Keep only top 3 candidates
-	if len(candidates) > 3 {
-		candidates = candidates[:3]
-	}
+	// Keep ALL candidates for --force-offset support
+	// We've already analyzed all 27 possible offsets (-12 to +14)
+	// so we have complete data for any forced offset the user might choose
 	
 	// Log the top candidates and use the best one
 	if len(candidates) > 0 {
@@ -1334,7 +1452,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			"top_confidence", candidates[0].Confidence)
 		
 		for i, c := range candidates {
-			if i >= 3 {
+			if i >= 5 {
 				break
 			}
 			d.logger.Debug("timezone candidate", "username", username,
@@ -1445,19 +1563,13 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		return orgs[i].count > orgs[j].count
 	})
 	// Take top 5 organizations, but only those with more than 1 contribution
-	var topOrgs []struct {
-		Name  string `json:"name"`
-		Count int    `json:"count"`
-	}
+	var topOrgs []OrgActivity
 	for i := 0; i < len(orgs) && len(topOrgs) < 5; i++ {
 		// Skip organizations with only 1 contribution
 		if orgs[i].count <= 1 {
 			continue
 		}
-		topOrgs = append(topOrgs, struct {
-			Name  string `json:"name"`
-			Count int    `json:"count"`
-		}{
+		topOrgs = append(topOrgs, OrgActivity{
 			Name:  orgs[i].name,
 			Count: orgs[i].count,
 		})

@@ -71,6 +71,40 @@ type OptionHolder struct {
 	forceActivity bool
 }
 
+// LunchBreak represents detected lunch break times.
+type LunchBreak struct {
+	Start      float64 `json:"start"`
+	End        float64 `json:"end"`
+	Confidence float64 `json:"confidence"`
+}
+
+// PeakTime represents peak productivity periods.
+type PeakTime struct {
+	Start float64 `json:"start"`
+	End   float64 `json:"end"`
+	Count int     `json:"count"`
+}
+
+// ActiveHours represents working hours.
+type ActiveHours struct {
+	Start float64 `json:"start"`
+	End   float64 `json:"end"`
+}
+
+// DateRange represents activity date range.
+type DateRange struct {
+	OldestActivity      time.Time `json:"oldest_activity,omitempty"`
+	NewestActivity      time.Time `json:"newest_activity,omitempty"`
+	TotalDays           int       `json:"total_days,omitempty"`
+	SpansDSTTransitions bool      `json:"spans_dst_transitions,omitempty"`
+}
+
+// OrgActivity represents organization activity counts.
+type OrgActivity struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
 // Result represents timezone detection results.
 type Result struct {
 	DetectionTime              time.Time              `json:"detection_time"`
@@ -87,40 +121,17 @@ type Result struct {
 	Username                   string                 `json:"username"`
 	ActivityTimezone           string                 `json:"activity_timezone,omitempty"`
 	GeminiPrompt               string                 `json:"gemini_prompt,omitempty"`
-	ActivityDateRange          struct {
-		OldestActivity      time.Time `json:"oldest_activity,omitempty"`
-		NewestActivity      time.Time `json:"newest_activity,omitempty"`
-		TotalDays           int       `json:"total_days,omitempty"`
-		SpansDSTTransitions bool      `json:"spans_dst_transitions,omitempty"`
-	} `json:"activity_date_range,omitempty"`
-	TopOrganizations []struct // Oldest activity timestamp
-	// Whether data spans DST transitions
-	{
-		Name  string `json:"name"`
-		Count int    `json:"count"`
-	} `json:"top_organizations"`
-	QuietHoursUTC []int `json:"quiet_hours_utc,omitempty"` // Hourly resolution (legacy)
-	SleepBucketsUTC []float64 `json:"sleep_buckets_utc,omitempty"` // 30-minute resolution sleep periods
-
-	LunchHoursUTC struct {
-		Start      float64 `json:"start"`
-		End        float64 `json:"end"`
-		Confidence float64 `json:"confidence"`
-	} `json:"lunch_hours_utc,omitempty"`
-	PeakProductivity struct {
-		Start float64 `json:"start"`
-		End   float64 `json:"end"`
-		Count int     `json:"count"`
-	} `json:"peak_productivity"`
-	ActiveHoursLocal struct {
-		Start float64 `json:"start"`
-		End   float64 `json:"end"`
-	} `json:"active_hours_local,omitempty"`
-	LocationConfidence float64 `json:"location_confidence,omitempty"`
-	TimezoneConfidence float64 `json:"timezone_confidence,omitempty"`
-	Confidence         float64 `json:"confidence"` // Lunch start time in UTC (supports 30-min increments)
-	// Work end time in UTC (supports 30-min increments)
-	TimezoneCandidates []TimezoneCandidate `json:"timezone_candidates,omitempty"` // Top timezone candidates
+	ActivityDateRange          DateRange              `json:"activity_date_range,omitempty"`
+	TopOrganizations           []OrgActivity          `json:"top_organizations"`
+	QuietHoursUTC              []int                  `json:"quiet_hours_utc,omitempty"`
+	SleepBucketsUTC            []float64              `json:"sleep_buckets_utc,omitempty"`
+	LunchHoursUTC              LunchBreak             `json:"lunch_hours_utc,omitempty"`
+	PeakProductivity           PeakTime               `json:"peak_productivity"`
+	ActiveHoursLocal           ActiveHours            `json:"active_hours_local,omitempty"`
+	LocationConfidence         float64                `json:"location_confidence,omitempty"`
+	TimezoneConfidence         float64                `json:"timezone_confidence,omitempty"`
+	Confidence                 float64                `json:"confidence"`
+	TimezoneCandidates         []TimezoneCandidate    `json:"timezone_candidates,omitempty"`
 }
 
 // Location represents geographic coordinates.

@@ -476,52 +476,6 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 		return nil
 	}
 
-	// Validate Gemini's suggestion against activity candidates if available
-	if activityResult != nil && len(activityResult.TimezoneCandidates) > 0 {
-		// Extract UTC offset from Gemini's timezone
-		geminiOffset := extractUTCOffset(timezone)
-		
-		// Check if Gemini's suggestion is within ±2 hours of any top 3 candidate
-		validSuggestion := false
-		minDistance := 24 // Start with max possible distance
-		
-		for i, candidate := range activityResult.TimezoneCandidates {
-			if i >= 3 {
-				break // Only check top 3 candidates
-			}
-			
-			candidateOffset := int(candidate.Offset)
-			distance := abs(geminiOffset - candidateOffset)
-			
-			// Handle wraparound (e.g., UTC+12 to UTC-11)
-			if distance > 12 {
-				distance = 24 - distance
-			}
-			
-			if distance < minDistance {
-				minDistance = distance
-			}
-			
-			if distance <= 2 {
-				validSuggestion = true
-				break
-			}
-		}
-		
-		if !validSuggestion {
-			// Log the violation and fall back to activity-based detection
-			d.logger.Warn("Gemini suggestion violates activity constraint",
-				"username", username,
-				"gemini_timezone", timezone,
-				"gemini_offset", geminiOffset,
-				"top_candidates", fmt.Sprintf("%+v", activityResult.TimezoneCandidates[:min(3, len(activityResult.TimezoneCandidates))]),
-				"min_distance", minDistance,
-				"reasoning", reasoning)
-			
-			// Return nil to fall back to activity-based detection
-			return nil
-		}
-	}
 
 	result := &Result{
 		Username:                username,

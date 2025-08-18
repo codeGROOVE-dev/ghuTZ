@@ -110,8 +110,8 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	if candidates, ok := contextData["timezone_candidates"].([]TimezoneCandidate); ok && len(candidates) > 0 {
 		sb.WriteString("\nTimezone Candidates (unified analysis):\n")
 		for i, candidate := range candidates {
-			if i >= 3 {
-				break // Only show top 3
+			if i >= 5 {
+				break // Only show top 5
 			}
 			// Display the confidence with enhanced dynamic range
 			// Raw scores are typically 15-45, with small differences being significant

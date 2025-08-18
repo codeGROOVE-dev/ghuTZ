@@ -24,11 +24,7 @@ type ActivityHistogram struct {
 }
 
 // getOrgColorFunc returns a color function for an organization.
-func getOrgColorFunc(org string, topOrgs []struct {
-	Name  string `json:"name"`
-	Count int    `json:"count"`
-},
-) *color.Color {
+func getOrgColorFunc(org string, topOrgs []OrgActivity) *color.Color {
 	// Define colors for top 3 orgs only
 	colors := []*color.Color{
 		color.New(color.FgBlue),   // Blue for top org

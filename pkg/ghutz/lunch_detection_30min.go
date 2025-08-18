@@ -1,9 +1,7 @@
 package ghutz
 
 import (
-	"fmt"
 	"math"
-	"os"
 )
 
 // DetectLunchBreakNoonCentered looks for lunch breaks in the 10am-2:30pm window
@@ -16,7 +14,7 @@ func DetectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 // SIMPLIFIED VERSION - just find ANY drop in activity
 func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int) (lunchStart, lunchEnd, confidence float64) {
 	// Debug output disabled to reduce clutter
-	// fmt.Fprintf(os.Stderr, "\n=== Lunch Detection for UTC%+d ===\n", utcOffset)
+	// Enable with --verbose flag if needed
 	
 	// First, check what data we have in the lunch window
 	// fmt.Fprintf(os.Stderr, "Activity in lunch window (10am-2:30pm local):\n")
@@ -72,6 +70,36 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 				beforeUTC += 24
 			}
 			beforeCount := halfHourCounts[beforeUTC]
+			
+			// CRITICAL: Check for sustained activity in the hour BEFORE lunch
+			// Real lunch breaks happen after working for a while, not at the start of the day
+			activityBeforeLunch := 0
+			for t := 1.0; t <= 2.0; t += 0.5 { // Check 1-2 hours before lunch
+				checkUTC := startUTC - t
+				if checkUTC < 0 {
+					checkUTC += 24
+				}
+				activityBeforeLunch += halfHourCounts[checkUTC]
+			}
+			
+			// Skip if there's no meaningful work before this "lunch"
+			// (Less than 20 events in the 2 hours before = probably not actually working yet)
+			// BUT: For sparse data (< 500 total events), lower the threshold
+			totalEvents := 0
+			for _, count := range halfHourCounts {
+				totalEvents += count
+			}
+			
+			minActivityThreshold := 20
+			if totalEvents < 200 {
+				minActivityThreshold = 10 // Lower threshold for very sparse data
+			} else if totalEvents < 500 {
+				minActivityThreshold = 15 // Lower threshold for sparse data
+			}
+			
+			if activityBeforeLunch < minActivityThreshold {
+				continue
+			}
 			
 			// Get activity during lunch (average)
 			// CRITICAL: Treat missing buckets as 0 events (perfect lunch signal!)
@@ -134,18 +162,20 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 			}
 			
 			if dropRatio > minThreshold {
-				// Debug output for wangzhen case
-				if os.Getenv("DEBUG_LUNCH") != "" {
-					fmt.Fprintf(os.Stderr, "  Found drop: %.1f local for %.0f min, %.1f%% drop, initial=%.3f\n", 
-						startLocal, duration*60, dropRatio*100, dropRatio)
-					fmt.Fprintf(os.Stderr, "    Before=%d, Lunch=%.1f, After=%d, Recovery=%.2f\n",
-						beforeCount, avgLunchActivity, afterCount, recoveryToPreLunch)
-					fmt.Fprintf(os.Stderr, "    QuickLunch=%v, StrongRecovery=%v, Noon=%.2f, 1130=%.2f, 1230=%.2f, Eff=%.2f\n",
-						isQuickLunch, hasStrongRecovery, distanceFromNoon, distanceFrom1130, distanceFrom1230, effectiveDistance)
-				}
+				// Debug output disabled - too verbose even for --verbose mode
+				// Uncomment for debugging specific lunch detection issues
 				
 				// Adjust scoring based on lunch duration and recovery pattern
 				effectiveScore := dropRatio
+				
+				// CRITICAL: Boost score if there was good work activity before lunch
+				// This helps distinguish real lunch from early morning quiet periods
+				if activityBeforeLunch > 40 {
+					effectiveScore *= 1.5 // 50% bonus for strong pre-lunch work
+				} else if activityBeforeLunch > 30 {
+					effectiveScore *= 1.2 // 20% bonus for moderate pre-lunch work
+				}
+				// Note: < 20 events already filtered out above
 				
 				// CRITICAL: Massive preference for 100% activity drops
 				// This ensures perfect lunch signals always win over partial drops
@@ -191,10 +221,11 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 					if isQuickLunch {
 						effectiveScore *= 1.3 // Extra 30% bonus for quick lunch at noon
 					}
-				} else if distanceFrom1130 <= 0.25 { // 11:15-11:45 range (inclusive)
-					effectiveScore *= 1.8 // 80% bonus for 11:30 lunch
 				} else if distanceFrom1230 <= 0.25 { // 12:15-12:45 range (inclusive)
-					effectiveScore *= 1.8 // 80% bonus for 12:30 lunch
+					// 12:30pm is VERY common, especially in Latin America
+					effectiveScore *= 2.2 // 120% bonus for 12:30 lunch (more popular than 11:30!)
+				} else if distanceFrom1130 <= 0.25 { // 11:15-11:45 range (inclusive)
+					effectiveScore *= 1.5 // 50% bonus for 11:30 lunch (less common than noon/12:30)
 				} else if effectiveDistance < 0.5 { // Within 30 minutes of any standard time
 					effectiveScore *= 1.5 // 50% bonus for near-standard lunch
 					if isQuickLunch {
@@ -216,18 +247,10 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 				}
 				
 				if effectiveScore > bestScore {
-					if os.Getenv("DEBUG_LUNCH") != "" {
-						fmt.Fprintf(os.Stderr, "    FINAL SCORE: %.3f (from initial %.3f)\n", effectiveScore, dropRatio)
-						fmt.Fprintf(os.Stderr, "    NEW BEST: %.1f local, %.0f min, score %.3f > %.3f\n", 
-							startLocal, duration*60, effectiveScore, bestScore)
-					}
 					bestScore = effectiveScore
 					bestDrop = dropRatio // Save actual drop ratio for reporting
 					bestStart = startLocal
 					bestDuration = duration
-				} else if os.Getenv("DEBUG_LUNCH") != "" && effectiveScore > 0 {
-					fmt.Fprintf(os.Stderr, "    Not best: %.1f local, score %.3f <= %.3f\n", 
-						startLocal, effectiveScore, bestScore)
 				}
 			}
 		}

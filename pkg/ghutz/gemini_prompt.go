@@ -8,8 +8,8 @@ EVIDENCE:
 %s
 
 🔴 MANDATORY CONSTRAINT - THIS OVERRIDES ALL OTHER SIGNALS:
-If activity_timezone candidates are provided (e.g., "Top 3 candidates: UTC+12, UTC+9, UTC+11"):
-- You MUST select a timezone within ±2 hours of one of the top 3 candidates
+If activity_timezone candidates are provided (e.g., "Top 5 candidates: UTC+12, UTC+9, UTC+11, UTC+10, UTC+8"):
+- You MUST select a timezone within ±2 hours of one of the top 5 candidates
 - Activity patterns represent ACTUAL behavior and cannot be ignored
 - Name etymology, company location, and other signals can only influence WHICH candidate to pick, not override them entirely
 - Example: If candidates are UTC+10/+11/+12, you CANNOT pick Europe/Moscow (UTC+3) even for a Russian name
@@ -20,6 +20,8 @@ DETECTION PRIORITIES (subject to above constraint):
    - Repo names with locations = strongest evidence ("ncdmv-app" = North Carolina, "toronto-meetup" = Toronto)
    - Government/civic repos suggest location IF compatible with activity patterns
    - US state names/codes in repos = US location (but must match activity timezone)
+   - 🇧🇷 CRITICAL: BVSP/Bovespa repositories = Brazilian Stock Exchange = STRONG Brazil signal (prefer over Argentina)
+   - "bov-stream: Realtime BVSP stock price analysis" = Working with Brazilian financial data = Brazil location
    - If someone with a Russian name isn't contributing to Russian projects, chances are they are in another country in the same timezone, like Australia.
 
 2. NAME CLUES (ONLY to disambiguate between viable candidates):
@@ -29,6 +31,8 @@ DETECTION PRIORITIES (subject to above constraint):
    - Russian names + Pacific activity (UTC+10/+11) = Vladivostok/Far East Russia, NOT Moscow
    - Belgian/Flemish names + UTC+0/+1 activity = Belgium
    - Portuguese names + UTC+0 activity = Portugal
+   - German surnames (like Knabben) + UTC-3 activity + Brazilian context = Southern Brazil (German immigration areas)
+   - UTC-3 timezone: Argentina (Buenos Aires) OR Brazil (São Paulo, Rio, Brasília, Southern states)
    - A Russian name (like Mikhail Mazurskiy) in UTC-10 is more likely to be in Sydney than Russia - unless they work with Russian projects.
    - ⚠️ NEVER let name override activity by more than 2 hours
 
@@ -38,6 +42,7 @@ DETECTION PRIORITIES (subject to above constraint):
    - Only use company location if it matches activity patterns
    - Being a Ukranian company, GitLab employees are more likely to live in Ukraine than Russia
    - Company names may be GitHub org names, like "@gitlabhq" being a reference for GitLab
+   - References to country-specific organizations in commit messages or repositories indicate a country strongly (for example, BVSP for Brazil, FTC for USA)
 
 4. ACTIVITY PATTERNS (HARD CONSTRAINTS):
    - Work before 5am local = wrong timezone (5-6am acceptable for some)
@@ -67,6 +72,13 @@ DETECTION PRIORITIES (subject to above constraint):
 
 7. Location Generation
 	- Guess a specific city in the timezone that would be the most likely with all evidence given: maybe it's just the biggest tech hub, or maybe you saw clues in the repository names or indicated hobbies
+	- 🚨 For UTC-3 disambiguation: ALWAYS check for Brazil-specific indicators FIRST:
+	  • BVSP/Bovespa in repos = Brazil (São Paulo likely)
+	  • Portuguese content, .br domains = Brazil
+	  • German surname + UTC-3 = Often Southern Brazil (Florianópolis, Porto Alegre, Curitiba)
+	- Brazilian tech hubs in UTC-3: São Paulo, Rio de Janeiro, Porto Alegre, Florianópolis, Curitiba
+	- Argentine tech hubs in UTC-3: Buenos Aires, Córdoba, Rosario
+	- Default to Brazil over Argentina when you see financial/stock market repos with BVSP
 	- You must make a guess. It's OK if your guess is incorrect, close is good enough.
 
 Return JSON only:

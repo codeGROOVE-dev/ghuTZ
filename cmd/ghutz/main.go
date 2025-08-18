@@ -26,7 +26,18 @@ var (
 	noCache      = flag.Bool("no-cache", false, "Disable caching")
 	verbose      = flag.Bool("verbose", false, "Enable verbose logging")
 	version      = flag.Bool("version", false, "Show version")
+	forceOffset  = flag.Int("force-offset", 99, "Force a specific UTC offset for visualization (-12 to +14)")
 )
+
+// getCandidateRank returns the 1-based rank of a candidate in the list
+func getCandidateRank(target ghutz.TimezoneCandidate, candidates []ghutz.TimezoneCandidate) int {
+	for i, c := range candidates {
+		if c.Offset == target.Offset {
+			return i + 1
+		}
+	}
+	return 0
+}
 
 func main() {
 	flag.Parse()
@@ -132,7 +143,55 @@ func main() {
 
 	// Show histogram by default if activity data is available
 	if result.HourlyActivityUTC != nil {
-		histogramOutput := ghutz.GenerateHistogram(result, result.HourlyActivityUTC, result.Timezone)
+		// Use forced offset if specified, otherwise use detected timezone
+		displayTimezone := result.Timezone
+		displayResult := result
+		
+		if *forceOffset >= -12 && *forceOffset <= 14 {
+			// Convert forced offset to UTC+/- format
+			if *forceOffset >= 0 {
+				displayTimezone = fmt.Sprintf("UTC+%d", *forceOffset)
+			} else {
+				displayTimezone = fmt.Sprintf("UTC%d", *forceOffset)
+			}
+			
+			// Check if this offset matches one of our analyzed candidates
+			foundCandidate := false
+			for _, candidate := range result.TimezoneCandidates {
+				if int(candidate.Offset) == *forceOffset {
+					// We have data for this timezone! Use the pre-calculated values
+					fmt.Printf("\n🔧 Using forced offset %s for visualization (analyzed candidate #%d)\n", 
+						displayTimezone, getCandidateRank(candidate, result.TimezoneCandidates))
+					
+					// Create a modified result with the candidate's lunch data
+					modifiedResult := *result
+					modifiedResult.LunchHoursUTC = ghutz.LunchBreak{
+						Start:      candidate.LunchStartUTC,
+						End:        candidate.LunchEndUTC,
+						Confidence: candidate.LunchConfidence,
+					}
+					// Keep existing peak and quiet markers as they're still valid
+					displayResult = &modifiedResult
+					foundCandidate = true
+					break
+				}
+			}
+			
+			if !foundCandidate {
+				// Not in our candidates - clear all markers as they would be misleading
+				fmt.Printf("\n🔧 Using forced offset %s for visualization\n", displayTimezone)
+				fmt.Printf("    (Note: No lunch/peak markers - offset not in analyzed candidates)\n")
+				
+				modifiedResult := *result
+				modifiedResult.LunchHoursUTC = ghutz.LunchBreak{} // Clear lunch markers
+				modifiedResult.PeakProductivity = ghutz.PeakTime{} // Clear peak markers
+				modifiedResult.QuietHoursUTC = nil // Clear quiet hour markers
+				modifiedResult.SleepBucketsUTC = nil // Clear sleep markers
+				displayResult = &modifiedResult
+			}
+		}
+		
+		histogramOutput := ghutz.GenerateHistogram(displayResult, displayResult.HourlyActivityUTC, displayTimezone)
 		fmt.Print(histogramOutput)
 	}
 }
