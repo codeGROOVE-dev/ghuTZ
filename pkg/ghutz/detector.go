@@ -192,18 +192,13 @@ func (d *Detector) Close() error {
 }
 
 // mergeActivityData copies activity analysis data into the result.
-func mergeActivityData(result, activityResult *Result) {
-	mergeActivityDataWithLogger(result, activityResult, slog.Default())
-}
-
-// mergeActivityDataWithLogger copies activity analysis data into the result.
-func mergeActivityDataWithLogger(result, activityResult *Result, logger *slog.Logger) {
+func (d *Detector) mergeActivityData(result, activityResult *Result) {
 	if activityResult == nil || result == nil {
 		return
 	}
 	
 	// Log to see what's being merged
-	logger.Debug("mergeActivityData called",
+	d.logger.Debug("mergeActivityData called",
 		"result.Timezone", result.Timezone,
 		"activityResult.Timezone", activityResult.Timezone,
 		"has_candidates", activityResult.TimezoneCandidates != nil)
@@ -223,12 +218,12 @@ func mergeActivityDataWithLogger(result, activityResult *Result, logger *slog.Lo
 	// First check if we already calculated lunch for this timezone in our candidates
 	// This is needed because Gemini might pick a named timezone like America/Los_Angeles
 	// but our activity analysis used UTC-8, and they might have different lunch calculations
-	if result.HalfHourlyActivityUTC != nil && result.TimezoneCandidates != nil {
+	if activityResult.HalfHourlyActivityUTC != nil && activityResult.TimezoneCandidates != nil {
 		// Calculate timezone offset for the new timezone
 		newOffset := offsetFromNamedTimezone(result.Timezone)
 		oldOffset := offsetFromNamedTimezone(activityResult.Timezone)
 		
-		logger.Debug("mergeActivityData checking candidates",
+		d.logger.Debug("mergeActivityData checking candidates",
 			"result.Timezone", result.Timezone,
 			"activityResult.Timezone", activityResult.Timezone,
 			"newOffset", newOffset,
@@ -262,7 +257,7 @@ func mergeActivityDataWithLogger(result, activityResult *Result, logger *slog.Lo
 			for _, candidate := range result.TimezoneCandidates {
 				if int(candidate.Offset) == offset && candidate.LunchStartUTC >= 0 {
 					// Reuse the lunch calculation from this candidate
-					logger.Debug("reusing lunch from candidate",
+					d.logger.Debug("reusing lunch from candidate",
 						"timezone", result.Timezone,
 						"candidate_offset", candidate.Offset,
 						"lunch_start_utc", candidate.LunchStartUTC,
@@ -288,10 +283,10 @@ func mergeActivityDataWithLogger(result, activityResult *Result, logger *slog.Lo
 		
 		// If we didn't find a pre-calculated lunch, calculate it now
 		if !lunchFound {
-			logger.Debug("no matching candidate lunch found, calculating new lunch",
+			d.logger.Debug("no matching candidate lunch found, calculating new lunch",
 				"timezone", result.Timezone,
 				"offset", newOffset)
-			lunchStart, lunchEnd, lunchConfidence := detectLunchBreakNoonCentered(result.HalfHourlyActivityUTC, newOffset)
+			lunchStart, lunchEnd, lunchConfidence := detectLunchBreakNoonCentered(activityResult.HalfHourlyActivityUTC, newOffset)
 			result.LunchHoursUTC = struct {
 				Start      float64 `json:"start"`
 				End        float64 `json:"end"`
@@ -524,7 +519,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	if result := d.tryProfileScrapingWithContext(ctx, userCtx); result != nil {
 		d.logger.Info("detected from profile HTML", "username", username, "timezone", result.Timezone)
 		result.Name = fullName
-		mergeActivityData(result, activityResult)
+		d.mergeActivityData(result, activityResult)
 		return result, nil
 	}
 	d.logger.Debug("profile HTML scraping failed", "username", username)
@@ -533,7 +528,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	if result := d.tryLocationFieldWithContext(ctx, userCtx); result != nil {
 		d.logger.Info("detected from location field", "username", username, "timezone", result.Timezone, "location", result.LocationName)
 		result.Name = fullName
-		mergeActivityData(result, activityResult)
+		d.mergeActivityData(result, activityResult)
 		return result, nil
 	}
 	d.logger.Debug("location field analysis failed", "username", username)
@@ -542,7 +537,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	if result := d.tryUnifiedGeminiAnalysisWithContext(ctx, userCtx, activityResult); result != nil {
 		result.Name = fullName
 		// Use mergeActivityData to properly handle lunch time reuse from candidates
-		mergeActivityDataWithLogger(result, activityResult, d.logger)
+		d.mergeActivityData(result, activityResult)
 		if activityResult != nil {
 			d.logger.Info("timezone detected with Gemini + activity", "username", username,
 				"activity_timezone", activityResult.Timezone, "final_timezone", result.Timezone)

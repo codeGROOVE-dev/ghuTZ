@@ -83,18 +83,36 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 			}
 			
 			// Skip if there's no meaningful work before this "lunch"
-			// (Less than 20 events in the 2 hours before = probably not actually working yet)
-			// BUT: For sparse data (< 500 total events), lower the threshold
+			// BUT: For very sparse data, be more lenient
 			totalEvents := 0
 			for _, count := range halfHourCounts {
 				totalEvents += count
 			}
 			
 			minActivityThreshold := 20
-			if totalEvents < 200 {
-				minActivityThreshold = 10 // Lower threshold for very sparse data
+			if totalEvents < 50 {
+				// VERY sparse data (like josebiro with 37 events)
+				// Just require SOME activity in the morning, even if not in the 2 hours before
+				minActivityThreshold = 3 
+				// Also check broader window (3-4 hours before lunch)
+				for t := 2.5; t <= 4.0 && activityBeforeLunch < minActivityThreshold; t += 0.5 {
+					checkUTC := startUTC - t
+					if checkUTC < 0 {
+						checkUTC += 24
+					}
+					activityBeforeLunch += halfHourCounts[checkUTC]
+				}
+			} else if totalEvents < 200 {
+				minActivityThreshold = 10 // Lower threshold for sparse data
 			} else if totalEvents < 500 {
-				minActivityThreshold = 15 // Lower threshold for sparse data
+				minActivityThreshold = 15 // Lower threshold for moderate data
+			}
+			
+			// For lunch times very close to noon (12:00-12:30), be extra lenient
+			// People often have light mornings before lunch
+			if startLocal >= 11.5 && startLocal <= 12.5 && activityBeforeLunch > 0 {
+				// If it's near noon and there's ANY morning activity, consider it
+				minActivityThreshold = 1
 			}
 			
 			if activityBeforeLunch < minActivityThreshold {
@@ -146,6 +164,13 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 			// Use the closest distance to any standard lunch time
 			effectiveDistance := math.Min(distanceFromNoon, math.Min(distanceFrom1130, distanceFrom1230))
 			
+			// CRITICAL: Heavily penalize late lunches (1:30pm or later start)
+			// These are often false positives from afternoon lulls
+			// Also skip very early lunches (before 10:30am)
+			if startLocal >= 13.5 || startLocal < 10.5 {
+				continue // Skip unreasonable lunch times
+			}
+			
 			// Strong recovery: activity returns to >60% of pre-lunch level
 			// This indicates lunch is actually over
 			// BUT only consider this a valid lunch pattern if the drop was significant
@@ -183,14 +208,42 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 					effectiveScore *= 10.0 // 900% bonus for perfect drops near lunch time
 				}
 				
+				// CRITICAL: Check if lunch continues beyond current duration
+				// If activity remains low/zero after the lunch period, it likely continues
+				lunchContinues := false
+				actualDuration := duration
+				if duration < 1.5 { // Only check if not already at max duration
+					nextBucket := math.Mod(startUTC+duration+24, 24)
+					nextCount := halfHourCounts[nextBucket]
+					// If next slot has 0 or very low activity, lunch probably continues
+					if nextCount == 0 || (beforeCount > 0 && float64(nextCount)/float64(beforeCount) < 0.3) {
+						lunchContinues = true
+						// Automatically extend duration when lunch clearly continues
+						// This fixes the josebiro case where 30min lunch should be 60min
+						if duration == 0.5 && nextCount == 0 {
+							// Check if the next slot after that (1 hour total) also has low activity
+							nextNextBucket := math.Mod(startUTC+1.0+24, 24)
+							nextNextCount := halfHourCounts[nextNextBucket]
+							if nextNextCount == 0 || (beforeCount > 0 && float64(nextNextCount)/float64(beforeCount) < 0.3) {
+								actualDuration = 1.0 // Extend to full hour
+							} else {
+								actualDuration = 1.0 // Extend to full hour anyway since next slot is 0
+							}
+						}
+					}
+				}
+				
 				// For 30-minute lunches with strong recovery, give a big bonus
 				// This is the clearest signal of a quick lunch break
-				if duration == 0.5 && hasStrongRecovery { // 30 minutes with strong rebound
+				if duration == 0.5 && hasStrongRecovery && !lunchContinues { // 30 minutes with strong rebound
 					effectiveScore *= 2.0 // 100% bonus for clear quick lunch pattern
-				} else if duration == 0.5 && isQuickLunch { // 30 minutes with moderate rebound
+				} else if duration == 0.5 && isQuickLunch && !lunchContinues { // 30 minutes with moderate rebound
 					effectiveScore *= 1.3 // 30% bonus for quick lunch
+				} else if duration == 0.5 && lunchContinues {
+					// 30 minutes but activity stays low - lunch probably continues
+					effectiveScore *= 0.5 // 50% penalty - incomplete lunch detection
 				} else if duration == 1.0 && !hasStrongRecovery { // 60 minutes without strong recovery after
-					effectiveScore *= 1.1 // Small bonus for standard lunch
+					effectiveScore *= 1.2 // Bonus for standard hour lunch
 				} else if duration == 1.0 && hasStrongRecovery { 
 					// 60 minutes but activity rebounds strongly at 60min mark
 					// This might mean lunch was actually shorter
@@ -250,7 +303,7 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 					bestScore = effectiveScore
 					bestDrop = dropRatio // Save actual drop ratio for reporting
 					bestStart = startLocal
-					bestDuration = duration
+					bestDuration = actualDuration // Use extended duration if lunch continues
 				}
 			}
 		}

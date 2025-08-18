@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,18 +41,9 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	promptTemplate := unifiedGeminiPrompt()
 	prompt := fmt.Sprintf(promptTemplate, evidence)
 
-	// Check if DEBUG logging is enabled (which means verbose mode)
-	if d.logger.Enabled(ctx, slog.LevelDebug) {
-		// Output the Gemini prompt with beautiful formatting
-		fmt.Fprintf(os.Stderr, "\n")
-		fmt.Fprintf(os.Stderr, "🤖 Gemini API Request\n")
-		fmt.Fprintf(os.Stderr, "──────────────────────────────────────────────────\n")
-		fmt.Fprintf(os.Stderr, "📊 Model:         %s\n", d.geminiModel)
-		fmt.Fprintf(os.Stderr, "📝 Prompt Length: %d characters\n", len(prompt))
-		fmt.Fprintf(os.Stderr, "──────────────────────────────────────────────────\n")
-		fmt.Fprintf(os.Stderr, "📋 Prompt:\n%s\n", prompt)
-		fmt.Fprintf(os.Stderr, "──────────────────────────────────────────────────\n\n")
-	}
+	// Store prompt for potential later display (after histogram)
+	// TODO: Add mechanism to display this after the main output
+	// For now, suppress inline display to reduce clutter
 
 	// Pass verbose if DEBUG logging is enabled
 	isVerbose := d.logger.Enabled(ctx, slog.LevelDebug)
@@ -111,18 +101,9 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 		}
 	}
 	
-	// Check if DEBUG logging is enabled (which means verbose mode)
-	if d.logger.Enabled(ctx, slog.LevelDebug) {
-		// Output the Gemini response with beautiful formatting
-		fmt.Fprintf(os.Stderr, "\n")
-		fmt.Fprintf(os.Stderr, "✨ Gemini API Response\n")
-		fmt.Fprintf(os.Stderr, "──────────────────────────────────────────────────\n")
-		fmt.Fprintf(os.Stderr, "🕐 Timezone:      %s\n", timezone)
-		fmt.Fprintf(os.Stderr, "📍 Location:      %s\n", location)
-		fmt.Fprintf(os.Stderr, "🎯 Confidence:    %s (%.0f%%)\n", resp.ConfidenceLevel, confidence*100)
-		fmt.Fprintf(os.Stderr, "💭 Reasoning:     %s\n", reasoning)
-		fmt.Fprintf(os.Stderr, "──────────────────────────────────────────────────\n\n")
-	}
+	// Store response for potential later display (after histogram)
+	// TODO: Add mechanism to display this after the main output
+	// For now, suppress inline display to reduce clutter
 
 	// Adjust confidence based on data availability
 	if !hasActivityData && confidence > 0.7 {
