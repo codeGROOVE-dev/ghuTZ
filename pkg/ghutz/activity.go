@@ -10,6 +10,8 @@ import (
 	"time"
 	
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/sleep"
 )
 
 // GlobalLunchPattern represents the best lunch pattern found globally in UTC
@@ -165,7 +167,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		}
 	}
 
-	quietHours := findSleepHours(hourCounts)
+	quietHours := sleep.FindSleepHours(hourCounts)
 	// With limited data, we might not find clear sleep patterns
 	// If we don't have enough quiet hours, make educated guesses based on what we have
 	if len(quietHours) < 4 {
@@ -424,21 +426,21 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	activeStart, activeEnd := calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
 	
 	// STEP 1: Find the best global lunch pattern in UTC (timezone-independent)
-	bestGlobalLunch := findBestGlobalLunchPattern(halfHourCounts)
+	bestGlobalLunch := lunch.FindBestGlobalLunchPattern(halfHourCounts)
 	d.logger.Debug("best global lunch pattern", "username", username, 
-		"start_utc", bestGlobalLunch.startUTC, 
-		"confidence", bestGlobalLunch.confidence,
-		"drop_percent", bestGlobalLunch.dropPercent)
+		"start_utc", bestGlobalLunch.StartUTC, 
+		"confidence", bestGlobalLunch.Confidence,
+		"drop_percent", bestGlobalLunch.DropPercent)
 	
 	// DEBUG: Let's see what the half-hour data looks like around the detected lunch time
-	if bestGlobalLunch.startUTC > 0 {
-		debugStart := bestGlobalLunch.startUTC - 1.0
-		debugEnd := bestGlobalLunch.startUTC + 2.0
+	if bestGlobalLunch.StartUTC > 0 {
+		debugStart := bestGlobalLunch.StartUTC - 1.0
+		debugEnd := bestGlobalLunch.StartUTC + 2.0
 		d.logger.Debug("lunch pattern context", "username", username,
 			fmt.Sprintf("%.1f", debugStart), halfHourCounts[debugStart],
-			fmt.Sprintf("%.1f", bestGlobalLunch.startUTC-0.5), halfHourCounts[bestGlobalLunch.startUTC-0.5],
-			fmt.Sprintf("%.1f", bestGlobalLunch.startUTC), halfHourCounts[bestGlobalLunch.startUTC],
-			fmt.Sprintf("%.1f", bestGlobalLunch.startUTC+0.5), halfHourCounts[bestGlobalLunch.startUTC+0.5],
+			fmt.Sprintf("%.1f", bestGlobalLunch.StartUTC-0.5), halfHourCounts[bestGlobalLunch.StartUTC-0.5],
+			fmt.Sprintf("%.1f", bestGlobalLunch.StartUTC), halfHourCounts[bestGlobalLunch.StartUTC],
+			fmt.Sprintf("%.1f", bestGlobalLunch.StartUTC+0.5), halfHourCounts[bestGlobalLunch.StartUTC+0.5],
 			fmt.Sprintf("%.1f", debugEnd), halfHourCounts[debugEnd])
 	}
 	
@@ -454,7 +456,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		
 		// Calculate metrics for this offset
 		// 1. Lunch timing analysis
-		testLunchStart, testLunchEnd, testLunchConf := detectLunchBreakNoonCentered(halfHourCounts, testOffset)
+		testLunchStart, testLunchEnd, testLunchConf := lunch.DetectLunchBreakNoonCentered(halfHourCounts, testOffset)
 		
 		// Debug UTC-6 specifically
 		if testOffset == -6 && username == "kevinmdavis" {
@@ -593,9 +595,9 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		
 		// STEP 2: Distance-from-noon lunch bonus system
 		noonDistanceBonus := 0.0
-		if bestGlobalLunch.confidence > 0 {
+		if bestGlobalLunch.Confidence > 0 {
 			// Calculate what local time the global lunch would be for this timezone
-			globalLunchLocalTime := math.Mod(bestGlobalLunch.startUTC+float64(testOffset)+24, 24)
+			globalLunchLocalTime := math.Mod(bestGlobalLunch.StartUTC+float64(testOffset)+24, 24)
 			
 			// Calculate distance from noon (12:00) in 30-minute buckets
 			distanceFromNoon := math.Abs(globalLunchLocalTime - 12.0)
@@ -610,22 +612,22 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			// 3 buckets away (1.5 hours) = 1 point
 			// 4+ buckets away (2+ hours) = minimal points
 			if bucketsFromNoon == 0 {
-				noonDistanceBonus = 10 * bestGlobalLunch.confidence // Perfect noon
+				noonDistanceBonus = 10 * bestGlobalLunch.Confidence // Perfect noon
 				adjustments = append(adjustments, fmt.Sprintf("+%.1f (perfect noon lunch)", noonDistanceBonus))
 			} else if bucketsFromNoon <= 1 {
-				noonDistanceBonus = 6 * bestGlobalLunch.confidence // Within 30 min of noon
+				noonDistanceBonus = 6 * bestGlobalLunch.Confidence // Within 30 min of noon
 				adjustments = append(adjustments, fmt.Sprintf("+%.1f (lunch within 30min of noon)", noonDistanceBonus))
 			} else if bucketsFromNoon <= 2 {
-				noonDistanceBonus = 3 * bestGlobalLunch.confidence // Within 1 hour of noon
+				noonDistanceBonus = 3 * bestGlobalLunch.Confidence // Within 1 hour of noon
 				adjustments = append(adjustments, fmt.Sprintf("+%.1f (lunch within 1hr of noon)", noonDistanceBonus))
 			} else if bucketsFromNoon <= 3 {
-				noonDistanceBonus = 1 * bestGlobalLunch.confidence // Within 1.5 hours of noon
+				noonDistanceBonus = 1 * bestGlobalLunch.Confidence // Within 1.5 hours of noon
 				adjustments = append(adjustments, fmt.Sprintf("+%.1f (lunch within 1.5hr of noon)", noonDistanceBonus))
 			} else if bucketsFromNoon <= 4 {
-				noonDistanceBonus = 0.5 * bestGlobalLunch.confidence // Within 2 hours of noon
+				noonDistanceBonus = 0.5 * bestGlobalLunch.Confidence // Within 2 hours of noon
 				adjustments = append(adjustments, fmt.Sprintf("+%.1f (lunch within 2hr of noon)", noonDistanceBonus))
 			} else {
-				noonDistanceBonus = 0.2 * bestGlobalLunch.confidence // Too far from reasonable lunch time
+				noonDistanceBonus = 0.2 * bestGlobalLunch.Confidence // Too far from reasonable lunch time
 				adjustments = append(adjustments, fmt.Sprintf("+%.1f (lunch >2hr from noon)", noonDistanceBonus))
 			}
 			
@@ -1301,16 +1303,16 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			"lunch_start_utc", lunchStart, "lunch_end_utc", lunchEnd, "confidence", lunchConfidence)
 	} else {
 		// Fall back to calculating lunch for the chosen offset
-		lunchStart, lunchEnd, lunchConfidence = detectLunchBreakNoonCentered(halfHourCounts, offsetInt)
+		lunchStart, lunchEnd, lunchConfidence = lunch.DetectLunchBreakNoonCentered(halfHourCounts, offsetInt)
 		d.logger.Debug("calculated new lunch", "username", username,
 			"offset", offsetInt, "lunch_start_utc", lunchStart, "lunch_end_utc", lunchEnd, "confidence", lunchConfidence)
 	}
 	
 	// Only use global lunch pattern if we don't already have a high-confidence lunch
 	// Global patterns can be misleading - a consistent 2pm drop might be meetings, not lunch
-	if bestGlobalLunch.confidence > 0.5 && bestGlobalLunch.startUTC >= 0 && lunchConfidence < 0.7 {
+	if bestGlobalLunch.Confidence > 0.5 && bestGlobalLunch.StartUTC >= 0 && lunchConfidence < 0.7 {
 		// Calculate what local time the global lunch would be
-		globalLunchLocal := math.Mod(bestGlobalLunch.startUTC+float64(offsetInt)+24, 24)
+		globalLunchLocal := math.Mod(bestGlobalLunch.StartUTC+float64(offsetInt)+24, 24)
 		
 		// Only use if it's in a more typical lunch range (11:30am-1:30pm)
 		// 2pm is too late and likely represents something else
@@ -1318,14 +1320,14 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			// Don't completely override - average with the detected lunch if both exist
 			if lunchStart >= 0 {
 				// Weight the individual detection more than the global pattern
-				lunchStart = (lunchStart*0.7 + bestGlobalLunch.startUTC*0.3)
-				lunchEnd = (lunchEnd*0.7 + bestGlobalLunch.endUTC*0.3)
-				lunchConfidence = math.Max(lunchConfidence, bestGlobalLunch.confidence*0.8)
+				lunchStart = (lunchStart*0.7 + bestGlobalLunch.StartUTC*0.3)
+				lunchEnd = (lunchEnd*0.7 + bestGlobalLunch.EndUTC*0.3)
+				lunchConfidence = math.Max(lunchConfidence, bestGlobalLunch.Confidence*0.8)
 			} else {
 				// No individual lunch detected, use global
-				lunchStart = bestGlobalLunch.startUTC
-				lunchEnd = bestGlobalLunch.endUTC
-				lunchConfidence = bestGlobalLunch.confidence * 0.8 // Reduce confidence a bit
+				lunchStart = bestGlobalLunch.StartUTC
+				lunchEnd = bestGlobalLunch.EndUTC
+				lunchConfidence = bestGlobalLunch.Confidence * 0.8 // Reduce confidence a bit
 			}
 		}
 	}
@@ -1492,7 +1494,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				activeStart, activeEnd = calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
 
 				// Recalculate lunch with corrected offset
-				newLunchStart, newLunchEnd, newLunchConfidence := detectLunchBreakNoonCentered(halfHourCounts, offsetInt)
+				newLunchStart, newLunchEnd, newLunchConfidence := lunch.DetectLunchBreakNoonCentered(halfHourCounts, offsetInt)
 
 				// If the new lunch time is more reasonable, keep the correction
 				if newLunchStart >= 11.5 && newLunchStart <= 13.0 {
@@ -1558,7 +1560,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			activeStart, activeEnd = calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
 
 			// Recalculate lunch with new offset
-			lunchStart, lunchEnd, lunchConfidence = detectLunchBreakNoonCentered(halfHourCounts, offsetInt)
+			lunchStart, lunchEnd, lunchConfidence = lunch.DetectLunchBreakNoonCentered(halfHourCounts, offsetInt)
 		}
 
 		// Recalculate peak with new offset
@@ -1576,7 +1578,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	activeEndUTC := float64(activeEnd)
 
 	// Detect sleep periods using 30-minute resolution with buffer
-	sleepBuckets := detectSleepPeriodsWithHalfHours(halfHourCounts)
+	sleepBuckets := sleep.DetectSleepPeriodsWithHalfHours(halfHourCounts)
 	
 	result := &Result{
 		Username:         username,

@@ -1,4 +1,4 @@
-package ghutz
+package lunch
 
 import (
 	"testing"
@@ -38,7 +38,7 @@ func TestTstrombergFullHourLunch(t *testing.T) {
 	offset := -4
 
 	// Detect lunch for this timezone
-	lunchStart, lunchEnd, confidence := detectLunchBreakNoonCentered(halfHourCounts, offset)
+	lunchStart, lunchEnd, confidence := DetectLunchBreakNoonCentered(halfHourCounts, offset)
 
 	// Convert UTC lunch times to local Eastern Time
 	lunchStartLocal := lunchStart + float64(offset)

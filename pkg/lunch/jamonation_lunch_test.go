@@ -1,4 +1,4 @@
-package ghutz
+package lunch
 
 import (
 	"testing"
@@ -24,7 +24,7 @@ func TestJamonationLunchDetection(t *testing.T) {
 	
 	// Test for UTC-4 (Eastern Time - Toronto)
 	utcOffset := -4
-	lunchStart, lunchEnd, confidence := detectLunchBreakNoonCentered(halfHourCounts, utcOffset)
+	lunchStart, lunchEnd, confidence := DetectLunchBreakNoonCentered(halfHourCounts, utcOffset)
 	
 	// Convert to local time for checking
 	lunchStartLocal := lunchStart + float64(utcOffset)
@@ -56,7 +56,7 @@ func TestJamonationLunchDetection(t *testing.T) {
 	
 	// Also test UTC-8 (Pacific - where it's incorrectly placing them)
 	utcOffset = -8
-	lunchStart8, _, confidence8 := detectLunchBreakNoonCentered(halfHourCounts, utcOffset)
+	lunchStart8, _, confidence8 := DetectLunchBreakNoonCentered(halfHourCounts, utcOffset)
 	lunchStartLocal8 := lunchStart8 + float64(utcOffset)
 	if lunchStartLocal8 < 0 {
 		lunchStartLocal8 += 24

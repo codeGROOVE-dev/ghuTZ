@@ -1,4 +1,4 @@
-package ghutz
+package lunch
 
 import (
 	"testing"
@@ -62,14 +62,14 @@ func TestJosebiroLunchDetection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lunchStart, lunchEnd, confidence := detectLunchBreakNoonCentered(halfHourActivity, tt.utcOffset)
+			lunchStart, lunchEnd, confidence := DetectLunchBreakNoonCentered(halfHourActivity, tt.utcOffset)
 			
 			// Allow some flexibility in detection (within 30 minutes)
 			startOk := tt.wantStart < 0 || (lunchStart >= tt.wantStart-0.5 && lunchStart <= tt.wantStart+0.5)
 			endOk := tt.wantEnd < 0 || (lunchEnd >= tt.wantEnd-0.5 && lunchEnd <= tt.wantEnd+0.5)
 			
 			if !startOk || !endOk {
-				t.Errorf("detectLunchBreakNoonCentered() got lunch at %.1f-%.1f UTC, want around %.1f-%.1f UTC",
+				t.Errorf("DetectLunchBreakNoonCentered() got lunch at %.1f-%.1f UTC, want around %.1f-%.1f UTC",
 					lunchStart, lunchEnd, tt.wantStart, tt.wantEnd)
 				
 				// Convert to local time for debugging

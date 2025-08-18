@@ -2,6 +2,8 @@ package ghutz
 
 import (
 	"testing"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
 )
 
 // TestAmberArcadiaDelawareDetection tests that AmberArcadia (who lives in Delaware)
@@ -66,7 +68,7 @@ func TestAmberArcadiaDelawareDetection(t *testing.T) {
 	offset := -4
 
 	// Detect lunch for this timezone
-	lunchStart, lunchEnd, confidence := detectLunchBreakNoonCentered(halfHourCounts, offset)
+	lunchStart, lunchEnd, confidence := lunch.DetectLunchBreakNoonCentered(halfHourCounts, offset)
 
 	// Convert UTC lunch times to local Eastern Time
 	lunchStartLocal := lunchStart + float64(offset)

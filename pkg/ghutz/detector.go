@@ -21,6 +21,7 @@ import (
 	md "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/httpcache"
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
 )
 
 // SECURITY: GitHub token patterns for validation.
@@ -336,7 +337,7 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 			d.logger.Debug("no matching candidate lunch found, calculating new lunch",
 				"timezone", result.Timezone,
 				"offset", newOffset)
-			lunchStart, lunchEnd, lunchConfidence := detectLunchBreakNoonCentered(activityResult.HalfHourlyActivityUTC, newOffset)
+			lunchStart, lunchEnd, lunchConfidence := lunch.DetectLunchBreakNoonCentered(activityResult.HalfHourlyActivityUTC, newOffset)
 			result.LunchHoursUTC = struct {
 				Start      float64 `json:"start"`
 				End        float64 `json:"end"`

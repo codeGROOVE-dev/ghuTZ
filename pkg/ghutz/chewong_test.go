@@ -2,6 +2,8 @@ package ghutz
 
 import (
 	"testing"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
 )
 
 // TestChewongLunchDetection tests chewong's real activity data
@@ -41,7 +43,7 @@ func TestChewongLunchDetection(t *testing.T) {
 	offset := -7
 	
 	// Detect lunch for this timezone
-	lunchStart, lunchEnd, confidence := detectLunchBreakNoonCentered(halfHourCounts, offset)
+	lunchStart, lunchEnd, confidence := lunch.DetectLunchBreakNoonCentered(halfHourCounts, offset)
 	
 	// Convert UTC lunch times to local Pacific Time
 	lunchStartLocal := lunchStart + float64(offset)

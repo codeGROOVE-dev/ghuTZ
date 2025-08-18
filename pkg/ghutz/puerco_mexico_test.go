@@ -2,6 +2,8 @@ package ghutz
 
 import (
 	"testing"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
 )
 
 // TestPuercoMexicoCityLunchDetection tests that puerco's lunch is correctly detected at 12:30pm
@@ -40,7 +42,7 @@ func TestPuercoMexicoCityLunchDetection(t *testing.T) {
 	offset := -6
 	
 	// Detect lunch
-	lunchStart, lunchEnd, confidence := detectLunchBreakNoonCentered(halfHourCounts, offset)
+	lunchStart, lunchEnd, confidence := lunch.DetectLunchBreakNoonCentered(halfHourCounts, offset)
 	
 	// Convert to local time
 	lunchStartLocal := lunchStart + float64(offset)

@@ -2,6 +2,8 @@ package ghutz
 
 import (
 	"testing"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
 )
 
 // TestIdlePhysicistRealLunchDetection tests lunch detection with actual IdlePhysicist data
@@ -82,7 +84,7 @@ func TestIdlePhysicistRealLunchDetection(t *testing.T) {
 	offset := -6
 	
 	// Detect lunch for this timezone
-	lunchStart, lunchEnd, confidence := detectLunchBreakNoonCentered(halfHourCounts, offset)
+	lunchStart, lunchEnd, confidence := lunch.DetectLunchBreakNoonCentered(halfHourCounts, offset)
 	
 	// Convert UTC lunch times to local Mountain Time
 	lunchStartLocal := lunchStart + float64(offset)

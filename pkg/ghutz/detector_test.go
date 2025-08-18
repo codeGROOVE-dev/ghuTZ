@@ -3,6 +3,9 @@ package ghutz
 import (
 	"math"
 	"testing"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/sleep"
 )
 
 // TestPolishNameDetection verifies that Polish names are correctly identified
@@ -326,7 +329,7 @@ func TestWorkScheduleCorrection(t *testing.T) {
 			}
 
 			// Find quiet hours using the actual sleep detection algorithm
-			quietHours := findSleepHours(hourCounts)
+			quietHours := sleep.FindSleepHours(hourCounts)
 
 			// Calculate initial offset (mimicking detector logic)
 			var sum float64
@@ -523,7 +526,7 @@ func TestTstrombergLunchDetection(t *testing.T) {
 	utcOffset := -4
 	
 	// Detect lunch using 30-minute buckets
-	lunchStart, lunchEnd, lunchConfidence := detectLunchBreakNoonCentered(halfHourCounts, utcOffset)
+	lunchStart, lunchEnd, lunchConfidence := lunch.DetectLunchBreakNoonCentered(halfHourCounts, utcOffset)
 	
 	// Convert to local time for logging
 	lunchStartLocal := lunchStart + float64(utcOffset)

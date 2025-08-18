@@ -2,6 +2,8 @@ package ghutz
 
 import (
 	"testing"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
 )
 
 // TestAojeaPortoDetection tests that aojea's activity pattern correctly detects Porto, Portugal (UTC+0)
@@ -102,7 +104,7 @@ func TestAojeaPortoDetection(t *testing.T) {
 	offset := 0
 
 	// Test lunch detection for UTC+0
-	lunchStart, lunchEnd, confidence := detectLunchBreakNoonCentered(halfHourCounts, offset)
+	lunchStart, lunchEnd, confidence := lunch.DetectLunchBreakNoonCentered(halfHourCounts, offset)
 	
 	// Convert to local time
 	lunchStartLocal := lunchStart + float64(offset)

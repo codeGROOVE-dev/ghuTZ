@@ -2,6 +2,8 @@ package ghutz
 
 import (
 	"testing"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
 )
 
 // TestKimstervPacificHardcodedDetection tests kimsterv's timezone detection
@@ -42,7 +44,7 @@ func TestKimstervPacificHardcodedDetection(t *testing.T) {
 	}
 	
 	// Test lunch detection for UTC-8 (Pacific Standard Time)
-	lunchStart, lunchEnd, lunchConfidence := detectLunchBreakNoonCentered(halfHourlyData, -8)
+	lunchStart, lunchEnd, lunchConfidence := lunch.DetectLunchBreakNoonCentered(halfHourlyData, -8)
 	
 	t.Logf("Lunch detection for UTC-8: start=%.1f, end=%.1f, confidence=%.2f", 
 		lunchStart, lunchEnd, lunchConfidence)

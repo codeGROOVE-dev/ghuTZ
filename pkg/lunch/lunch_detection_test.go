@@ -1,4 +1,4 @@
-package ghutz
+package lunch
 
 import (
 	"testing"
@@ -38,7 +38,7 @@ func TestLunchDetectionTstromberg(t *testing.T) {
 
 	// The algorithm should detect lunch from 11:30-12:30 EDT
 
-	lunchStart, lunchEnd, confidence := detectLunchBreakNoonCentered(halfHourData, utcOffset)
+	lunchStart, lunchEnd, confidence := DetectLunchBreakNoonCentered(halfHourData, utcOffset)
 
 	// Convert to local time for verification
 	lunchStartLocal := (lunchStart + float64(utcOffset) + 24)

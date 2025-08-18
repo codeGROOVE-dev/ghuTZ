@@ -2,6 +2,8 @@ package ghutz
 
 import (
 	"testing"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
 )
 
 func TestTstrombergRealData(t *testing.T) {
@@ -32,7 +34,7 @@ func TestTstrombergRealData(t *testing.T) {
 		utcOffset := -4
 		
 		// Test lunch detection
-		lunchStart, lunchEnd, lunchConf := detectLunchBreakNoonCentered(halfHourCounts, utcOffset)
+		lunchStart, lunchEnd, lunchConf := lunch.DetectLunchBreakNoonCentered(halfHourCounts, utcOffset)
 		
 		// Convert UTC lunch to local time for verification
 		lunchStartLocal := lunchStart + float64(utcOffset)
@@ -127,7 +129,7 @@ func TestLunchDetectionWithRealPatterns(t *testing.T) {
 	
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lunchStart, lunchEnd, confidence := detectLunchBreakNoonCentered(
+			lunchStart, lunchEnd, confidence := lunch.DetectLunchBreakNoonCentered(
 				tt.halfHourData, tt.utcOffset)
 			
 			// Convert UTC lunch to local time

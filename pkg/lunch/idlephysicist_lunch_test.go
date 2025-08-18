@@ -1,4 +1,4 @@
-package ghutz
+package lunch
 
 import (
 	"testing"
@@ -66,7 +66,7 @@ func TestIdlePhysicistLunchDetection(t *testing.T) {
 	offset := -6
 	
 	// Detect lunch for this timezone
-	lunchStart, lunchEnd, confidence := detectLunchBreakNoonCentered(halfHourCounts, offset)
+	lunchStart, lunchEnd, confidence := DetectLunchBreakNoonCentered(halfHourCounts, offset)
 	
 	// Convert UTC lunch times to local Mountain Time
 	lunchStartLocal := lunchStart + float64(offset)
@@ -124,7 +124,7 @@ func TestIdlePhysicistLunchDetectionUTC6(t *testing.T) {
 	offset := -6
 	
 	// Detect lunch for this timezone
-	lunchStart, lunchEnd, confidence := detectLunchBreakNoonCentered(halfHourCounts, offset)
+	lunchStart, lunchEnd, confidence := DetectLunchBreakNoonCentered(halfHourCounts, offset)
 	
 	// Convert UTC lunch times to local time
 	lunchStartLocal := lunchStart + float64(offset)

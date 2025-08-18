@@ -1,4 +1,4 @@
-package ghutz
+package lunch
 
 import (
 	"testing"
@@ -51,7 +51,7 @@ func TestKimstervLunchDetection(t *testing.T) {
 	}
 	
 	// Test lunch detection for UTC-8 (Pacific Standard Time)
-	lunchStart, lunchEnd, lunchConfidence := detectLunchBreakNoonCentered(halfHourlyData, -8)
+	lunchStart, lunchEnd, lunchConfidence := DetectLunchBreakNoonCentered(halfHourlyData, -8)
 	
 	t.Logf("Lunch detection for UTC-8: start=%.1f, end=%.1f, confidence=%.2f", 
 		lunchStart, lunchEnd, lunchConfidence)

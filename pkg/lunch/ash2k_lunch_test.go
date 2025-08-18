@@ -1,4 +1,4 @@
-package ghutz
+package lunch
 
 import (
 	"testing"
@@ -32,7 +32,7 @@ func TestAsh2kSydneyLunchDetection(t *testing.T) {
 	offset := 10
 	
 	// Detect lunch for Sydney timezone
-	lunchStart, lunchEnd, confidence := detectLunchBreakNoonCentered(halfHourCounts, offset)
+	lunchStart, lunchEnd, confidence := DetectLunchBreakNoonCentered(halfHourCounts, offset)
 	
 	// Convert UTC lunch times to local Sydney time
 	lunchStartLocal := lunchStart + float64(offset)

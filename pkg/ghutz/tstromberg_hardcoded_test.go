@@ -2,6 +2,8 @@ package ghutz
 
 import (
 	"testing"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
 )
 
 // TestTstrombergHardcodedDataDetectsEasternTime tests tstromberg's timezone detection
@@ -39,7 +41,7 @@ func TestTstrombergHardcodedDataDetectsEasternTime(t *testing.T) {
 	}
 	
 	// Test lunch detection for UTC-4 (Eastern Daylight Time)
-	lunchStart, lunchEnd, lunchConfidence := detectLunchBreakNoonCentered(halfHourlyData, -4)
+	lunchStart, lunchEnd, lunchConfidence := lunch.DetectLunchBreakNoonCentered(halfHourlyData, -4)
 	
 	t.Logf("Lunch detection for UTC-4: start=%.1f, end=%.1f, confidence=%.2f", 
 		lunchStart, lunchEnd, lunchConfidence)
