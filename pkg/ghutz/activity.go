@@ -957,8 +957,7 @@ func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, usern
 		}
 		
 		// Combine all comment types
-		allComments := append(res.comments, starComments...)
-		allComments = append(allComments, commitComments...)
+		allComments := append(append(res.comments, starComments...), commitComments...)
 		
 		return &ActivityData{
 			PullRequests: res.prs,

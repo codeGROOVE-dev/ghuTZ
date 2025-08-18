@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/ghutz"
-	"github.com/codeGROOVE-dev/ghuTZ/pkg/timezone"
 )
 
 var (
@@ -30,15 +29,6 @@ var (
 	forceOffset  = flag.Int("force-offset", 99, "Force a specific UTC offset for visualization (-12 to +14)")
 )
 
-// getCandidateRank returns the 1-based rank of a candidate in the list
-func getCandidateRank(target timezone.TimezoneCandidate, candidates []timezone.TimezoneCandidate) int {
-	for i, c := range candidates {
-		if c.Offset == target.Offset {
-			return i + 1
-		}
-	}
-	return 0
-}
 
 func main() {
 	flag.Parse()
@@ -148,23 +138,32 @@ func main() {
 			// Check if this offset matches one of our analyzed candidates
 			foundCandidate := false
 			for _, candidate := range result.TimezoneCandidates {
-				if int(candidate.Offset) == *forceOffset {
-					// We have data for this timezone! Use the pre-calculated values
-					fmt.Printf("\n🔧 Using forced offset %s for visualization (analyzed candidate #%d)\n", 
-						displayTimezone, getCandidateRank(candidate, result.TimezoneCandidates))
-					
-					// Create a modified result with the candidate's lunch data
-					modifiedResult := *result
-					modifiedResult.LunchHoursUTC = ghutz.LunchBreak{
-						Start:      candidate.LunchStartUTC,
-						End:        candidate.LunchEndUTC,
-						Confidence: candidate.LunchConfidence,
-					}
-					// Keep existing peak and quiet markers as they're still valid
-					displayResult = &modifiedResult
-					foundCandidate = true
-					break
+				if int(candidate.Offset) != *forceOffset {
+					continue
 				}
+				// We have data for this timezone! Use the pre-calculated values
+				// Find the rank of this candidate (1-based)
+				rank := 0
+				for i, c := range result.TimezoneCandidates {
+					if c.Offset == candidate.Offset {
+						rank = i + 1
+						break
+					}
+				}
+				fmt.Printf("\n🔧 Using forced offset %s for visualization (analyzed candidate #%d)\n", 
+					displayTimezone, rank)
+				
+				// Create a modified result with the candidate's lunch data
+				modifiedResult := *result
+				modifiedResult.LunchHoursUTC = ghutz.LunchBreak{
+					Start:      candidate.LunchStartUTC,
+					End:        candidate.LunchEndUTC,
+					Confidence: candidate.LunchConfidence,
+				}
+				// Keep existing peak and quiet markers as they're still valid
+				displayResult = &modifiedResult
+				foundCandidate = true
+				break
 			}
 			
 			if !foundCandidate {

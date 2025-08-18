@@ -65,19 +65,13 @@ func cspPolicy() string {
 		"https://b.tile.openstreetmap.org",
 		"https://c.tile.openstreetmap.org",
 	}
-	directives = append(directives, fmt.Sprintf("connect-src %s", strings.Join(connectSrcs, " ")))
-
-	// Frame sources
-	directives = append(directives, "frame-src https://www.openstreetmap.org")
-
-	// Object sources - none for security
-	directives = append(directives, "object-src 'none'")
-
-	// Base URI - restrict to self
-	directives = append(directives, "base-uri 'self'")
-
-	// Form action - restrict to self
-	directives = append(directives, "form-action 'self'")
+	directives = append(directives,
+		fmt.Sprintf("connect-src %s", strings.Join(connectSrcs, " ")),
+		"frame-src https://www.openstreetmap.org",
+		"object-src 'none'",
+		"base-uri 'self'",
+		"form-action 'self'",
+	)
 
 	// Child sources (workers, embeds)
 	directives = append(directives, "child-src 'self'")
