@@ -149,10 +149,3 @@ func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64)
 	return result.TimeZoneID, nil
 }
 
-// Helper function for min
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

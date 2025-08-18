@@ -178,8 +178,18 @@ func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger 
 	// Also check bio for URLs
 	bioURLs := extractURLsFromHTML(account.Note)
 	for _, url := range bioURLs {
-		if !containsMastodonDomain(url) && !contains(profileData.Websites, url) {
-			profileData.Websites = append(profileData.Websites, url)
+		if !containsMastodonDomain(url) {
+			// Check if URL already exists in websites
+			found := false
+			for _, existing := range profileData.Websites {
+				if existing == url {
+					found = true
+					break
+				}
+			}
+			if !found {
+				profileData.Websites = append(profileData.Websites, url)
+			}
 		}
 	}
 	
@@ -257,12 +267,3 @@ func containsMastodonDomain(url string) bool {
 	return false
 }
 
-// contains checks if a string slice contains a string
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}

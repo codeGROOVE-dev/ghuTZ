@@ -139,8 +139,8 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			"target_days", minDaysSpan,
 			"constraints", strings.Join(constraints, ", "))
 
-		// Fetch ALL additional data from all sources
-		additionalData := d.fetchSupplementalActivity(ctx, username)
+		// Fetch ALL additional data from all sources (first page only for performance)
+		additionalData := d.fetchSupplementalActivityWithDepth(ctx, username, 1)
 
 		// Add all timestamps from supplemental data
 		prOldest := time.Now()
@@ -1927,10 +1927,6 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 }
 
 // fetchSupplementalActivity fetches additional activity data when events are insufficient.
-func (d *Detector) fetchSupplementalActivity(ctx context.Context, username string) *ActivityData {
-	// Default to fetching only first page of PRs/issues
-	return d.fetchSupplementalActivityWithDepth(ctx, username, 1)
-}
 
 // fetchSupplementalActivityWithDepth fetches additional activity data with control over depth.
 // maxPages controls how many pages of PRs/issues to fetch (1 = first 100, 2 = up to 200)
