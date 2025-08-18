@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -23,8 +25,13 @@ import (
 	"github.com/codeGROOVE-dev/retry"
 )
 
-// SECURITY: Timezone extraction patterns for validation.
+// SECURITY: Compiled regex patterns for validation and extraction.
 var (
+	// GitHub token patterns for validation (compiled once for performance)
+	githubPATRegex         = regexp.MustCompile(`^ghp_[a-zA-Z0-9]{36}$`)
+	githubAppTokenRegex    = regexp.MustCompile(`^ghs_[a-zA-Z0-9]{36}$`)
+	githubFineGrainedRegex = regexp.MustCompile(`^github_pat_[a-zA-Z0-9_]{82}$`)
+	
 	// Timezone extraction patterns.
 	timezoneDataAttrRegex = regexp.MustCompile(`data-timezone="([^"]+)"`)
 	timezoneJSONRegex     = regexp.MustCompile(`"timezone":"([^"]+)"`)
@@ -125,21 +132,11 @@ func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*htt
 func (d *Detector) isValidGitHubToken(token string) bool {
 	// SECURITY: Validate token format to prevent injection attacks
 	token = strings.TrimSpace(token)
-
-	// Check against known GitHub token patterns
-	// GitHub Personal Access Token (classic) - ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.
-	if matched, err := regexp.MatchString(`^ghp_[a-zA-Z0-9]{36}$`, token); err == nil && matched {
-		return true
-	}
-	// GitHub App Installation Token - ghs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.
-	if matched, err := regexp.MatchString(`^ghs_[a-zA-Z0-9]{36}$`, token); err == nil && matched {
-		return true
-	}
-	// GitHub Fine-grained PAT - github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.
-	if matched, err := regexp.MatchString(`^github_pat_[a-zA-Z0-9_]{82}$`, token); err == nil && matched {
-		return true
-	}
-	return false
+	
+	// Check against known GitHub token patterns (compiled regex for performance)
+	return githubPATRegex.MatchString(token) ||
+		githubAppTokenRegex.MatchString(token) ||
+		githubFineGrainedRegex.MatchString(token)
 }
 
 // isValidGitHubUsername validates GitHub username format for security.
@@ -156,7 +153,7 @@ func isValidGitHubUsername(username string) bool {
 	// - May contain alphanumeric characters and hyphens
 	// - Cannot start or end with hyphen
 	// - Cannot have consecutive hyphens
-	if len(username) > 39 || username == "" {
+	if len(username) > 39 {
 		return false
 	}
 
@@ -635,6 +632,38 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 
 	if !strings.HasPrefix(blogURL, "http://") && !strings.HasPrefix(blogURL, "https://") {
 		blogURL = "https://" + blogURL
+	}
+	
+	// SECURITY: Parse URL to validate it's safe to fetch
+	parsedURL, err := url.Parse(blogURL)
+	if err != nil {
+		d.logger.Debug("invalid URL format", "url", blogURL, "error", err)
+		return ""
+	}
+	
+	// SECURITY: Prevent SSRF attacks by blocking internal/private IPs and local URLs
+	host := strings.ToLower(parsedURL.Hostname())
+	
+	// Block localhost and local domains
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || 
+		strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") {
+		d.logger.Debug("blocked fetch to local/internal host", "host", host)
+		return ""
+	}
+	
+	// Block private IP ranges (RFC 1918)
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			d.logger.Debug("blocked fetch to private IP", "ip", host)
+			return ""
+		}
+	}
+	
+	// Block metadata service endpoints (AWS, GCP, Azure)
+	if host == "169.254.169.254" || host == "metadata.google.internal" || 
+		host == "metadata.azure.com" {
+		d.logger.Debug("blocked fetch to metadata service", "host", host)
+		return ""
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, blogURL, http.NoBody)

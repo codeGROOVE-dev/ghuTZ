@@ -5,7 +5,9 @@ import (
 	"html"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -266,6 +268,38 @@ func fetchWebsiteContent(ctx context.Context, websiteURL string, logger *slog.Lo
 
 	if !strings.HasPrefix(websiteURL, "http://") && !strings.HasPrefix(websiteURL, "https://") {
 		websiteURL = "https://" + websiteURL
+	}
+	
+	// SECURITY: Parse URL to validate it's safe to fetch
+	parsedURL, err := url.Parse(websiteURL)
+	if err != nil {
+		logger.Debug("invalid URL format", "url", websiteURL, "error", err)
+		return ""
+	}
+	
+	// SECURITY: Prevent SSRF attacks by blocking internal/private IPs and local URLs
+	host := strings.ToLower(parsedURL.Hostname())
+	
+	// Block localhost and local domains
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || 
+		strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") {
+		logger.Debug("blocked fetch to local/internal host", "host", host)
+		return ""
+	}
+	
+	// Block private IP ranges (RFC 1918)
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			logger.Debug("blocked fetch to private IP", "ip", host)
+			return ""
+		}
+	}
+	
+	// Block metadata service endpoints (AWS, GCP, Azure)
+	if host == "169.254.169.254" || host == "metadata.google.internal" || 
+		host == "metadata.azure.com" {
+		logger.Debug("blocked fetch to metadata service", "host", host)
+		return ""
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, websiteURL, http.NoBody)
