@@ -9,21 +9,23 @@ import (
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/timezone"
 )
 
-// repoContribution tracks contributions to a repository
+// repoContribution tracks contributions to a repository.
 type repoContribution struct {
 	Name  string
 	Count int
 }
 
 // formatEvidenceForGemini formats detection evidence for Gemini API analysis.
-// This optimized version reduces duplications while preserving critical signals.
-func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) string {
+// It organizes the evidence by signal strength: direct location signals,
+// activity-based timezone constraints, repository geography, recent activity,
+// work patterns, and website content for hobby detection.
+func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	var sb strings.Builder
 
-	// SECTION 1: DIRECT LOCATION EVIDENCE (Highest Priority)
+	// Section 1: Direct location evidence (highest priority).
 	sb.WriteString("=== PRIMARY LOCATION SIGNALS ===\n\n")
 
-	// User profile - most direct signal
+	// User profile is the most direct signal.
 	if user, ok := contextData["user"].(*github.GitHubUser); ok && user != nil {
 		sb.WriteString("GitHub Profile:\n")
 		if user.Name != "" {
@@ -47,7 +49,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		sb.WriteString("\n")
 	}
 
-	// Organizations
+	// Organizations with their locations and descriptions.
 	if orgs, ok := contextData["organizations"].([]github.Organization); ok && len(orgs) > 0 {
 		sb.WriteString("GitHub Organizations:\n")
 		for _, org := range orgs {
@@ -67,7 +69,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		sb.WriteString("\n")
 	}
 
-	// Country domains (consolidated)
+	// Country-specific domains provide strong location signals.
 	if tlds, ok := contextData["country_tlds"].([]CountryTLD); ok && len(tlds) > 0 {
 		sb.WriteString("Country domains: ")
 		for i, tld := range tlds {
@@ -79,24 +81,25 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		sb.WriteString("\n\n")
 	}
 
-	// Social media profiles
+	// Social media profiles can reveal location information.
 	if socialURLs, ok := contextData["social_media_urls"].([]string); ok && len(socialURLs) > 0 {
 		sb.WriteString("Social media profiles:\n")
 		for _, url := range socialURLs {
-			if strings.Contains(url, "twitter.com") || strings.Contains(url, "x.com") {
+			switch {
+			case strings.Contains(url, "twitter.com") || strings.Contains(url, "x.com"):
 				sb.WriteString(fmt.Sprintf("- Twitter/X: %s\n", url))
-			} else if strings.Contains(url, "linkedin.com") {
+			case strings.Contains(url, "linkedin.com"):
 				sb.WriteString(fmt.Sprintf("- LinkedIn: %s\n", url))
-			} else if strings.Contains(url, "@") || strings.Contains(url, "mastodon") || strings.Contains(url, "fosstodon") {
+			case strings.Contains(url, "@") || strings.Contains(url, "mastodon") || strings.Contains(url, "fosstodon"):
 				sb.WriteString(fmt.Sprintf("- Mastodon: %s\n", url))
-			} else {
+			default:
 				sb.WriteString(fmt.Sprintf("- %s\n", url))
 			}
 		}
 		sb.WriteString("\n")
 	}
 
-	// Mastodon profile detail if available
+	// Mastodon profile details if available.
 	if mastodonProfile, ok := contextData["mastodon_profile"].(*MastodonProfileData); ok && mastodonProfile != nil {
 		sb.WriteString("Mastodon profile details:\n")
 		if mastodonProfile.Username != "" {
@@ -114,12 +117,12 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		sb.WriteString("\n")
 	}
 
-	// SECTION 2: ACTIVITY-BASED TIMEZONE CONSTRAINTS (Mandatory)
+	// Section 2: Activity-based timezone constraints (mandatory).
 	sb.WriteString("=== ACTIVITY TIMEZONE ANALYSIS ===\n\n")
 
-	// Timezone candidates - CRITICAL CONSTRAINT
+	// Timezone candidates are critical constraints that must be respected.
 	if candidates, ok := contextData["timezone_candidates"].([]timezone.TimezoneCandidate); ok && len(candidates) > 0 {
-		// Summary line for constraint
+		// Summary line shows all viable candidates.
 		sb.WriteString("Top 5 candidates: ")
 		for i, candidate := range candidates {
 			if i >= 5 {
@@ -132,15 +135,15 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		}
 		sb.WriteString("\n\n")
 
-		// Details for top 3 only
+		// Show detailed signals for top 3 candidates.
 		for i, candidate := range candidates {
 			if i >= 3 {
 				break
 			}
-			sb.WriteString(fmt.Sprintf("%d. UTC%+.1f (%.0f%% confidence)\n", 
+			sb.WriteString(fmt.Sprintf("%d. UTC%+.1f (%.0f%% confidence)\n",
 				i+1, candidate.Offset, candidate.Confidence))
-			
-			// Key signals in compact format
+
+			// Format key signals compactly.
 			signals := []string{}
 			if candidate.WorkStartLocal >= 5 && candidate.WorkStartLocal <= 10 {
 				signals = append(signals, fmt.Sprintf("work %dam", candidate.WorkStartLocal))
@@ -158,8 +161,8 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		sb.WriteString("\n")
 	}
 
-	// Activity summary
-	if dateRange, ok := contextData["activity_date_range"].(map[string]interface{}); ok {
+	// Activity summary shows overall engagement.
+	if dateRange, ok := contextData["activity_date_range"].(map[string]any); ok {
 		if totalEvents, ok := dateRange["total_events"].(int); ok {
 			if totalDays, ok := dateRange["total_days"].(int); ok {
 				sb.WriteString(fmt.Sprintf("Activity: %d events over %d days\n", totalEvents, totalDays))
@@ -167,7 +170,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		}
 	}
 
-	// Time patterns
+	// Time patterns help validate timezone candidates.
 	if workHours, ok := contextData["work_hours_utc"].([]int); ok && len(workHours) == 2 {
 		sb.WriteString(fmt.Sprintf("Active hours UTC: %02d:00-%02d:00\n", workHours[0], workHours[1]))
 	}
@@ -175,7 +178,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		sb.WriteString(fmt.Sprintf("Quiet hours UTC: %v\n", quietHours))
 	}
 
-	// Hourly activity distribution (helpful for validation)
+	// Hourly activity distribution helps validate timezone candidates.
 	if hourCounts, ok := contextData["hour_counts"].(map[int]int); ok && len(hourCounts) > 0 {
 		sb.WriteString("\nHourly activity (UTC):\n")
 		for hour := 0; hour < 24; hour++ {
@@ -186,19 +189,19 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	}
 	sb.WriteString("\n")
 
-	// SECTION 3: REPOSITORY GEOGRAPHY & INTERESTS
+	// Section 3: Repository geography and interests.
 	sb.WriteString("=== REPOSITORY SIGNALS ===\n\n")
 
-	// First list user's repositories
+	// List user's repositories first.
 	if repos, ok := contextData["repositories"].([]github.Repository); ok && len(repos) > 0 {
 		sb.WriteString("User's repositories:\n")
 		count := 0
-		for _, repo := range repos {
-			if !repo.Fork && count < 20 { // Show up to 20 non-fork repos
-				if repo.Description != "" {
-					sb.WriteString(fmt.Sprintf("- %s: %s\n", repo.Name, repo.Description))
+		for i := range repos {
+			if !repos[i].Fork && count < 20 { // Show up to 20 non-fork repos.
+				if repos[i].Description != "" {
+					sb.WriteString(fmt.Sprintf("- %s: %s\n", repos[i].Name, repos[i].Description))
 				} else {
-					sb.WriteString(fmt.Sprintf("- %s\n", repo.Name))
+					sb.WriteString(fmt.Sprintf("- %s\n", repos[i].Name))
 				}
 				count++
 			}
@@ -206,41 +209,41 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		sb.WriteString("\n")
 	}
 
-	// List starred repositories
+	// Starred repositories reveal interests and potential location clues.
 	if starredRepos, ok := contextData["starred_repositories"].([]github.Repository); ok && len(starredRepos) > 0 {
 		sb.WriteString("Starred repositories (interests/location clues):\n")
-		for i, repo := range starredRepos {
-			if i >= 15 { // Limit to 15
+		for i := range starredRepos {
+			if i >= 15 { // Limit to 15 starred repos.
 				break
 			}
-			if repo.Description != "" {
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", repo.Name, repo.Description))
+			if starredRepos[i].Description != "" {
+				sb.WriteString(fmt.Sprintf("- %s: %s\n", starredRepos[i].Name, starredRepos[i].Description))
 			} else {
-				sb.WriteString(fmt.Sprintf("- %s\n", repo.Name))
+				sb.WriteString(fmt.Sprintf("- %s\n", starredRepos[i].Name))
 			}
 		}
 		sb.WriteString("\n")
 	}
 
-	// Now analyze for location and hobby clues (no duplicates)
+	// Analyze repositories for location and hobby clues.
 	locationRepos := make(map[string]string)
 	hobbyIndicators := make(map[string]bool)
-	
-	// Helper function to analyze repo
-	analyzeRepo := func(repo github.Repository, source string) {
+
+	// analyzeRepo extracts location and hobby indicators from a repository.
+	analyzeRepo := func(repo github.Repository, _ string) {
 		repoLower := strings.ToLower(repo.Name + " " + repo.Description)
-		
-		// Location-specific repos
+
+		// Check for location-specific keywords in repository names and descriptions.
 		locations := map[string][]string{
-			"Brazil": {"brazil", "brasil", "bvsp", "bovespa", "são paulo", "sao paulo", "rio de janeiro"},
-			"Argentina": {"argentina", "buenos aires"},
-			"Canada": {"canada", "toronto", "montreal", "vancouver", "ottawa", "calgary"},
-			"Colorado": {"colorado", "denver", "boulder"},
+			"Brazil":     {"brazil", "brasil", "bvsp", "bovespa", "são paulo", "sao paulo", "rio de janeiro"},
+			"Argentina":  {"argentina", "buenos aires"},
+			"Canada":     {"canada", "toronto", "montreal", "vancouver", "ottawa", "calgary"},
+			"Colorado":   {"colorado", "denver", "boulder"},
 			"California": {"california", "san francisco", "los angeles", "san diego"},
-			"Texas": {"texas", "austin", "houston", "dallas"},
-			"New York": {"new york", "nyc", "manhattan", "brooklyn"},
+			"Texas":      {"texas", "austin", "houston", "dallas"},
+			"New York":   {"new york", "nyc", "manhattan", "brooklyn"},
 		}
-		
+
 		for location, keywords := range locations {
 			for _, keyword := range keywords {
 				if strings.Contains(repoLower, keyword) {
@@ -249,17 +252,17 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 				}
 			}
 		}
-		
-		// Hobby/interest indicators
+
+		// Check for hobby and interest indicators.
 		hobbies := map[string][]string{
 			"Caving/Spelunking (US Mountain timezone likely)": {"caving", "spelunk", "cave map"},
-			"Rock climbing (Mountain/Pacific US)": {"climbing", "climb", "boulder", "crag"},
-			"Winter sports (Mountain states)": {"skiing", "ski", "snowboard", "snow"},
-			"Hiking/Outdoors (Western US)": {"hiking", "trail", "backpack", "camping"},
-			"Surfing (Coastal)": {"surf", "wave", "beach"},
-			"Desert activities (Southwest US)": {"desert", "canyon", "mesa"},
+			"Rock climbing (Mountain/Pacific US)":             {"climbing", "climb", "boulder", "crag"},
+			"Winter sports (Mountain states)":                 {"skiing", "ski", "snowboard", "snow"},
+			"Hiking/Outdoors (Western US)":                    {"hiking", "trail", "backpack", "camping"},
+			"Surfing (Coastal)":                               {"surf", "wave", "beach"},
+			"Desert activities (Southwest US)":                {"desert", "canyon", "mesa"},
 		}
-		
+
 		for hobby, keywords := range hobbies {
 			for _, keyword := range keywords {
 				if strings.Contains(repoLower, keyword) {
@@ -269,27 +272,27 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 			}
 		}
 	}
-	
-	// Analyze user's own repos
+
+	// Analyze user's own repositories.
 	if repos, ok := contextData["repositories"].([]github.Repository); ok {
-		for _, repo := range repos {
-			if !repo.Fork { // Skip forks
-				analyzeRepo(repo, "owned")
+		for i := range repos {
+			if !repos[i].Fork { // Skip forks.
+				analyzeRepo(repos[i], "owned")
 			}
 		}
 	}
-	
-	// Analyze starred repos for interests
+
+	// Analyze starred repositories for interests.
 	if starredRepos, ok := contextData["starred_repositories"].([]github.Repository); ok {
-		for _, repo := range starredRepos {
-			analyzeRepo(repo, "starred")
+		for i := range starredRepos {
+			analyzeRepo(starredRepos[i], "starred")
 		}
 	}
-	
-	// Output location-specific repos if found
+
+	// Output location-specific repositories if found.
 	if len(locationRepos) > 0 {
 		sb.WriteString("Location indicators found in repos:\n")
-		// Sort by repo name for consistent output
+		// Sort by repository name for consistent output.
 		var repoNames []string
 		for name := range locationRepos {
 			repoNames = append(repoNames, name)
@@ -297,7 +300,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		sort.Strings(repoNames)
 		count := 0
 		for _, name := range repoNames {
-			if count >= 5 { // Limit to 5 since we already listed repos above
+			if count >= 5 { // Limit to 5 location indicators.
 				break
 			}
 			sb.WriteString(fmt.Sprintf("- %s → %s\n", name, locationRepos[name]))
@@ -305,8 +308,8 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		}
 		sb.WriteString("\n")
 	}
-	
-	// Output hobby indicators
+
+	// Output hobby indicators if found.
 	if len(hobbyIndicators) > 0 {
 		sb.WriteString("Hobby/Interest indicators:\n")
 		for hobby := range hobbyIndicators {
@@ -315,11 +318,11 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		sb.WriteString("\n")
 	}
 
-	// Contributed repositories
+	// External contributions show collaboration patterns.
 	if contribs, ok := contextData["contributed_repositories"].([]repoContribution); ok && len(contribs) > 0 {
 		sb.WriteString("External contributions (repos not owned by user):\n")
 		for i, contrib := range contribs {
-			if i >= 15 { // Show up to 15
+			if i >= 15 { // Show up to 15 external contributions.
 				break
 			}
 			sb.WriteString(fmt.Sprintf("- %s (%d contributions)\n", contrib.Name, contrib.Count))
@@ -327,34 +330,34 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		sb.WriteString("\n")
 	}
 
-	// SECTION 4: RECENT ACTIVITY & CONTRIBUTIONS
+	// Section 4: Recent activity and contributions.
 	sb.WriteString("=== RECENT ACTIVITY ===\n\n")
 
-	// Pull requests (10 recent)
+	// Recent pull requests show current work focus.
 	if prs, ok := contextData["pull_requests"].([]github.PullRequest); ok && len(prs) > 0 {
 		sb.WriteString("Recent Pull Requests:\n")
-		for i, pr := range prs {
+		for i := range prs {
 			if i >= 10 {
 				break
 			}
-			sb.WriteString(fmt.Sprintf("- %s\n", pr.Title))
+			sb.WriteString(fmt.Sprintf("- %s\n", prs[i].Title))
 		}
 		sb.WriteString("\n")
 	}
 
-	// Issues (10 recent)
+	// Recent issues show areas of interest and collaboration.
 	if issues, ok := contextData["issues"].([]github.Issue); ok && len(issues) > 0 {
 		sb.WriteString("Recent Issues:\n")
-		for i, issue := range issues {
+		for i := range issues {
 			if i >= 10 {
 				break
 			}
-			sb.WriteString(fmt.Sprintf("- %s\n", issue.Title))
+			sb.WriteString(fmt.Sprintf("- %s\n", issues[i].Title))
 		}
 		sb.WriteString("\n")
 	}
 
-	// Commit messages (10 samples)
+	// Commit messages can reveal language patterns and work style.
 	if commitSamples, ok := contextData["commit_message_samples"].([]CommitMessageSample); ok && len(commitSamples) > 0 {
 		sb.WriteString("Recent Commit Messages:\n")
 		for i, sample := range commitSamples {
@@ -370,7 +373,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		sb.WriteString("\n")
 	}
 
-	// Text samples from PRs/issues/comments
+	// Text samples provide language and cultural indicators.
 	if textSamples, ok := contextData["text_samples"].([]string); ok && len(textSamples) > 0 {
 		sb.WriteString("Text samples from PRs/issues/comments:\n")
 		for i, sample := range textSamples {
@@ -382,23 +385,24 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		sb.WriteString("\n")
 	}
 
-	// SECTION 5: WORK PATTERNS
+	// Section 5: Work patterns.
 	sb.WriteString("\n=== WORK PATTERNS ===\n\n")
 
-	// Weekend vs weekday activity
+	// Weekend versus weekday activity reveals work style.
 	if weekendActivity, ok := contextData["weekend_activity_ratio"].(float64); ok {
 		sb.WriteString(fmt.Sprintf("Weekend activity: %.1f%% of weekday activity\n", weekendActivity*100))
-		if weekendActivity < 0.3 {
+		switch {
+		case weekendActivity < 0.3:
 			sb.WriteString("Pattern: Strong work/life separation (typical employee)\n")
-		} else if weekendActivity > 0.7 {
+		case weekendActivity > 0.7:
 			sb.WriteString("Pattern: Continuous activity (OSS maintainer)\n")
-		} else {
+		default:
 			sb.WriteString("Pattern: Moderate weekend activity\n")
 		}
 		sb.WriteString("\n")
 	}
 
-	// Day of week activity
+	// Day of week activity shows work schedule patterns.
 	if dayActivity, ok := contextData["day_of_week_activity"].(map[string]int); ok && len(dayActivity) > 0 {
 		sb.WriteString("Activity by day of week:\n")
 		days := []string{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
@@ -410,20 +414,20 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		sb.WriteString("\n")
 	}
 
-	// Lunch pattern
+	// Lunch break patterns help validate timezone.
 	if lunchHours, ok := contextData["lunch_break_utc"].([]int); ok && len(lunchHours) >= 2 {
 		if confidence, ok := contextData["lunch_confidence"].(float64); ok {
-			sb.WriteString(fmt.Sprintf("Lunch break UTC: %02d:00-%02d:00 (%.0f%% confidence)\n", 
+			sb.WriteString(fmt.Sprintf("Lunch break UTC: %02d:00-%02d:00 (%.0f%% confidence)\n",
 				lunchHours[0], lunchHours[1], confidence*100))
 		}
-		}
+	}
 
-	// Peak productivity
+	// Peak productivity hours indicate work style.
 	if peakHours, ok := contextData["peak_productivity_utc"].([]int); ok && len(peakHours) >= 2 {
 		sb.WriteString(fmt.Sprintf("Peak productivity UTC: %02d:00-%02d:00\n", peakHours[0], peakHours[1]))
 	}
 
-	// Evening activity
+	// Evening activity indicates personal coding time.
 	if eveningHours, ok := contextData["evening_activity_hours"].([]int); ok && len(eveningHours) > 0 {
 		sb.WriteString(fmt.Sprintf("Evening activity hours (7-11pm window): %v\n", eveningHours))
 		if eveningPct, ok := contextData["evening_activity_percentage"].(float64); ok {
@@ -432,7 +436,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	}
 	sb.WriteString("\n")
 
-	// SECTION 6: WEBSITE CONTENT (keep full for hobby detection)
+	// Section 6: Website content (kept full for hobby detection).
 	if websiteContent, ok := contextData["website_content"].(string); ok && websiteContent != "" {
 		sb.WriteString("=== WEBSITE CONTENT ===\n\n")
 		contentPreview := websiteContent
@@ -443,7 +447,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		sb.WriteString("\n\n")
 	}
 
-	// Mastodon website content
+	// Mastodon-linked website content.
 	if websiteContents, ok := contextData["mastodon_website_contents"].(map[string]string); ok && len(websiteContents) > 0 {
 		for website, content := range websiteContents {
 			sb.WriteString(fmt.Sprintf("Content from %s:\n", website))
@@ -458,3 +462,4 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 
 	return sb.String()
 }
+

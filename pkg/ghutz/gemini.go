@@ -25,7 +25,7 @@ type geminiQueryResult struct {
 }
 
 // queryUnifiedGeminiForTimezone queries Gemini AI for timezone detection.
-func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]interface{}, verbose bool) (*geminiQueryResult, error) {
+func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]any, verbose bool) (*geminiQueryResult, error) {
 	// Check if we have activity data for confidence scoring later
 	hasActivityData := false
 	if hourCounts, ok := contextData["hour_counts"].(map[int]int); ok && len(hourCounts) > 0 {
@@ -131,7 +131,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	}
 
 	// Prepare comprehensive context for Gemini
-	contextData := make(map[string]interface{})
+	contextData := make(map[string]any)
 	contextData["user"] = userCtx.User
 	contextData["recent_events"] = userCtx.Events
 
@@ -159,7 +159,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 				}
 			}
 
-			contextData["activity_date_range"] = map[string]interface{}{
+			contextData["activity_date_range"] = map[string]any{
 				"oldest":       activityResult.ActivityDateRange.OldestActivity,
 				"newest":       activityResult.ActivityDateRange.NewestActivity,
 				"total_days":   activityResult.ActivityDateRange.TotalDays,
