@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/codeGROOVE-dev/retry"
@@ -311,81 +312,164 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 		FromCache: make(map[string]bool),
 	}
 
+	var wg sync.WaitGroup
+	var mu sync.Mutex // For safe concurrent writes to userCtx
+
 	// Fetch user profile (with GraphQL for social accounts)
-	d.logger.Debug("checking user profile", "username", username)
-	userCtx.User = d.fetchUser(ctx, username)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.logger.Debug("checking user profile", "username", username)
+		user := d.fetchUser(ctx, username)
+		mu.Lock()
+		userCtx.User = user
+		mu.Unlock()
+	}()
 
 	// Fetch public events
-	d.logger.Debug("checking public events", "username", username)
-	events, err := d.fetchPublicEvents(ctx, username)
-	if err != nil {
-		d.logger.Debug("failed to fetch public events", "error", err)
-		events = []PublicEvent{}
-	}
-	userCtx.Events = events
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.logger.Debug("checking public events", "username", username)
+		events, err := d.fetchPublicEvents(ctx, username)
+		if err != nil {
+			d.logger.Debug("failed to fetch public events", "error", err)
+			events = []PublicEvent{}
+		}
+		mu.Lock()
+		userCtx.Events = events
+		mu.Unlock()
+	}()
 
 	// Fetch profile HTML for scraping
-	d.logger.Debug("checking profile HTML", "username", username)
-	userCtx.ProfileHTML = d.fetchProfileHTML(ctx, username)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.logger.Debug("checking profile HTML", "username", username)
+		html := d.fetchProfileHTML(ctx, username)
+		mu.Lock()
+		userCtx.ProfileHTML = html
+		mu.Unlock()
+	}()
 
 	// Fetch organizations
-	orgs, err := d.fetchOrganizations(ctx, username)
-	if err == nil {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		orgs, err := d.fetchOrganizations(ctx, username)
+		if err == nil {
+			d.logger.Debug("fetched organizations", "username", username, "count", len(orgs))
+		} else {
+			d.logger.Debug("failed to fetch organizations", "username", username, "error", err)
+		}
+		mu.Lock()
 		userCtx.Organizations = orgs
-		d.logger.Debug("fetched organizations", "username", username, "count", len(orgs))
-	} else {
-		d.logger.Debug("failed to fetch organizations", "username", username, "error", err)
-	}
+		mu.Unlock()
+	}()
 
-	// Fetch repositories (pinned and popular)
-	d.logger.Debug("checking repositories", "username", username)
-	pinnedRepos, _ := d.fetchPinnedRepositories(ctx, username)
-	popularRepos, _ := d.fetchPopularRepositories(ctx, username)
-	
-	// Combine and deduplicate repos
-	repoMap := make(map[string]Repository)
-	for _, repo := range pinnedRepos {
-		repoMap[repo.FullName] = repo
-	}
-	for _, repo := range popularRepos {
-		if _, exists := repoMap[repo.FullName]; !exists {
+	// Fetch repositories (pinned and popular) - do these in parallel too
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.logger.Debug("checking repositories", "username", username)
+		
+		var pinnedRepos, popularRepos []Repository
+		var repoWg sync.WaitGroup
+		
+		repoWg.Add(2)
+		go func() {
+			defer repoWg.Done()
+			pinnedRepos, _ = d.fetchPinnedRepositories(ctx, username)
+		}()
+		go func() {
+			defer repoWg.Done()
+			popularRepos, _ = d.fetchPopularRepositories(ctx, username)
+		}()
+		repoWg.Wait()
+		
+		// Combine and deduplicate repos
+		repoMap := make(map[string]Repository)
+		for _, repo := range pinnedRepos {
 			repoMap[repo.FullName] = repo
 		}
-	}
-	// Sort repo names for deterministic order
-	var repoNames []string
-	for name := range repoMap {
-		repoNames = append(repoNames, name)
-	}
-	sort.Strings(repoNames)
-	for _, name := range repoNames {
-		userCtx.Repositories = append(userCtx.Repositories, repoMap[name])
-	}
+		for _, repo := range popularRepos {
+			if _, exists := repoMap[repo.FullName]; !exists {
+				repoMap[repo.FullName] = repo
+			}
+		}
+		// Sort repo names for deterministic order
+		var repoNames []string
+		for name := range repoMap {
+			repoNames = append(repoNames, name)
+		}
+		sort.Strings(repoNames)
+		var repos []Repository
+		for _, name := range repoNames {
+			repos = append(repos, repoMap[name])
+		}
+		
+		mu.Lock()
+		userCtx.Repositories = repos
+		mu.Unlock()
+	}()
 
 	// Fetch starred repositories
-	d.logger.Debug("checking starred repositories", "username", username)
-	_, starredRepos, _ := d.fetchStarredRepositories(ctx, username)
-	userCtx.StarredRepos = starredRepos
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.logger.Debug("checking starred repositories", "username", username)
+		_, starredRepos, _ := d.fetchStarredRepositories(ctx, username)
+		mu.Lock()
+		userCtx.StarredRepos = starredRepos
+		mu.Unlock()
+	}()
 
 	// Fetch pull requests
-	d.logger.Debug("checking pull requests", "username", username)
-	prs, _ := d.fetchPullRequests(ctx, username)
-	userCtx.PullRequests = prs
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.logger.Debug("checking pull requests", "username", username)
+		prs, _ := d.fetchPullRequests(ctx, username)
+		mu.Lock()
+		userCtx.PullRequests = prs
+		mu.Unlock()
+	}()
 
 	// Fetch issues
-	d.logger.Debug("checking issues", "username", username)
-	issues, _ := d.fetchIssues(ctx, username)
-	userCtx.Issues = issues
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.logger.Debug("checking issues", "username", username)
+		issues, _ := d.fetchIssues(ctx, username)
+		mu.Lock()
+		userCtx.Issues = issues
+		mu.Unlock()
+	}()
 
 	// Fetch comments
-	d.logger.Debug("checking comments", "username", username)
-	comments, _ := d.fetchUserComments(ctx, username)
-	userCtx.Comments = comments
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.logger.Debug("checking comments", "username", username)
+		comments, _ := d.fetchUserComments(ctx, username)
+		mu.Lock()
+		userCtx.Comments = comments
+		mu.Unlock()
+	}()
 
 	// Fetch gists
-	d.logger.Debug("checking gists", "username", username)
-	gists, _ := d.fetchUserGists(ctx, username)
-	userCtx.Gists = gists
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.logger.Debug("checking gists", "username", username)
+		gists, _ := d.fetchUserGists(ctx, username)
+		mu.Lock()
+		userCtx.Gists = gists
+		mu.Unlock()
+	}()
+
+	// Wait for all fetches to complete
+	wg.Wait()
 
 	// Log summary
 	d.logger.Info("fetched all user data",

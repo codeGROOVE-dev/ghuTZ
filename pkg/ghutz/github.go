@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -1048,85 +1049,117 @@ func (d *Detector) fetchStarredRepositories(ctx context.Context, username string
 
 // fetchUserCommits fetches commit timestamps for a user's recent commits across their repositories.
 func (d *Detector) fetchUserCommits(ctx context.Context, username string) ([]time.Time, error) {
+	return d.fetchUserCommitsWithLimit(ctx, username, 2) // Default to 2 pages (200 commits)
+}
+
+// fetchUserCommitsWithLimit fetches commit timestamps with a configurable page limit.
+func (d *Detector) fetchUserCommitsWithLimit(ctx context.Context, username string, maxPages int) ([]time.Time, error) {
 	var allTimestamps []time.Time
 	const perPage = 100
-	const maxPages = 2 // Fetch up to 200 commits
 	
-	for page := 1; page <= maxPages; page++ {
-		// Use GitHub Search API to find commits by this user
-		// Note: This requires authentication for better rate limits
-		searchURL := fmt.Sprintf("https://api.github.com/search/commits?q=author:%s&sort=author-date&order=desc&per_page=%d&page=%d", 
-			username, perPage, page)
+	// Fetch pages in parallel if maxPages > 1
+	if maxPages > 1 {
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		results := make([][]time.Time, maxPages)
 		
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, http.NoBody)
-		if err != nil {
-			return allTimestamps, fmt.Errorf("creating request: %w", err)
+		for page := 1; page <= maxPages; page++ {
+			wg.Add(1)
+			go func(p int) {
+				defer wg.Done()
+				timestamps, _ := d.fetchCommitPage(ctx, username, p, perPage)
+				mu.Lock()
+				results[p-1] = timestamps
+				mu.Unlock()
+			}(page)
 		}
 		
-		// The commit search API requires this Accept header
-		req.Header.Set("Accept", "application/vnd.github.cloak-preview+json")
+		wg.Wait()
 		
-		// SECURITY: Validate and sanitize GitHub token before use
-		if d.githubToken != "" {
-			token := d.githubToken
-			if d.isValidGitHubToken(token) {
-				req.Header.Set("Authorization", "token "+token)
-			}
+		// Combine results in order
+		for _, timestamps := range results {
+			allTimestamps = append(allTimestamps, timestamps...)
 		}
-		
-		resp, err := d.cachedHTTPDo(ctx, req)
-		if err != nil {
-			d.logger.Debug("failed to fetch commit page", "page", page, "error", err)
-			break // Return what we have so far
-		}
-		defer func() {
-			if err := resp.Body.Close(); err != nil {
-				d.logger.Debug("failed to close response body", "error", err)
-			}
-		}()
-		
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			d.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
-			break
-		}
-		
-		var searchResult struct {
-			Items []struct {
-				Commit struct {
-					Author struct {
-						Date time.Time `json:"date"`
-					} `json:"author"`
-					Committer struct {
-						Date time.Time `json:"date"`
-					} `json:"committer"`
-				} `json:"commit"`
-			} `json:"items"`
-			TotalCount int `json:"total_count"`
-		}
-		
-		if err := json.NewDecoder(resp.Body).Decode(&searchResult); err != nil {
-			d.logger.Debug("failed to decode commit response", "page", page, "error", err)
-			break
-		}
-		
-		if page == 1 {
-			d.logger.Debug("GitHub commit search results", "username", username, "total_count", searchResult.TotalCount)
-		}
-		
-		for _, item := range searchResult.Items {
-			// Use author date (when the commit was originally authored)
-			if !item.Commit.Author.Date.IsZero() {
-				allTimestamps = append(allTimestamps, item.Commit.Author.Date)
-			}
-		}
-		
-		// If we got fewer items than requested, we've reached the end
-		if len(searchResult.Items) < perPage {
-			break
+	} else {
+		// Single page, no need for parallelization
+		allTimestamps, _ = d.fetchCommitPage(ctx, username, 1, perPage)
+	}
+	
+	d.logger.Debug("fetched user commits", "username", username, "count", len(allTimestamps), "pages", maxPages)
+	return allTimestamps, nil
+}
+
+// fetchCommitPage fetches a single page of commits
+func (d *Detector) fetchCommitPage(ctx context.Context, username string, page int, perPage int) ([]time.Time, error) {
+	var timestamps []time.Time
+	
+	// Use GitHub Search API to find commits by this user
+	// Note: This requires authentication for better rate limits
+	searchURL := fmt.Sprintf("https://api.github.com/search/commits?q=author:%s&sort=author-date&order=desc&per_page=%d&page=%d", 
+		username, perPage, page)
+	
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, http.NoBody)
+	if err != nil {
+		return timestamps, fmt.Errorf("creating request: %w", err)
+	}
+	
+	// The commit search API requires this Accept header
+	req.Header.Set("Accept", "application/vnd.github.cloak-preview+json")
+	
+	// SECURITY: Validate and sanitize GitHub token before use
+	if d.githubToken != "" {
+		token := d.githubToken
+		if d.isValidGitHubToken(token) {
+			req.Header.Set("Authorization", "token "+token)
 		}
 	}
 	
-	d.logger.Debug("fetched user commits", "username", username, "count", len(allTimestamps))
-	return allTimestamps, nil
+	resp, err := d.cachedHTTPDo(ctx, req)
+	if err != nil {
+		d.logger.Debug("failed to fetch commit page", "page", page, "error", err)
+		return timestamps, err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			d.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
+	
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		d.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
+		return timestamps, fmt.Errorf("GitHub API error: %d", resp.StatusCode)
+	}
+	
+	var searchResult struct {
+		Items []struct {
+			Commit struct {
+				Author struct {
+					Date time.Time `json:"date"`
+				} `json:"author"`
+				Committer struct {
+					Date time.Time `json:"date"`
+				} `json:"committer"`
+			} `json:"commit"`
+		} `json:"items"`
+		TotalCount int `json:"total_count"`
+	}
+	
+	if err := json.NewDecoder(resp.Body).Decode(&searchResult); err != nil {
+		d.logger.Debug("failed to decode commit response", "page", page, "error", err)
+		return timestamps, err
+	}
+	
+	if page == 1 {
+		d.logger.Debug("GitHub commit search results", "username", username, "total_count", searchResult.TotalCount)
+	}
+	
+	for _, item := range searchResult.Items {
+		// Use author date (when the commit was originally authored)
+		if !item.Commit.Author.Date.IsZero() {
+			timestamps = append(timestamps, item.Commit.Author.Date)
+		}
+	}
+	
+	return timestamps, nil
 }

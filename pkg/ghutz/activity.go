@@ -104,11 +104,40 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// Implement adaptive data collection strategy:
 	// Target 200 data points minimum, expand time window progressively
 	const targetDataPoints = 200
-	needSupplemental := len(allTimestamps) < targetDataPoints
+	const minDaysSpan = 14 // Need at least 2 weeks for good pattern detection
+	
+	// Calculate current time span
+	var timeSpanDays int
+	if len(allTimestamps) > 0 {
+		var oldest, newest time.Time
+		for i, ts := range allTimestamps {
+			if i == 0 || ts.time.Before(oldest) {
+				oldest = ts.time
+			}
+			if i == 0 || ts.time.After(newest) {
+				newest = ts.time
+			}
+		}
+		timeSpanDays = int(newest.Sub(oldest).Hours() / 24)
+	}
+	
+	needSupplemental := len(allTimestamps) < targetDataPoints || timeSpanDays < minDaysSpan
 
 	if needSupplemental {
-		d.logger.Debug("need more data points, fetching supplemental data", "username", username, 
-			"current_count", len(allTimestamps), "target", targetDataPoints)
+		constraints := []string{}
+		if len(allTimestamps) < targetDataPoints {
+			constraints = append(constraints, fmt.Sprintf("need %d more data points", targetDataPoints - len(allTimestamps)))
+		}
+		if timeSpanDays < minDaysSpan {
+			constraints = append(constraints, fmt.Sprintf("need %d more days coverage", minDaysSpan - timeSpanDays))
+		}
+		
+		d.logger.Info("📊 Fetching supplemental data", "username", username, 
+			"current_count", len(allTimestamps), 
+			"target_count", targetDataPoints,
+			"current_days", timeSpanDays,
+			"target_days", minDaysSpan,
+			"constraints", strings.Join(constraints, ", "))
 
 		// Fetch ALL additional data from all sources
 		additionalData := d.fetchSupplementalActivity(ctx, username)
@@ -208,12 +237,15 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			"comments", len(additionalData.Comments))
 		
 		// Check if we still need more data after initial fetch
-		// Only fetch additional pages of PRs/issues if we're still under threshold
+		// Only fetch additional pages of PRs/issues/commits if we're still under threshold
 		if len(allTimestamps) < targetDataPoints {
-			d.logger.Debug("still need more data, fetching additional PR/issue pages", "username", username,
-				"current_count", len(allTimestamps), "target", targetDataPoints)
+			remaining := targetDataPoints - len(allTimestamps)
+			d.logger.Info("📊 Still need more data, fetching additional pages", "username", username,
+				"current_count", len(allTimestamps), 
+				"need", remaining,
+				"fetching", "PRs page 2+, Issues page 2+, Commits page 2")
 			
-			// Fetch second page of PRs and issues (expensive API calls)
+			// Fetch second page of PRs, issues, and commits in parallel (expensive API calls)
 			extraData := d.fetchSupplementalActivityWithDepth(ctx, username, 2)
 			
 			// Only add the NEW data from pages 2+ (first 100 already included)
@@ -1919,7 +1951,13 @@ func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, usern
 
 		// Fetch in parallel using goroutines
 		var wg sync.WaitGroup
-		wg.Add(5) // PRs, issues, comments, starred repos, commits
+		// For initial fetch (maxPages==1), fetch first page of everything
+		// For deep fetch (maxPages>1), skip comments/stars to save API calls
+		numGoroutines := 5
+		if maxPages > 1 {
+			numGoroutines = 3 // Only PRs, issues, commits for deep fetch
+		}
+		wg.Add(numGoroutines)
 
 		// Fetch PRs
 		go func() {
@@ -1941,31 +1979,34 @@ func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, usern
 			}
 		}()
 
-		// Fetch Comments via GraphQL
-		go func() {
-			defer wg.Done()
-			if comments, err := d.fetchUserComments(ctx, username); err == nil {
-				res.comments = comments
-			} else {
-				d.logger.Debug("failed to fetch comments", "username", username, "error", err)
-			}
-		}()
+		// Only fetch comments and stars on initial fetch to save API calls
+		if maxPages == 1 {
+			// Fetch Comments via GraphQL
+			go func() {
+				defer wg.Done()
+				if comments, err := d.fetchUserComments(ctx, username); err == nil {
+					res.comments = comments
+				} else {
+					d.logger.Debug("failed to fetch comments", "username", username, "error", err)
+				}
+			}()
 
-		// Fetch starred repositories for additional timestamps
-		go func() {
-			defer wg.Done()
-			if stars, starredRepos, err := d.fetchStarredRepositories(ctx, username); err == nil {
-				res.stars = stars
-				res.starredRepos = starredRepos
-			} else {
-				d.logger.Debug("failed to fetch starred repos", "username", username, "error", err)
-			}
-		}()
+			// Fetch starred repositories for additional timestamps
+			go func() {
+				defer wg.Done()
+				if stars, starredRepos, err := d.fetchStarredRepositories(ctx, username); err == nil {
+					res.stars = stars
+					res.starredRepos = starredRepos
+				} else {
+					d.logger.Debug("failed to fetch starred repos", "username", username, "error", err)
+				}
+			}()
+		}
 
-		// Fetch commits
+		// Fetch commits with appropriate page limit
 		go func() {
 			defer wg.Done()
-			if commits, err := d.fetchUserCommits(ctx, username); err == nil {
+			if commits, err := d.fetchUserCommitsWithLimit(ctx, username, maxPages); err == nil {
 				res.commits = commits
 			} else {
 				d.logger.Debug("failed to fetch commits", "username", username, "error", err)
