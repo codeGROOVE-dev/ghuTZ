@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 )
 
 // GlobalLunchPattern represents the best lunch pattern found globally in UTC
@@ -36,7 +38,7 @@ func (d *Detector) tryActivityPatternsWithContext(ctx context.Context, userCtx *
 	return d.tryActivityPatternsWithEvents(ctx, userCtx.Username, userCtx.Events)
 }
 
-func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username string, events []PublicEvent) *Result {
+func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username string, events []github.PublicEvent) *Result {
 	// Collect all timestamps from various sources
 	allTimestamps, orgCounts := d.collectActivityTimestamps(ctx, username, events)
 
@@ -1528,7 +1530,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// UNLESS we have strong evidence for Europe (e.g., Polish name)
 	if suspiciousWorkHours && alternativeTimezone == "UTC+8" && offsetInt <= 3 {
 		// Get user's full name to check for regional indicators
-		user := d.fetchUser(ctx, username)
+		user := d.githubClient.FetchUser(ctx, username)
 		isLikelyEuropean := false
 
 		if user != nil && user.Name != "" {
@@ -1648,11 +1650,11 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 // maxPages controls how many pages of PRs/issues to fetch (1 = first 100, 2 = up to 200)
 func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, username string, maxPages int) *ActivityData {
 	type result struct {
-		prs          []PullRequest
-		issues       []Issue
-		comments     []Comment
+		prs          []github.PullRequest
+		issues       []github.Issue
+		comments     []github.Comment
 		stars        []time.Time
-		starredRepos []Repository
+		starredRepos []github.Repository
 		commits      []time.Time
 	}
 
@@ -1674,7 +1676,7 @@ func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, usern
 		// Fetch PRs
 		go func() {
 			defer wg.Done()
-			if prs, err := d.fetchPullRequestsWithLimit(ctx, username, maxPages); err == nil {
+			if prs, err := d.githubClient.FetchPullRequestsWithLimit(ctx, username, maxPages); err == nil {
 				res.prs = prs
 			} else {
 				d.logger.Debug("failed to fetch PRs", "username", username, "error", err)
@@ -1684,7 +1686,7 @@ func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, usern
 		// Fetch Issues
 		go func() {
 			defer wg.Done()
-			if issues, err := d.fetchIssuesWithLimit(ctx, username, maxPages); err == nil {
+			if issues, err := d.githubClient.FetchIssuesWithLimit(ctx, username, maxPages); err == nil {
 				res.issues = issues
 			} else {
 				d.logger.Debug("failed to fetch issues", "username", username, "error", err)
@@ -1696,7 +1698,7 @@ func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, usern
 			// Fetch Comments via GraphQL
 			go func() {
 				defer wg.Done()
-				if comments, err := d.fetchUserComments(ctx, username); err == nil {
+				if comments, err := d.githubClient.FetchUserComments(ctx, username); err == nil {
 					res.comments = comments
 				} else {
 					d.logger.Debug("failed to fetch comments", "username", username, "error", err)
@@ -1706,7 +1708,7 @@ func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, usern
 			// Fetch starred repositories for additional timestamps
 			go func() {
 				defer wg.Done()
-				if stars, starredRepos, err := d.fetchStarredRepositories(ctx, username); err == nil {
+				if stars, starredRepos, err := d.githubClient.FetchStarredRepositories(ctx, username); err == nil {
 					res.stars = stars
 					res.starredRepos = starredRepos
 				} else {
@@ -1718,7 +1720,7 @@ func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, usern
 		// Fetch commits with appropriate page limit
 		go func() {
 			defer wg.Done()
-			if commits, err := d.fetchUserCommitsWithLimit(ctx, username, maxPages); err == nil {
+			if commits, err := d.githubClient.FetchUserCommitsWithLimit(ctx, username, maxPages); err == nil {
 				res.commits = commits
 			} else {
 				d.logger.Debug("failed to fetch commits", "username", username, "error", err)
@@ -1732,24 +1734,22 @@ func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, usern
 	select {
 	case res := <-ch:
 		// Convert starred timestamps to comments for inclusion in activity analysis
-		starComments := make([]Comment, len(res.stars))
+		starComments := make([]github.Comment, len(res.stars))
 		for i, starTime := range res.stars {
-			starComments[i] = Comment{
+			starComments[i] = github.Comment{
 				CreatedAt:  starTime,
-				Type:       "star",
 				Body:       "starred repository",
-				Repository: "various",
+				HTMLURL:    "",
 			}
 		}
 		
 		// Convert commit timestamps to comments for inclusion in activity analysis
-		commitComments := make([]Comment, len(res.commits))
+		commitComments := make([]github.Comment, len(res.commits))
 		for i, commitTime := range res.commits {
-			commitComments[i] = Comment{
+			commitComments[i] = github.Comment{
 				CreatedAt:  commitTime,
-				Type:       "commit",
 				Body:       "authored commit",
-				Repository: "various",
+				HTMLURL:    "",
 			}
 		}
 		

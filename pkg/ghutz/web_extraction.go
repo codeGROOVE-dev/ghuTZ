@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 )
 
 // CountryTLD represents a country top-level domain with its associated country.
@@ -244,7 +246,7 @@ func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.
 }
 
 // extractSocialMediaURLs extracts social media profile URLs from GitHub user data.
-func extractSocialMediaURLs(user *GitHubUser) []string {
+func extractSocialMediaURLs(user *github.GitHubUser) []string {
 	if user == nil {
 		return nil
 	}
@@ -284,8 +286,8 @@ func extractSocialMediaURLs(user *GitHubUser) []string {
 	}
 
 	// Check Twitter username field
-	if user.TwitterUsername != "" {
-		urls = append(urls, fmt.Sprintf("https://twitter.com/%s", user.TwitterUsername))
+	if user.TwitterHandle != "" {
+		urls = append(urls, fmt.Sprintf("https://twitter.com/%s", user.TwitterHandle))
 	}
 
 	return urls

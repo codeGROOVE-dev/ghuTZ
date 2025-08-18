@@ -19,6 +19,7 @@ import (
 
 	"github.com/codeGROOVE-dev/retry"
 	md "github.com/JohannesKaufmann/html-to-markdown/v2"
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 )
 
 // SECURITY: GitHub token patterns for validation.
@@ -40,14 +41,14 @@ var (
 // UserContext holds all fetched data for a user to avoid redundant API calls
 type UserContext struct {
 	Username          string
-	User              *GitHubUser
-	Events            []PublicEvent
-	Organizations     []Organization
-	Repositories      []Repository // User's own repos
-	StarredRepos      []Repository // Repos the user has starred
-	PullRequests      []PullRequest
-	Issues            []Issue
-	Comments          []Comment
+	User              *github.GitHubUser
+	Events            []github.PublicEvent
+	Organizations     []github.Organization
+	Repositories      []github.Repository // User's own repos
+	StarredRepos      []github.Repository // Repos the user has starred
+	PullRequests      []github.PullRequest
+	Issues            []github.Issue
+	Comments          []github.Comment
 	Gists             []time.Time // Gist timestamps
 	Commits           []time.Time // Commit timestamps
 	ProfileHTML       string       // Cached profile HTML
@@ -64,6 +65,7 @@ type Detector struct {
 	httpClient    *http.Client
 	forceActivity bool
 	cache         *OtterCache
+	githubClient  *github.Client
 }
 
 // retryableHTTPDo performs an HTTP request with exponential backoff and jitter.
@@ -208,7 +210,7 @@ func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *De
 		}
 	}
 
-	return &Detector{
+	detector := &Detector{
 		githubToken:   optHolder.githubToken,
 		mapsAPIKey:    optHolder.mapsAPIKey,
 		geminiAPIKey:  optHolder.geminiAPIKey,
@@ -219,6 +221,15 @@ func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *De
 		forceActivity: optHolder.forceActivity,
 		cache:         cache,
 	}
+	
+	// Create GitHub client with cached HTTP
+	if cache != nil {
+		detector.githubClient = github.NewClient(logger, detector.httpClient, optHolder.githubToken, detector.cachedHTTPDo)
+	} else {
+		detector.githubClient = github.NewClient(logger, detector.httpClient, optHolder.githubToken, detector.retryableHTTPDo)
+	}
+	
+	return detector
 }
 
 // Close properly shuts down the detector, including saving the cache to disk.
@@ -353,7 +364,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking user profile", "username", username)
-		user := d.fetchUser(ctx, username)
+		user := d.githubClient.FetchUser(ctx, username)
 		mu.Lock()
 		userCtx.User = user
 		mu.Unlock()
@@ -364,10 +375,10 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking public events", "username", username)
-		events, err := d.fetchPublicEvents(ctx, username)
+		events, err := d.githubClient.FetchPublicEvents(ctx, username)
 		if err != nil {
 			d.logger.Debug("failed to fetch public events", "error", err)
-			events = []PublicEvent{}
+			events = []github.PublicEvent{}
 		}
 		mu.Lock()
 		userCtx.Events = events
@@ -379,7 +390,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking profile HTML", "username", username)
-		html := d.fetchProfileHTML(ctx, username)
+		html := d.githubClient.FetchProfileHTML(ctx, username)
 		mu.Lock()
 		userCtx.ProfileHTML = html
 		mu.Unlock()
@@ -389,7 +400,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		orgs, err := d.fetchOrganizations(ctx, username)
+		orgs, err := d.githubClient.FetchOrganizations(ctx, username)
 		if err == nil {
 			d.logger.Debug("fetched organizations", "username", username, "count", len(orgs))
 		} else {
@@ -406,14 +417,14 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 		defer wg.Done()
 		d.logger.Debug("checking repositories", "username", username)
 		
-		var pinnedRepos, popularRepos []Repository
+		var pinnedRepos, popularRepos []github.Repository
 		var repoWg sync.WaitGroup
 		
 		repoWg.Add(2)
 		go func() {
 			defer repoWg.Done()
 			var err error
-			pinnedRepos, err = d.fetchPinnedRepositories(ctx, username)
+			pinnedRepos, err = d.githubClient.FetchPinnedRepositories(ctx, username)
 			if err != nil {
 				d.logger.Debug("failed to fetch pinned repositories", "username", username, "error", err)
 			}
@@ -421,7 +432,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 		go func() {
 			defer repoWg.Done()
 			var err error
-			popularRepos, err = d.fetchPopularRepositories(ctx, username)
+			popularRepos, err = d.githubClient.FetchPopularRepositories(ctx, username)
 			if err != nil {
 				d.logger.Debug("failed to fetch popular repositories", "username", username, "error", err)
 			}
@@ -429,7 +440,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 		repoWg.Wait()
 		
 		// Combine and deduplicate repos
-		repoMap := make(map[string]Repository)
+		repoMap := make(map[string]github.Repository)
 		for _, repo := range pinnedRepos {
 			repoMap[repo.FullName] = repo
 		}
@@ -444,7 +455,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 			repoNames = append(repoNames, name)
 		}
 		sort.Strings(repoNames)
-		var repos []Repository
+		var repos []github.Repository
 		for _, name := range repoNames {
 			repos = append(repos, repoMap[name])
 		}
@@ -459,7 +470,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking starred repositories", "username", username)
-		_, starredRepos, err := d.fetchStarredRepositories(ctx, username)
+		_, starredRepos, err := d.githubClient.FetchStarredRepositories(ctx, username)
 		if err != nil {
 			d.logger.Debug("failed to fetch starred repositories", "username", username, "error", err)
 		}
@@ -473,7 +484,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking pull requests", "username", username)
-		prs, err := d.fetchPullRequests(ctx, username)
+		prs, err := d.githubClient.FetchPullRequests(ctx, username)
 		if err != nil {
 			d.logger.Debug("failed to fetch pull requests", "username", username, "error", err)
 		}
@@ -487,7 +498,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking issues", "username", username)
-		issues, err := d.fetchIssues(ctx, username)
+		issues, err := d.githubClient.FetchIssues(ctx, username)
 		if err != nil {
 			d.logger.Debug("failed to fetch issues", "username", username, "error", err)
 		}
@@ -501,7 +512,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking comments", "username", username)
-		comments, err := d.fetchUserComments(ctx, username)
+		comments, err := d.githubClient.FetchUserComments(ctx, username)
 		if err != nil {
 			d.logger.Debug("failed to fetch user comments", "username", username, "error", err)
 		}
@@ -515,7 +526,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking gists", "username", username)
-		gists, err := d.fetchUserGists(ctx, username)
+		gists, err := d.githubClient.FetchUserGists(ctx, username)
 		if err != nil {
 			d.logger.Debug("failed to fetch user gists", "username", username, "error", err)
 		}
@@ -713,7 +724,7 @@ func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Res
 }
 
 func (d *Detector) tryLocationField(ctx context.Context, username string) *Result {
-	user := d.fetchUser(ctx, username)
+	user := d.githubClient.FetchUser(ctx, username)
 	if user == nil || user.Location == "" {
 		d.logger.Debug("no location field found", "username", username)
 		return nil

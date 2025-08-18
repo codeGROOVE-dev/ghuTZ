@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 )
 
 // formatEvidenceForGemini formats detection evidence for Gemini API analysis.
@@ -13,7 +15,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	var sb strings.Builder
 
 	// User profile information
-	if user, ok := contextData["user"].(*GitHubUser); ok && user != nil {
+	if user, ok := contextData["user"].(*github.GitHubUser); ok && user != nil {
 		sb.WriteString("GitHub Profile:\n")
 		if user.Name != "" {
 			sb.WriteString(fmt.Sprintf("- Name: %s\n", user.Name))
@@ -30,8 +32,8 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		if user.Blog != "" {
 			sb.WriteString(fmt.Sprintf("- Website: %s\n", user.Blog))
 		}
-		if user.TwitterUsername != "" {
-			sb.WriteString(fmt.Sprintf("- Twitter: @%s\n", user.TwitterUsername))
+		if user.TwitterHandle != "" {
+			sb.WriteString(fmt.Sprintf("- Twitter: @%s\n", user.TwitterHandle))
 		}
 		sb.WriteString("\n")
 	} else {
@@ -220,7 +222,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		}
 		
 		// Check for US company with non-US timezone pattern
-		if user, ok := contextData["user"].(*GitHubUser); ok && user != nil {
+		if user, ok := contextData["user"].(*github.GitHubUser); ok && user != nil {
 			if strings.Contains(strings.ToLower(user.Company), "chainguard") ||
 			   strings.Contains(strings.ToLower(user.Company), "google") ||
 			   strings.Contains(strings.ToLower(user.Company), "meta") ||
@@ -243,7 +245,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 
 	// Organizations
 	if orgs, ok := contextData["organizations"]; ok && orgs != nil {
-		if orgsList, ok := orgs.([]Organization); ok && len(orgsList) > 0 {
+		if orgsList, ok := orgs.([]github.Organization); ok && len(orgsList) > 0 {
 			sb.WriteString("\nGitHub Organizations:\n")
 			for _, org := range orgsList {
 				if org.Location != "" {
@@ -259,16 +261,15 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	}
 
 	// Repository evidence - show user's own repositories with descriptions
-	if repos, ok := contextData["repositories"].([]Repository); ok && len(repos) > 0 {
+	if repos, ok := contextData["repositories"].([]github.Repository); ok && len(repos) > 0 {
 		// Separate pinned, non-fork, and fork repos
-		var pinnedRepos []Repository
-		var nonForkRepos []Repository
-		var forkRepos []Repository
+		var pinnedRepos []github.Repository
+		var nonForkRepos []github.Repository
+		var forkRepos []github.Repository
 		
 		for _, repo := range repos {
-			if repo.IsPinned {
-				pinnedRepos = append(pinnedRepos, repo)
-			} else if !repo.IsFork {
+			// Note: We don't have IsPinned field anymore, so we'll just split by Fork status
+			if !repo.Fork {
 				nonForkRepos = append(nonForkRepos, repo)
 			} else {
 				forkRepos = append(forkRepos, repo)
@@ -279,7 +280,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		
 		// First show pinned repos (if any)
 		for _, repo := range pinnedRepos {
-			if repo.IsFork {
+			if repo.Fork {
 				sb.WriteString(fmt.Sprintf("- %s: %s [FORK, PINNED]\n", repo.Name, repo.Description))
 			} else {
 				sb.WriteString(fmt.Sprintf("- %s: %s [PINNED]\n", repo.Name, repo.Description))
@@ -305,7 +306,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	}
 
 	// Starred repositories - these can be very revealing for location/interests
-	if starredRepos, ok := contextData["starred_repositories"].([]Repository); ok && len(starredRepos) > 0 {
+	if starredRepos, ok := contextData["starred_repositories"].([]github.Repository); ok && len(starredRepos) > 0 {
 		sb.WriteString("\nRecently Starred Repositories (location/interest clues):\n")
 		for i, repo := range starredRepos {
 			if i >= 25 { // Limit to 25 most recent
@@ -320,7 +321,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	}
 
 	// Recent activity date range (just the time span, not the event counts)
-	if events, ok := contextData["recent_events"].([]PublicEvent); ok && len(events) > 0 {
+	if events, ok := contextData["recent_events"].([]github.PublicEvent); ok && len(events) > 0 {
 		var firstEvent, lastEvent time.Time
 		
 		for i, event := range events {
@@ -339,7 +340,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	repoContributions := make(map[string]int)
 	
 	// Pull requests
-	if prs, ok := contextData["pull_requests"].([]PullRequest); ok && len(prs) > 0 {
+	if prs, ok := contextData["pull_requests"].([]github.PullRequest); ok && len(prs) > 0 {
 		// Show recent PR titles for context
 		sb.WriteString("\nRecent PR titles:\n")
 		for i, pr := range prs {
@@ -348,16 +349,16 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 			}
 			sb.WriteString(fmt.Sprintf("- %s\n", pr.Title))
 			// Track repositories they're contributing to
-			if pr.Repository != "" {
-				repoContributions[pr.Repository]++
+			if pr.RepoName != "" {
+				repoContributions[pr.RepoName]++
 			}
 		}
 		
 		// Track more repositories from issues
-		if issues, ok := contextData["issues"].([]Issue); ok {
+		if issues, ok := contextData["issues"].([]github.Issue); ok {
 			for _, issue := range issues {
-				if issue.Repository != "" {
-					repoContributions[issue.Repository]++
+				if issue.RepoName != "" {
+					repoContributions[issue.RepoName]++
 				}
 			}
 		}
@@ -366,7 +367,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 		if len(repoContributions) > 0 {
 			// Build a set of already shown repos
 			alreadyShown := make(map[string]bool)
-			if repos, ok := contextData["repositories"].([]Repository); ok {
+			if repos, ok := contextData["repositories"].([]github.Repository); ok {
 				for _, repo := range repos {
 					alreadyShown[repo.FullName] = true
 				}
@@ -416,7 +417,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	}
 
 	// Issues
-	if issues, ok := contextData["issues"].([]Issue); ok && len(issues) > 0 {
+	if issues, ok := contextData["issues"].([]github.Issue); ok && len(issues) > 0 {
 		// Show recent issue titles for context
 		sb.WriteString("\nRecent issue titles:\n")
 		for i, issue := range issues {
@@ -428,7 +429,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]interface{}) s
 	}
 
 	// Find longest PR body (excluding templates) as a writing sample
-	if prs, ok := contextData["pull_requests"].([]PullRequest); ok && len(prs) > 0 {
+	if prs, ok := contextData["pull_requests"].([]github.PullRequest); ok && len(prs) > 0 {
 		longestBody := ""
 		maxLength := 0
 		for _, pr := range prs {

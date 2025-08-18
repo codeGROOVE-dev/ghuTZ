@@ -1,4 +1,4 @@
-package ghutz
+package github
 
 import (
 	"bytes"
@@ -14,20 +14,9 @@ import (
 	"time"
 )
 
-// PublicEvent represents a GitHub public event.
-type PublicEvent struct {
-	ID        string    `json:"id"`
-	Type      string    `json:"type"`
-	CreatedAt time.Time `json:"created_at"`
-	Repo      struct {
-		Name string `json:"name"`
-		URL  string `json:"url"`
-	} `json:"repo"`
-	Payload json.RawMessage `json:"payload"`
-}
 
 // fetchPublicEvents fetches public events (limited to last 30 days by GitHub API).
-func (d *Detector) fetchPublicEvents(ctx context.Context, username string) ([]PublicEvent, error) {
+func (c *Client) FetchPublicEvents(ctx context.Context, username string) ([]PublicEvent, error) {
 	const maxPages = 3 // 100 events per page * 3 = 300 (GitHub's max)
 	const perPage = 100
 
@@ -42,29 +31,29 @@ func (d *Detector) fetchPublicEvents(ctx context.Context, username string) ([]Pu
 		}
 
 		// Add GitHub token if available
-		if d.githubToken != "" && d.isValidGitHubToken(d.githubToken) {
-			req.Header.Set("Authorization", "token "+d.githubToken)
+		if c.githubToken != "" && c.isValidGitHubToken(c.githubToken) {
+			req.Header.Set("Authorization", "token "+c.githubToken)
 		}
 
-		resp, err := d.cachedHTTPDo(ctx, req)
+		resp, err := c.cachedHTTPDo(ctx, req)
 		if err != nil {
-			d.logger.Debug("failed to fetch events page", "page", page, "error", err)
+			c.logger.Debug("failed to fetch events page", "page", page, "error", err)
 			break // Return what we have so far
 		}
 		defer func() {
 			if err := resp.Body.Close(); err != nil {
-				d.logger.Debug("failed to close response body", "error", err)
+				c.logger.Debug("failed to close response body", "error", err)
 			}
 		}()
 
 		if resp.StatusCode != http.StatusOK {
-			d.logger.Debug("GitHub API returned non-200 status", "status", resp.StatusCode, "page", page)
+			c.logger.Debug("GitHub API returned non-200 status", "status", resp.StatusCode, "page", page)
 			break // Return what we have so far
 		}
 
 		var events []PublicEvent
 		if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
-			d.logger.Debug("failed to decode events", "page", page, "error", err)
+			c.logger.Debug("failed to decode events", "page", page, "error", err)
 			break // Return what we have so far
 		}
 
@@ -81,13 +70,13 @@ func (d *Detector) fetchPublicEvents(ctx context.Context, username string) ([]Pu
 		}
 	}
 
-	d.logger.Debug("fetched public events", "username", username, "count", len(allEvents))
+	c.logger.Debug("fetched public events", "username", username, "count", len(allEvents))
 	return allEvents, nil
 }
 
 
 // fetchUserGists fetches gist timestamps for a user.
-func (d *Detector) fetchUserGists(ctx context.Context, username string) ([]time.Time, error) {
+func (c *Client) FetchUserGists(ctx context.Context, username string) ([]time.Time, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/users/%s/gists?per_page=100", url.PathEscape(username))
 	
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
@@ -95,11 +84,11 @@ func (d *Detector) fetchUserGists(ctx context.Context, username string) ([]time.
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	
-	if d.githubToken != "" && d.isValidGitHubToken(d.githubToken) {
-		req.Header.Set("Authorization", "token "+d.githubToken)
+	if c.githubToken != "" && c.isValidGitHubToken(c.githubToken) {
+		req.Header.Set("Authorization", "token "+c.githubToken)
 	}
 	
-	resp, err := d.cachedHTTPDo(ctx, req)
+	resp, err := c.cachedHTTPDo(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -129,15 +118,15 @@ func (d *Detector) fetchUserGists(ctx context.Context, username string) ([]time.
 		timestamps = append(timestamps, gist.UpdatedAt)
 	}
 	
-	d.logger.Debug("fetched gist timestamps", "username", username, "count", len(timestamps))
+	c.logger.Debug("fetched gist timestamps", "username", username, "count", len(timestamps))
 	return timestamps, nil
 }
 
-func (d *Detector) fetchPullRequests(ctx context.Context, username string) ([]PullRequest, error) {
-	return d.fetchPullRequestsWithLimit(ctx, username, 2)
+func (c *Client) FetchPullRequests(ctx context.Context, username string) ([]PullRequest, error) {
+	return c.FetchPullRequestsWithLimit(ctx, username, 2)
 }
 
-func (d *Detector) fetchPullRequestsWithLimit(ctx context.Context, username string, maxPages int) ([]PullRequest, error) {
+func (c *Client) FetchPullRequestsWithLimit(ctx context.Context, username string, maxPages int) ([]PullRequest, error) {
 	var allPRs []PullRequest
 	const perPage = 100
 	
@@ -151,32 +140,32 @@ func (d *Detector) fetchPullRequestsWithLimit(ctx context.Context, username stri
 		}
 
 		// SECURITY: Validate and sanitize GitHub token before use
-		if d.githubToken != "" {
-			token := d.githubToken
+		if c.githubToken != "" {
+			token := c.githubToken
 			// Validate token format to prevent injection attacks
-			if d.isValidGitHubToken(token) {
+			if c.isValidGitHubToken(token) {
 				req.Header.Set("Authorization", "token "+token)
 			}
 		}
 
-		resp, err := d.cachedHTTPDo(ctx, req)
+		resp, err := c.cachedHTTPDo(ctx, req)
 		if err != nil {
-			d.logger.Debug("failed to fetch PR page", "page", page, "error", err)
+			c.logger.Debug("failed to fetch PR page", "page", page, "error", err)
 			break // Return what we have so far
 		}
 		defer func() {
 			if err := resp.Body.Close(); err != nil {
-				d.logger.Debug("failed to close response body", "error", err)
+				c.logger.Debug("failed to close response body", "error", err)
 			}
 		}()
 
 		if resp.StatusCode != http.StatusOK {
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
-				d.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page)
+				c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page)
 				break
 			}
-			d.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
+			c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
 			break
 		}
 
@@ -192,12 +181,12 @@ func (d *Detector) fetchPullRequestsWithLimit(ctx context.Context, username stri
 		}
 
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			d.logger.Debug("failed to decode PR response", "page", page, "error", err)
+			c.logger.Debug("failed to decode PR response", "page", page, "error", err)
 			break
 		}
 
 		if page == 1 {
-			d.logger.Debug("GitHub PR search results", "username", username, "total_count", result.TotalCount)
+			c.logger.Debug("GitHub PR search results", "username", username, "total_count", result.TotalCount)
 		}
 
 		for _, item := range result.Items {
@@ -216,7 +205,7 @@ func (d *Detector) fetchPullRequestsWithLimit(ctx context.Context, username stri
 				Body:       item.Body,
 				CreatedAt:  item.CreatedAt,
 				HTMLURL:    item.HTMLURL,
-				Repository: repo,
+				RepoName: repo,
 			})
 		}
 		
@@ -226,15 +215,15 @@ func (d *Detector) fetchPullRequestsWithLimit(ctx context.Context, username stri
 		}
 	}
 
-	d.logger.Debug("fetched pull requests", "username", username, "count", len(allPRs))
+	c.logger.Debug("fetched pull requests", "username", username, "count", len(allPRs))
 	return allPRs, nil
 }
 
-func (d *Detector) fetchIssues(ctx context.Context, username string) ([]Issue, error) {
-	return d.fetchIssuesWithLimit(ctx, username, 2)
+func (c *Client) FetchIssues(ctx context.Context, username string) ([]Issue, error) {
+	return c.FetchIssuesWithLimit(ctx, username, 2)
 }
 
-func (d *Detector) fetchIssuesWithLimit(ctx context.Context, username string, maxPages int) ([]Issue, error) {
+func (c *Client) FetchIssuesWithLimit(ctx context.Context, username string, maxPages int) ([]Issue, error) {
 	var allIssues []Issue
 	const perPage = 100
 	
@@ -248,32 +237,32 @@ func (d *Detector) fetchIssuesWithLimit(ctx context.Context, username string, ma
 		}
 
 		// SECURITY: Validate and sanitize GitHub token before use
-		if d.githubToken != "" {
-			token := d.githubToken
+		if c.githubToken != "" {
+			token := c.githubToken
 			// Validate token format to prevent injection attacks
-			if d.isValidGitHubToken(token) {
+			if c.isValidGitHubToken(token) {
 				req.Header.Set("Authorization", "token "+token)
 			}
 		}
 
-		resp, err := d.cachedHTTPDo(ctx, req)
+		resp, err := c.cachedHTTPDo(ctx, req)
 		if err != nil {
-			d.logger.Debug("failed to fetch issue page", "page", page, "error", err)
+			c.logger.Debug("failed to fetch issue page", "page", page, "error", err)
 			break // Return what we have so far
 		}
 		defer func() {
 			if err := resp.Body.Close(); err != nil {
-				d.logger.Debug("failed to close response body", "error", err)
+				c.logger.Debug("failed to close response body", "error", err)
 			}
 		}()
 
 		if resp.StatusCode != http.StatusOK {
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
-				d.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page)
+				c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page)
 				break
 			}
-			d.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
+			c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
 			break
 		}
 
@@ -288,12 +277,12 @@ func (d *Detector) fetchIssuesWithLimit(ctx context.Context, username string, ma
 		}
 
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			d.logger.Debug("failed to decode issue response", "page", page, "error", err)
+			c.logger.Debug("failed to decode issue response", "page", page, "error", err)
 			break
 		}
 
 		if page == 1 {
-			d.logger.Debug("GitHub issue search results", "username", username, "total_count", result.TotalCount)
+			c.logger.Debug("GitHub issue search results", "username", username, "total_count", result.TotalCount)
 		}
 
 		for _, item := range result.Items {
@@ -312,7 +301,7 @@ func (d *Detector) fetchIssuesWithLimit(ctx context.Context, username string, ma
 				Body:       item.Body,
 				CreatedAt:  item.CreatedAt,
 				HTMLURL:    item.HTMLURL,
-				Repository: repo,
+				RepoName: repo,
 			})
 		}
 		
@@ -322,13 +311,13 @@ func (d *Detector) fetchIssuesWithLimit(ctx context.Context, username string, ma
 		}
 	}
 
-	d.logger.Debug("fetched issues", "username", username, "count", len(allIssues))
+	c.logger.Debug("fetched issues", "username", username, "count", len(allIssues))
 	return allIssues, nil
 }
 
 // fetchUserWithGraphQL fetches user data including social accounts via GraphQL
-func (d *Detector) fetchUserWithGraphQL(ctx context.Context, username string) *GitHubUser {
-	d.logger.Debug("attempting GraphQL user fetch", "username", username)
+func (c *Client) FetchUserWithGraphQL(ctx context.Context, username string) *GitHubUser {
+	c.logger.Debug("attempting GraphQL user fetch", "username", username)
 	query := fmt.Sprintf(`{
 		user(login: "%s") {
 			login
@@ -356,27 +345,27 @@ func (d *Detector) fetchUserWithGraphQL(ctx context.Context, username string) *G
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		d.logger.Debug("failed to marshal GraphQL query", "error", err)
+		c.logger.Debug("failed to marshal GraphQL query", "error", err)
 		return nil
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.github.com/graphql", bytes.NewBuffer(jsonBody))
 	if err != nil {
-		d.logger.Debug("failed to create GraphQL request", "error", err)
+		c.logger.Debug("failed to create GraphQL request", "error", err)
 		return nil
 	}
 
-	req.Header.Set("Authorization", "Bearer "+d.githubToken)
+	req.Header.Set("Authorization", "Bearer "+c.githubToken)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := d.cachedHTTPDo(ctx, req)
+	resp, err := c.cachedHTTPDo(ctx, req)
 	if err != nil {
-		d.logger.Debug("failed to execute GraphQL request", "error", err)
+		c.logger.Debug("failed to execute GraphQL request", "error", err)
 		return nil
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			d.logger.Debug("failed to close response body", "error", err)
+			c.logger.Debug("failed to close response body", "error", err)
 		}
 	}()
 
@@ -410,12 +399,12 @@ func (d *Detector) fetchUserWithGraphQL(ctx context.Context, username string) *G
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		d.logger.Debug("failed to decode GraphQL response", "error", err)
+		c.logger.Debug("failed to decode GraphQL response", "error", err)
 		return nil
 	}
 
 	if len(result.Errors) > 0 {
-		d.logger.Debug("GraphQL query returned errors", "error", result.Errors[0].Message)
+		c.logger.Debug("GraphQL query returned errors", "error", result.Errors[0].Message)
 		return nil
 	}
 
@@ -427,16 +416,15 @@ func (d *Detector) fetchUserWithGraphQL(ctx context.Context, username string) *G
 		Bio:             result.Data.User.Bio,
 		Email:           result.Data.User.Email,
 		Blog:            result.Data.User.WebsiteUrl,
-		TwitterUsername: result.Data.User.TwitterUsername,
-		CreatedAt:       result.Data.User.CreatedAt,
+		TwitterHandle: result.Data.User.TwitterUsername,
 	}
 
 	// Process social accounts
-	d.logger.Debug("GraphQL social accounts raw", "username", username, 
+	c.logger.Debug("GraphQL social accounts raw", "username", username, 
 		"accounts_count", len(result.Data.User.SocialAccounts.Nodes))
 	
 	for _, account := range result.Data.User.SocialAccounts.Nodes {
-		d.logger.Debug("processing social account", "provider", account.Provider, 
+		c.logger.Debug("processing social account", "provider", account.Provider, 
 			"url", account.URL, "display_name", account.DisplayName)
 		
 		// Add social links to bio for extraction
@@ -456,15 +444,15 @@ func (d *Detector) fetchUserWithGraphQL(ctx context.Context, username string) *G
 		}
 	}
 
-	d.logger.Debug("fetched user via GraphQL", "username", username, "name", user.Name, 
+	c.logger.Debug("fetched user via GraphQL", "username", username, "name", user.Name, 
 		"blog", user.Blog, "social_accounts", len(result.Data.User.SocialAccounts.Nodes), "cache", fromCache)
 
 	return user
 }
 
-func (d *Detector) fetchUserComments(ctx context.Context, username string) ([]Comment, error) {
-	if d.githubToken == "" {
-		d.logger.Debug("GitHub token required for GraphQL API", "username", username)
+func (c *Client) FetchUserComments(ctx context.Context, username string) ([]Comment, error) {
+	if c.githubToken == "" {
+		c.logger.Debug("GitHub token required for GraphQL API", "username", username)
 		return nil, errors.New("GitHub token required for GraphQL API")
 	}
 
@@ -514,16 +502,16 @@ func (d *Detector) fetchUserComments(ctx context.Context, username string) ([]Co
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "bearer "+d.githubToken)
+	req.Header.Set("Authorization", "bearer "+c.githubToken)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := d.cachedHTTPDo(ctx, req)
+	resp, err := c.cachedHTTPDo(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching comments: %w", err)
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			d.logger.Debug("failed to close response body", "error", err)
+			c.logger.Debug("failed to close response body", "error", err)
 		}
 	}()
 
@@ -578,7 +566,7 @@ func (d *Detector) fetchUserComments(ctx context.Context, username string) ([]Co
 	}
 
 	if len(result.Errors) > 0 {
-		d.logger.Debug("GitHub GraphQL errors", "username", username, "errors", result.Errors)
+		c.logger.Debug("GitHub GraphQL errors", "username", username, "errors", result.Errors)
 		return nil, fmt.Errorf("GraphQL errors: %v", result.Errors[0].Message)
 	}
 
@@ -588,9 +576,8 @@ func (d *Detector) fetchUserComments(ctx context.Context, username string) ([]Co
 	for _, node := range result.Data.User.IssueComments.Nodes {
 		comments = append(comments, Comment{
 			CreatedAt:  node.CreatedAt,
-			Type:       "issue",
 			Body:       node.Body,
-			Repository: node.Repository.NameWithOwner,
+			HTMLURL:    fmt.Sprintf("https://github.com/%s", node.Repository.NameWithOwner),
 		})
 	}
 
@@ -598,13 +585,12 @@ func (d *Detector) fetchUserComments(ctx context.Context, username string) ([]Co
 	for _, node := range result.Data.User.CommitComments.Nodes {
 		comments = append(comments, Comment{
 			CreatedAt:  node.CreatedAt,
-			Type:       "commit",
 			Body:       node.Body,
-			Repository: node.Commit.Repository.NameWithOwner,
+			HTMLURL:    fmt.Sprintf("https://github.com/%s/commit/%s", node.Commit.Repository.NameWithOwner, node.Commit.AbbreviatedOid),
 		})
 	}
 
-	d.logger.Debug("fetched user comments", "username", username,
+	c.logger.Debug("fetched user comments", "username", username,
 		"issue_comments", len(result.Data.User.IssueComments.Nodes),
 		"commit_comments", len(result.Data.User.CommitComments.Nodes),
 		"total", len(comments))
@@ -612,9 +598,9 @@ func (d *Detector) fetchUserComments(ctx context.Context, username string) ([]Co
 	return comments, nil
 }
 
-func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]Organization, error) {
+func (c *Client) FetchOrganizations(ctx context.Context, username string) ([]Organization, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/users/%s/orgs", url.PathEscape(username))
-	d.logger.Debug("fetching organizations from API", "url", apiURL)
+	c.logger.Debug("fetching organizations from API", "url", apiURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
@@ -622,27 +608,27 @@ func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]O
 	}
 
 	// SECURITY: Validate and sanitize GitHub token before use
-	if d.githubToken != "" {
-		token := d.githubToken
+	if c.githubToken != "" {
+		token := c.githubToken
 		// Validate token format to prevent injection attacks
-		if d.isValidGitHubToken(token) {
+		if c.isValidGitHubToken(token) {
 			req.Header.Set("Authorization", "token "+token)
 		}
 	}
 
-	resp, err := d.cachedHTTPDo(ctx, req)
+	resp, err := c.cachedHTTPDo(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching organizations: %w", err)
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			d.logger.Debug("failed to close response body", "error", err)
+			c.logger.Debug("failed to close response body", "error", err)
 		}
 	}()
 	
 	// Check if response was from cache
 	fromCache := resp.Header.Get("X-From-Cache") == "true"
-	d.logger.Debug("organizations API response", "username", username, "cache", fromCache, "status", resp.StatusCode)
+	c.logger.Debug("organizations API response", "username", username, "cache", fromCache, "status", resp.StatusCode)
 
 	if resp.StatusCode != http.StatusOK {
 		body, err := io.ReadAll(resp.Body)
@@ -662,7 +648,7 @@ func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]O
 	if len(body) < previewLen {
 		previewLen = len(body)
 	}
-	d.logger.Debug("organizations API raw response", "username", username, "body_len", len(body), "body_preview", string(body[:previewLen]))
+	c.logger.Debug("organizations API raw response", "username", username, "body_len", len(body), "body_preview", string(body[:previewLen]))
 	
 	var orgs []Organization
 	if err := json.Unmarshal(body, &orgs); err != nil {
@@ -672,21 +658,21 @@ func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]O
 	return orgs, nil
 }
 
-func (d *Detector) fetchUser(ctx context.Context, username string) *GitHubUser {
+func (c *Client) FetchUser(ctx context.Context, username string) *GitHubUser {
 	// First try to get enhanced data via GraphQL if we have a token
-	if d.githubToken != "" && d.isValidGitHubToken(d.githubToken) {
-		if user := d.fetchUserWithGraphQL(ctx, username); user != nil {
+	if c.githubToken != "" && c.isValidGitHubToken(c.githubToken) {
+		if user := c.FetchUserWithGraphQL(ctx, username); user != nil {
 			// If GraphQL didn't find social accounts, try HTML scraping
 			if !strings.Contains(user.Bio, "@") && !strings.Contains(user.Bio, "http") {
-				d.logger.Debug("GraphQL found no social accounts, trying HTML scraping", "username", username)
-				if htmlSocials := d.fetchSocialFromHTML(ctx, username); len(htmlSocials) > 0 {
+				c.logger.Debug("GraphQL found no social accounts, trying HTML scraping", "username", username)
+				if htmlSocials := c.FetchSocialFromHTML(ctx, username); len(htmlSocials) > 0 {
 					for _, social := range htmlSocials {
 						if user.Bio != "" {
 							user.Bio += " | "
 						}
 						user.Bio += social
 					}
-					d.logger.Debug("HTML scraping found social accounts", "username", username, "count", len(htmlSocials))
+					c.logger.Debug("HTML scraping found social accounts", "username", username, "count", len(htmlSocials))
 				}
 			}
 			return user
@@ -702,63 +688,63 @@ func (d *Detector) fetchUser(ctx context.Context, username string) *GitHubUser {
 	}
 
 	// SECURITY: Validate and sanitize GitHub token before use
-	if d.githubToken != "" {
-		token := d.githubToken
+	if c.githubToken != "" {
+		token := c.githubToken
 		// Validate token format to prevent injection attacks
-		if d.isValidGitHubToken(token) {
+		if c.isValidGitHubToken(token) {
 			req.Header.Set("Authorization", "token "+token)
 		}
 	}
 
-	resp, err := d.cachedHTTPDo(ctx, req)
+	resp, err := c.cachedHTTPDo(ctx, req)
 	if err != nil {
-		d.logger.Debug("failed to fetch user", "username", username, "error", err)
+		c.logger.Debug("failed to fetch user", "username", username, "error", err)
 		return nil
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			d.logger.Debug("failed to close response body", "error", err)
+			c.logger.Debug("failed to close response body", "error", err)
 		}
 	}()
 
 	var user GitHubUser
 	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
-		d.logger.Debug("failed to decode user", "username", username, "error", err)
+		c.logger.Debug("failed to decode user", "username", username, "error", err)
 		return nil
 	}
 	
-	d.logger.Debug("fetched user full name", "username", username, "name", user.Name)
+	c.logger.Debug("fetched user full name", "username", username, "name", user.Name)
 
 	return &user
 }
 
-func (d *Detector) fetchUserRepositories(ctx context.Context, username string) ([]Repository, error) {
+func (c *Client) FetchUserRepositories(ctx context.Context, username string) ([]Repository, error) {
 	// First try to get pinned repositories using GraphQL
-	pinnedRepos, err := d.fetchPinnedRepositories(ctx, username)
+	pinnedRepos, err := c.FetchPinnedRepositories(ctx, username)
 	if err != nil {
-		d.logger.Debug("failed to fetch pinned repositories, falling back to popular repos", "username", username, "error", err)
+		c.logger.Debug("failed to fetch pinned repositories, falling back to popular repos", "username", username, "error", err)
 	}
 
 	// If we have pinned repos, use those
 	if len(pinnedRepos) > 0 {
-		d.logger.Debug("using pinned repositories", "username", username, "count", len(pinnedRepos))
+		c.logger.Debug("using pinned repositories", "username", username, "count", len(pinnedRepos))
 		return pinnedRepos, nil
 	}
 
 	// Fall back to most starred repositories
-	popularRepos, err := d.fetchPopularRepositories(ctx, username)
+	popularRepos, err := c.FetchPopularRepositories(ctx, username)
 	if err != nil {
-		d.logger.Debug("failed to fetch popular repositories", "username", username, "error", err)
+		c.logger.Debug("failed to fetch popular repositories", "username", username, "error", err)
 		return []Repository{}, err
 	}
 
-	d.logger.Debug("using popular repositories", "username", username, "count", len(popularRepos))
+	c.logger.Debug("using popular repositories", "username", username, "count", len(popularRepos))
 	return popularRepos, nil
 }
 
-func (d *Detector) fetchPinnedRepositories(ctx context.Context, username string) ([]Repository, error) {
-	if d.githubToken == "" {
-		d.logger.Debug("GitHub token required for GraphQL API", "username", username)
+func (c *Client) FetchPinnedRepositories(ctx context.Context, username string) ([]Repository, error) {
+	if c.githubToken == "" {
+		c.logger.Debug("GitHub token required for GraphQL API", "username", username)
 		return nil, errors.New("GitHub token required for GraphQL API")
 	}
 
@@ -796,16 +782,16 @@ func (d *Detector) fetchPinnedRepositories(ctx context.Context, username string)
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "bearer "+d.githubToken)
+	req.Header.Set("Authorization", "bearer "+c.githubToken)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := d.cachedHTTPDo(ctx, req)
+	resp, err := c.cachedHTTPDo(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching pinned repositories: %w", err)
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			d.logger.Debug("failed to close response body", "error", err)
+			c.logger.Debug("failed to close response body", "error", err)
 		}
 	}()
 
@@ -845,7 +831,7 @@ func (d *Detector) fetchPinnedRepositories(ctx context.Context, username string)
 	}
 
 	if len(result.Errors) > 0 {
-		d.logger.Debug("GitHub GraphQL errors", "username", username, "errors", result.Errors)
+		c.logger.Debug("GitHub GraphQL errors", "username", username, "errors", result.Errors)
 		return nil, fmt.Errorf("GraphQL errors: %v", result.Errors[0].Message)
 	}
 
@@ -856,19 +842,18 @@ func (d *Detector) fetchPinnedRepositories(ctx context.Context, username string)
 			FullName:        node.NameWithOwner,
 			Description:     node.Description,
 			Language:        node.PrimaryLanguage.Name,
-			StargazersCount: node.StargazerCount,
-			IsPinned:        true,
-			IsFork:          node.IsFork,
+			StarCount: node.StargazerCount,
+			Fork:      node.IsFork,
 			HTMLURL:         node.URL,
 		}
 		repositories = append(repositories, repo)
 	}
 
-	d.logger.Debug("fetched pinned repositories", "username", username, "count", len(repositories))
+	c.logger.Debug("fetched pinned repositories", "username", username, "count", len(repositories))
 	return repositories, nil
 }
 
-func (d *Detector) fetchPopularRepositories(ctx context.Context, username string) ([]Repository, error) {
+func (c *Client) FetchPopularRepositories(ctx context.Context, username string) ([]Repository, error) {
 	// Fetch all repos (up to 100) to ensure we don't miss important ones
 	apiURL := fmt.Sprintf("https://api.github.com/users/%s/repos?sort=updated&per_page=100", url.PathEscape(username))
 
@@ -878,21 +863,21 @@ func (d *Detector) fetchPopularRepositories(ctx context.Context, username string
 	}
 
 	// SECURITY: Validate and sanitize GitHub token before use
-	if d.githubToken != "" {
-		token := d.githubToken
+	if c.githubToken != "" {
+		token := c.githubToken
 		// Validate token format to prevent injection attacks
-		if d.isValidGitHubToken(token) {
+		if c.isValidGitHubToken(token) {
 			req.Header.Set("Authorization", "token "+token)
 		}
 	}
 
-	resp, err := d.cachedHTTPDo(ctx, req)
+	resp, err := c.cachedHTTPDo(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching popular repositories: %w", err)
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			d.logger.Debug("failed to close response body", "error", err)
+			c.logger.Debug("failed to close response body", "error", err)
 		}
 	}()
 
@@ -925,61 +910,96 @@ func (d *Detector) fetchPopularRepositories(ctx context.Context, username string
 			FullName:        apiRepo.FullName,
 			Description:     apiRepo.Description,
 			Language:        apiRepo.Language,
-			StargazersCount: apiRepo.StargazersCount,
-			IsPinned:        false,
-			IsFork:          apiRepo.Fork,
+			StarCount: apiRepo.StargazersCount,
+			Fork:      apiRepo.Fork,
 			HTMLURL:         apiRepo.HTMLURL,
 		}
 		repositories = append(repositories, repo)
 	}
 
-	d.logger.Debug("fetched popular repositories", "username", username, "count", len(repositories))
+	c.logger.Debug("fetched popular repositories", "username", username, "count", len(repositories))
 	return repositories, nil
 }
 
+// FetchProfileHTML fetches the raw HTML of a GitHub profile page
+func (c *Client) FetchProfileHTML(ctx context.Context, username string) string {
+	profileURL := fmt.Sprintf("https://github.com/%s", url.PathEscape(username))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, profileURL, http.NoBody)
+	if err != nil {
+		return ""
+	}
+
+	// SECURITY: Validate and sanitize GitHub token before use
+	if c.githubToken != "" && c.isValidGitHubToken(c.githubToken) {
+		req.Header.Set("Authorization", "token "+c.githubToken)
+	}
+
+	resp, err := c.cachedHTTPDo(ctx, req)
+	if err != nil {
+		return ""
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ""
+	}
+
+	return string(body)
+}
+
 // fetchSocialFromHTML scrapes GitHub profile HTML for social media links
-func (d *Detector) fetchSocialFromHTML(ctx context.Context, username string) []string {
+func (c *Client) FetchSocialFromHTML(ctx context.Context, username string) []string {
 	url := fmt.Sprintf("https://github.com/%s", username)
 	
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
-		d.logger.Debug("failed to create HTML request", "username", username, "error", err)
+		c.logger.Debug("failed to create HTML request", "username", username, "error", err)
 		return nil
 	}
 	
 	req.Header.Set("User-Agent", "GitHub-Timezone-Detector/1.0")
 	
-	resp, err := d.cachedHTTPDo(ctx, req)
+	resp, err := c.cachedHTTPDo(ctx, req)
 	if err != nil {
-		d.logger.Debug("failed to fetch profile HTML", "username", username, "error", err)
+		c.logger.Debug("failed to fetch profile HTML", "username", username, "error", err)
 		return nil
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			d.logger.Debug("failed to close response body", "error", err)
+			c.logger.Debug("failed to close response body", "error", err)
 		}
 	}()
 	
 	if resp.StatusCode != http.StatusOK {
-		d.logger.Debug("profile HTML returned non-200", "username", username, "status", resp.StatusCode)
+		c.logger.Debug("profile HTML returned non-200", "username", username, "status", resp.StatusCode)
 		return nil
 	}
 	
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024)) // 2MB limit
 	if err != nil {
-		d.logger.Debug("failed to read profile HTML", "username", username, "error", err)
+		c.logger.Debug("failed to read profile HTML", "username", username, "error", err)
 		return nil
 	}
 	
 	html := string(body)
-	d.logger.Debug("scraped profile HTML", "username", username, "html_length", len(html))
+	c.logger.Debug("scraped profile HTML", "username", username, "html_length", len(html))
 	
 	// Use the existing extraction function
-	return extractSocialMediaFromHTML(html)
+	return ExtractSocialMediaFromHTML(html)
 }
 
 // fetchStarredRepositories fetches repositories the user has starred for additional timestamp data and repository details.
-func (d *Detector) fetchStarredRepositories(ctx context.Context, username string) ([]time.Time, []Repository, error) {
+func (c *Client) FetchStarredRepositories(ctx context.Context, username string) ([]time.Time, []Repository, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/users/%s/starred?per_page=100", url.PathEscape(username))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
@@ -988,9 +1008,9 @@ func (d *Detector) fetchStarredRepositories(ctx context.Context, username string
 	}
 
 	// SECURITY: Validate and sanitize GitHub token before use
-	if d.githubToken != "" {
-		token := d.githubToken
-		if d.isValidGitHubToken(token) {
+	if c.githubToken != "" {
+		token := c.githubToken
+		if c.isValidGitHubToken(token) {
 			req.Header.Set("Authorization", "token "+token)
 		}
 	}
@@ -998,13 +1018,13 @@ func (d *Detector) fetchStarredRepositories(ctx context.Context, username string
 	// Request timestamps in response headers
 	req.Header.Set("Accept", "application/vnd.github.v3.star+json")
 
-	resp, err := d.cachedHTTPDo(ctx, req)
+	resp, err := c.cachedHTTPDo(ctx, req)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetching starred repositories: %w", err)
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			d.logger.Debug("failed to close response body", "error", err)
+			c.logger.Debug("failed to close response body", "error", err)
 		}
 	}()
 
@@ -1048,17 +1068,17 @@ func (d *Detector) fetchStarredRepositories(ctx context.Context, username string
 		}
 	}
 
-	d.logger.Debug("fetched starred repositories", "username", username, "count", len(timestamps))
+	c.logger.Debug("fetched starred repositories", "username", username, "count", len(timestamps))
 	return timestamps, repos, nil
 }
 
 // fetchUserCommits fetches commit timestamps for a user's recent commits across their repositories.
-func (d *Detector) fetchUserCommits(ctx context.Context, username string) ([]time.Time, error) {
-	return d.fetchUserCommitsWithLimit(ctx, username, 2) // Default to 2 pages (200 commits)
+func (c *Client) FetchUserCommits(ctx context.Context, username string) ([]time.Time, error) {
+	return c.FetchUserCommitsWithLimit(ctx, username, 2) // Default to 2 pages (200 commits)
 }
 
 // fetchUserCommitsWithLimit fetches commit timestamps with a configurable page limit.
-func (d *Detector) fetchUserCommitsWithLimit(ctx context.Context, username string, maxPages int) ([]time.Time, error) {
+func (c *Client) FetchUserCommitsWithLimit(ctx context.Context, username string, maxPages int) ([]time.Time, error) {
 	var allTimestamps []time.Time
 	const perPage = 100
 	
@@ -1072,7 +1092,7 @@ func (d *Detector) fetchUserCommitsWithLimit(ctx context.Context, username strin
 			wg.Add(1)
 			go func(p int) {
 				defer wg.Done()
-				timestamps, err := d.fetchCommitPage(ctx, username, p, perPage)
+				timestamps, err := c.fetchCommitPage(ctx, username, p, perPage)
 				if err != nil {
 					// Log but continue - partial data is acceptable
 					return
@@ -1092,18 +1112,18 @@ func (d *Detector) fetchUserCommitsWithLimit(ctx context.Context, username strin
 	} else {
 		// Single page, no need for parallelization
 		var err error
-		allTimestamps, err = d.fetchCommitPage(ctx, username, 1, perPage)
+		allTimestamps, err = c.fetchCommitPage(ctx, username, 1, perPage)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch commits for user %s: %w", username, err)
 		}
 	}
 	
-	d.logger.Debug("fetched user commits", "username", username, "count", len(allTimestamps), "pages", maxPages)
+	c.logger.Debug("fetched user commits", "username", username, "count", len(allTimestamps), "pages", maxPages)
 	return allTimestamps, nil
 }
 
 // fetchCommitPage fetches a single page of commits
-func (d *Detector) fetchCommitPage(ctx context.Context, username string, page int, perPage int) ([]time.Time, error) {
+func (c *Client) fetchCommitPage(ctx context.Context, username string, page int, perPage int) ([]time.Time, error) {
 	var timestamps []time.Time
 	
 	// Use GitHub Search API to find commits by this user
@@ -1120,21 +1140,21 @@ func (d *Detector) fetchCommitPage(ctx context.Context, username string, page in
 	req.Header.Set("Accept", "application/vnd.github.cloak-preview+json")
 	
 	// SECURITY: Validate and sanitize GitHub token before use
-	if d.githubToken != "" {
-		token := d.githubToken
-		if d.isValidGitHubToken(token) {
+	if c.githubToken != "" {
+		token := c.githubToken
+		if c.isValidGitHubToken(token) {
 			req.Header.Set("Authorization", "token "+token)
 		}
 	}
 	
-	resp, err := d.cachedHTTPDo(ctx, req)
+	resp, err := c.cachedHTTPDo(ctx, req)
 	if err != nil {
-		d.logger.Debug("failed to fetch commit page", "page", page, "error", err)
+		c.logger.Debug("failed to fetch commit page", "page", page, "error", err)
 		return timestamps, err
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			d.logger.Debug("failed to close response body", "error", err)
+			c.logger.Debug("failed to close response body", "error", err)
 		}
 	}()
 	
@@ -1143,7 +1163,7 @@ func (d *Detector) fetchCommitPage(ctx context.Context, username string, page in
 		if err != nil {
 			return nil, fmt.Errorf("failed to read response body: %w", err)
 		}
-		d.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
+		c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
 		return timestamps, fmt.Errorf("GitHub API error: %d", resp.StatusCode)
 	}
 	
@@ -1162,12 +1182,12 @@ func (d *Detector) fetchCommitPage(ctx context.Context, username string, page in
 	}
 	
 	if err := json.NewDecoder(resp.Body).Decode(&searchResult); err != nil {
-		d.logger.Debug("failed to decode commit response", "page", page, "error", err)
+		c.logger.Debug("failed to decode commit response", "page", page, "error", err)
 		return timestamps, err
 	}
 	
 	if page == 1 {
-		d.logger.Debug("GitHub commit search results", "username", username, "total_count", searchResult.TotalCount)
+		c.logger.Debug("GitHub commit search results", "username", username, "total_count", searchResult.TotalCount)
 	}
 	
 	for _, item := range searchResult.Items {

@@ -3,6 +3,8 @@ package ghutz
 import (
 	"encoding/json"
 	"strings"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 )
 
 // CommitMessageSample represents a sample commit message for analysis
@@ -12,7 +14,7 @@ type CommitMessageSample struct {
 }
 
 // collectCommitMessageSamples collects sample commit messages from events
-func collectCommitMessageSamples(events []PublicEvent, maxSamples int) []CommitMessageSample {
+func collectCommitMessageSamples(events []github.PublicEvent, maxSamples int) []CommitMessageSample {
 	var samples []CommitMessageSample
 	seen := make(map[string]bool)
 	
@@ -66,7 +68,7 @@ func collectCommitMessageSamples(events []PublicEvent, maxSamples int) []CommitM
 }
 
 // collectTextSamples collects sample text from PRs, issues, and comments
-func collectTextSamples(prs []PullRequest, issues []Issue, comments []Comment, maxSamples int) []string {
+func collectTextSamples(prs []github.PullRequest, issues []github.Issue, comments []github.Comment, maxSamples int) []string {
 	var samples []string
 	seen := make(map[string]bool)
 	

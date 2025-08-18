@@ -1,6 +1,10 @@
 package ghutz
 
-import "time"
+import (
+	"time"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
+)
 
 // Option configures a Detector.
 type Option func(*OptionHolder)
@@ -140,72 +144,15 @@ type Location struct {
 	Longitude float64 `json:"longitude"`
 }
 
-// GitHubUser represents basic GitHub user info.
-type GitHubUser struct {
-	Login           string `json:"login"`
-	Name            string `json:"name"`
-	Location        string `json:"location"`
-	Company         string `json:"company"`
-	Blog            string `json:"blog"`
-	Email           string `json:"email"`
-	Bio             string `json:"bio"`
-	TwitterUsername string `json:"twitter_username"`
-	CreatedAt       string `json:"created_at"`
-}
-
-// PullRequest represents a GitHub pull request.
-type PullRequest struct {
-	Title      string    `json:"title"`
-	Body       string    `json:"body"`
-	CreatedAt  time.Time `json:"created_at"`
-	HTMLURL    string    `json:"html_url"`
-	Repository string    `json:"repository,omitempty"` // owner/repo format
-}
-
-// Issue represents a GitHub issue.
-type Issue struct {
-	Title      string    `json:"title"`
-	Body       string    `json:"body"`
-	CreatedAt  time.Time `json:"created_at"`
-	HTMLURL    string    `json:"html_url"`
-	Repository string    `json:"repository,omitempty"` // owner/repo format
-}
-
-// Comment represents a GitHub comment.
-type Comment struct {
-	CreatedAt  time.Time `json:"created_at"`
-	Type       string    `json:"type"` // "issue" or "commit"
-	Body       string    `json:"body"`
-	Repository string    `json:"repository"` // owner/repo format
-}
-
-// Organization represents a GitHub organization.
-type Organization struct {
-	Login       string `json:"login"`
-	Description string `json:"description"`
-	Location    string `json:"location"`
-}
-
-// Repository represents a GitHub repository with location indicators.
-type Repository struct {
-	Name            string    `json:"name"`
-	FullName        string    `json:"full_name"`
-	Description     string    `json:"description"`
-	Language        string    `json:"language"`
-	HTMLURL         string    `json:"html_url"`
-	StargazersCount int       `json:"stargazers_count"`
-	IsPinned        bool      `json:"is_pinned"`
-	IsFork          bool      `json:"is_fork"`
-	CreatedAt       time.Time `json:"created_at"`
-	PushedAt        time.Time `json:"pushed_at"`
-}
+// Note: GitHub-related types (GitHubUser, PullRequest, Issue, Comment, Organization, Repository)
+// have been moved to the github package
 
 // ActivityData holds all activity data for timezone detection.
 type ActivityData struct {
-	PullRequests   []PullRequest
-	Issues         []Issue
-	Comments       []Comment
-	StarredRepos   []Repository
+	PullRequests   []github.PullRequest
+	Issues         []github.Issue
+	Comments       []github.Comment
+	StarredRepos   []github.Repository
 }
 
 // TimezoneCandidate represents a timezone detection result with evidence.

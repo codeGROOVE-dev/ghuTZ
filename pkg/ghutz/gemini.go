@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/gemini"
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 )
 
 // geminiQueryResult holds the result from a Gemini API query
@@ -215,7 +216,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	}
 	
 	// Filter recent PRs
-	var recentPRs []PullRequest
+	var recentPRs []github.PullRequest
 	cutoff := time.Now().AddDate(0, -3, 0)
 	for _, pr := range userCtx.PullRequests {
 		if pr.CreatedAt.After(cutoff) {
@@ -230,7 +231,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	}
 	
 	// Filter recent issues
-	var recentIssues []Issue
+	var recentIssues []github.Issue
 	for _, issue := range userCtx.Issues {
 		if issue.CreatedAt.After(cutoff) {
 			recentIssues = append(recentIssues, issue)
@@ -282,7 +283,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	
 	// Also extract social media URLs from website content
 	if websiteContent, ok := contextData["website_content"].(string); ok && websiteContent != "" {
-		websiteSocialURLs := extractSocialMediaFromHTML(websiteContent)
+		websiteSocialURLs := github.ExtractSocialMediaFromHTML(websiteContent)
 		d.logger.Debug("extracted social media URLs from website", 
 			"website", userCtx.User.Blog, 
 			"found_urls", len(websiteSocialURLs))
@@ -399,14 +400,14 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 }
 
 // tryUnifiedGeminiAnalysisWithEvents attempts timezone detection using Gemini AI with event context.
-func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, username string, activityResult *Result, events []PublicEvent) *Result {
+func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, username string, activityResult *Result, events []github.PublicEvent) *Result {
 	// Skip if no Gemini API key
 	if d.geminiAPIKey == "" {
 		d.logger.Debug("skipping Gemini analysis - no API key configured")
 		return nil
 	}
 
-	user := d.fetchUser(ctx, username)
+	user := d.githubClient.FetchUser(ctx, username)
 	if user == nil {
 		d.logger.Debug("could not fetch user for Gemini analysis", "username", username)
 		return nil
@@ -499,18 +500,18 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 
 	// Fetch supplemental data for comprehensive analysis
 	wg := sync.WaitGroup{}
-	var organizations []Organization
-	var repos []Repository
-	var starredRepos []Repository
-	var pullRequests []PullRequest
-	var issues []Issue
-	var comments []Comment
+	var organizations []github.Organization
+	var repos []github.Repository
+	var starredRepos []github.Repository
+	var pullRequests []github.PullRequest
+	var issues []github.Issue
+	var comments []github.Comment
 
 	// Fetch organizations
 	wg.Add(6) // Total goroutines: orgs, repos, PRs, issues, comments, starred
 	go func() {
 		defer wg.Done()
-		orgs, err := d.fetchOrganizations(ctx, username)
+		orgs, err := d.githubClient.FetchOrganizations(ctx, username)
 		if err == nil {
 			organizations = orgs
 		}
@@ -519,17 +520,17 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	// Fetch repositories
 	go func() {
 		defer wg.Done()
-		pinnedRepos, err := d.fetchPinnedRepositories(ctx, username)
+		pinnedRepos, err := d.githubClient.FetchPinnedRepositories(ctx, username)
 		if err != nil {
 			d.logger.Debug("failed to fetch pinned repositories", "error", err)
 		}
-		popularRepos, err := d.fetchPopularRepositories(ctx, username)
+		popularRepos, err := d.githubClient.FetchPopularRepositories(ctx, username)
 		if err != nil {
 			d.logger.Debug("failed to fetch popular repositories", "error", err)
 		}
 
 		// Combine and deduplicate
-		repoMap := make(map[string]Repository)
+		repoMap := make(map[string]github.Repository)
 		for _, repo := range pinnedRepos {
 			repoMap[repo.FullName] = repo
 		}
@@ -547,7 +548,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	// Fetch recent PRs
 	go func() {
 		defer wg.Done()
-		prs, err := d.fetchPullRequests(ctx, username)
+		prs, err := d.githubClient.FetchPullRequests(ctx, username)
 		if err == nil && len(prs) > 0 {
 			// Limit to recent PRs
 			cutoff := time.Now().AddDate(0, -3, 0)
@@ -565,7 +566,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	// Fetch recent issues
 	go func() {
 		defer wg.Done()
-		iss, err := d.fetchIssues(ctx, username)
+		iss, err := d.githubClient.FetchIssues(ctx, username)
 		if err == nil && len(iss) > 0 {
 			// Limit to recent issues
 			cutoff := time.Now().AddDate(0, -3, 0)
@@ -583,7 +584,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	// Fetch recent comments
 	go func() {
 		defer wg.Done()
-		cmts, err := d.fetchUserComments(ctx, username)
+		cmts, err := d.githubClient.FetchUserComments(ctx, username)
 		if err == nil {
 			comments = cmts
 		}
@@ -592,7 +593,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	// Fetch starred repositories
 	go func() {
 		defer wg.Done()
-		_, starred, err := d.fetchStarredRepositories(ctx, username)
+		_, starred, err := d.githubClient.FetchStarredRepositories(ctx, username)
 		if err == nil {
 			starredRepos = starred
 		}
@@ -657,7 +658,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	
 	// Also extract social media URLs from website content
 	if websiteContent, ok := contextData["website_content"].(string); ok && websiteContent != "" {
-		websiteSocialURLs := extractSocialMediaFromHTML(websiteContent)
+		websiteSocialURLs := github.ExtractSocialMediaFromHTML(websiteContent)
 		d.logger.Debug("extracted social media URLs from website", 
 			"website", user.Blog, 
 			"found_urls", len(websiteSocialURLs))

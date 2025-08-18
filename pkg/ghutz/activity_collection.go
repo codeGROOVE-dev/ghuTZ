@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 )
 
 // timestampEntry represents a single activity timestamp with metadata.
@@ -16,7 +18,7 @@ type timestampEntry struct {
 }
 
 // collectActivityTimestamps gathers all activity timestamps from various sources.
-func (d *Detector) collectActivityTimestamps(ctx context.Context, username string, events []PublicEvent) (timestamps []timestampEntry, orgCounts map[string]int) {
+func (d *Detector) collectActivityTimestamps(ctx context.Context, username string, events []github.PublicEvent) (timestamps []timestampEntry, orgCounts map[string]int) {
 	allTimestamps := []timestampEntry{}
 	orgCounts = make(map[string]int)
 
@@ -47,7 +49,7 @@ func (d *Detector) collectActivityTimestamps(ctx context.Context, username strin
 	}
 
 	// Also fetch gist timestamps
-	if gistTimestamps, err := d.fetchUserGists(ctx, username); err == nil && len(gistTimestamps) > 0 {
+	if gistTimestamps, err := d.githubClient.FetchUserGists(ctx, username); err == nil && len(gistTimestamps) > 0 {
 		for _, ts := range gistTimestamps {
 			allTimestamps = append(allTimestamps, timestampEntry{
 				time:   ts,
@@ -134,7 +136,7 @@ func (d *Detector) fetchAdditionalPages(ctx context.Context, username string, al
 	if len(extraData.PullRequests) > prCount {
 		newPRs := extraData.PullRequests[prCount:]
 		for _, pr := range newPRs {
-			org := extractOrganization(pr.Repository)
+			org := extractOrganization(pr.RepoName)
 			allTimestamps = append(allTimestamps, timestampEntry{
 				time:   pr.CreatedAt,
 				source: "pr",
@@ -148,7 +150,7 @@ func (d *Detector) fetchAdditionalPages(ctx context.Context, username string, al
 	if len(extraData.Issues) > issueCount {
 		newIssues := extraData.Issues[issueCount:]
 		for _, issue := range newIssues {
-			org := extractOrganization(issue.Repository)
+			org := extractOrganization(issue.RepoName)
 			allTimestamps = append(allTimestamps, timestampEntry{
 				time:   issue.CreatedAt,
 				source: "issue",
@@ -180,7 +182,7 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 	prOldest := time.Now()
 	prNewest := time.Time{}
 	for _, pr := range additionalData.PullRequests {
-		org := extractOrganization(pr.Repository)
+		org := extractOrganization(pr.RepoName)
 		allTimestamps = append(allTimestamps, timestampEntry{
 			time:   pr.CreatedAt,
 			source: "pr",
@@ -205,7 +207,7 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 	issueOldest := time.Now()
 	issueNewest := time.Time{}
 	for _, issue := range additionalData.Issues {
-		org := extractOrganization(issue.Repository)
+		org := extractOrganization(issue.RepoName)
 		allTimestamps = append(allTimestamps, timestampEntry{
 			time:   issue.CreatedAt,
 			source: "issue",
