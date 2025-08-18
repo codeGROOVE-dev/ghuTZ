@@ -753,35 +753,4 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 
 // extractUTCOffset extracts the UTC offset from a timezone string
 // Handles formats like "UTC+10", "Europe/Moscow", "America/New_York"
-func extractUTCOffset(timezone string) int {
-	// Handle UTC+/- format
-	if strings.HasPrefix(timezone, "UTC") {
-		offsetStr := strings.TrimPrefix(timezone, "UTC")
-		if offsetStr == "" {
-			return 0
-		}
-		if offset, err := strconv.Atoi(offsetStr); err == nil {
-			return offset
-		}
-	}
-	
-	// Handle named timezones by loading them
-	if loc, err := time.LoadLocation(timezone); err == nil {
-		// Use a reference date to get the current offset
-		now := time.Now().In(loc)
-		_, offset := now.Zone()
-		return offset / 3600
-	}
-	
-	// Default to 0 if we can't parse
-	return 0
-}
-
-// abs returns the absolute value of an integer
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
 

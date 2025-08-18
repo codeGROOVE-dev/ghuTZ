@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -33,7 +34,7 @@ func (d *Detector) fetchPublicEvents(ctx context.Context, username string) ([]Pu
 	var allEvents []PublicEvent
 
 	for page := 1; page <= maxPages; page++ {
-		apiURL := fmt.Sprintf("https://api.github.com/users/%s/events/public?per_page=%d&page=%d", username, perPage, page)
+		apiURL := fmt.Sprintf("https://api.github.com/users/%s/events/public?per_page=%d&page=%d", url.PathEscape(username), perPage, page)
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 		if err != nil {
@@ -87,7 +88,7 @@ func (d *Detector) fetchPublicEvents(ctx context.Context, username string) ([]Pu
 
 // fetchUserGists fetches gist timestamps for a user.
 func (d *Detector) fetchUserGists(ctx context.Context, username string) ([]time.Time, error) {
-	apiURL := fmt.Sprintf("https://api.github.com/users/%s/gists?per_page=100", username)
+	apiURL := fmt.Sprintf("https://api.github.com/users/%s/gists?per_page=100", url.PathEscape(username))
 	
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
@@ -102,7 +103,11 @@ func (d *Detector) fetchUserGists(ctx context.Context, username string) ([]time.
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error but don't fail the request
+		}
+	}()
 	
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
@@ -138,7 +143,7 @@ func (d *Detector) fetchPullRequestsWithLimit(ctx context.Context, username stri
 	
 	for page := 1; page <= maxPages; page++ {
 		apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:pr&sort=created&order=desc&per_page=%d&page=%d", 
-			username, perPage, page)
+			url.QueryEscape(username), perPage, page)
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 		if err != nil {
@@ -235,7 +240,7 @@ func (d *Detector) fetchIssuesWithLimit(ctx context.Context, username string, ma
 	
 	for page := 1; page <= maxPages; page++ {
 		apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:issue&sort=created&order=desc&per_page=%d&page=%d", 
-			username, perPage, page)
+			url.QueryEscape(username), perPage, page)
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 		if err != nil {
@@ -608,7 +613,7 @@ func (d *Detector) fetchUserComments(ctx context.Context, username string) ([]Co
 }
 
 func (d *Detector) fetchOrganizations(ctx context.Context, username string) ([]Organization, error) {
-	apiURL := fmt.Sprintf("https://api.github.com/users/%s/orgs", username)
+	apiURL := fmt.Sprintf("https://api.github.com/users/%s/orgs", url.PathEscape(username))
 	d.logger.Debug("fetching organizations from API", "url", apiURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
@@ -689,9 +694,9 @@ func (d *Detector) fetchUser(ctx context.Context, username string) *GitHubUser {
 	}
 	
 	// Fallback to REST API
-	url := fmt.Sprintf("https://api.github.com/users/%s", username)
+	apiURL := fmt.Sprintf("https://api.github.com/users/%s", url.PathEscape(username))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
 		return nil
 	}
@@ -865,7 +870,7 @@ func (d *Detector) fetchPinnedRepositories(ctx context.Context, username string)
 
 func (d *Detector) fetchPopularRepositories(ctx context.Context, username string) ([]Repository, error) {
 	// Fetch all repos (up to 100) to ensure we don't miss important ones
-	apiURL := fmt.Sprintf("https://api.github.com/users/%s/repos?sort=updated&per_page=100", username)
+	apiURL := fmt.Sprintf("https://api.github.com/users/%s/repos?sort=updated&per_page=100", url.PathEscape(username))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
@@ -975,7 +980,7 @@ func (d *Detector) fetchSocialFromHTML(ctx context.Context, username string) []s
 
 // fetchStarredRepositories fetches repositories the user has starred for additional timestamp data and repository details.
 func (d *Detector) fetchStarredRepositories(ctx context.Context, username string) ([]time.Time, []Repository, error) {
-	apiURL := fmt.Sprintf("https://api.github.com/users/%s/starred?per_page=100", username)
+	apiURL := fmt.Sprintf("https://api.github.com/users/%s/starred?per_page=100", url.PathEscape(username))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
@@ -1067,7 +1072,11 @@ func (d *Detector) fetchUserCommitsWithLimit(ctx context.Context, username strin
 			wg.Add(1)
 			go func(p int) {
 				defer wg.Done()
-				timestamps, _ := d.fetchCommitPage(ctx, username, p, perPage)
+				timestamps, err := d.fetchCommitPage(ctx, username, p, perPage)
+				if err != nil {
+					// Log but continue - partial data is acceptable
+					return
+				}
 				mu.Lock()
 				results[p-1] = timestamps
 				mu.Unlock()
@@ -1082,7 +1091,11 @@ func (d *Detector) fetchUserCommitsWithLimit(ctx context.Context, username strin
 		}
 	} else {
 		// Single page, no need for parallelization
-		allTimestamps, _ = d.fetchCommitPage(ctx, username, 1, perPage)
+		var err error
+		allTimestamps, err = d.fetchCommitPage(ctx, username, 1, perPage)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch commits for user %s: %w", username, err)
+		}
 	}
 	
 	d.logger.Debug("fetched user commits", "username", username, "count", len(allTimestamps), "pages", maxPages)
@@ -1096,7 +1109,7 @@ func (d *Detector) fetchCommitPage(ctx context.Context, username string, page in
 	// Use GitHub Search API to find commits by this user
 	// Note: This requires authentication for better rate limits
 	searchURL := fmt.Sprintf("https://api.github.com/search/commits?q=author:%s&sort=author-date&order=desc&per_page=%d&page=%d", 
-		username, perPage, page)
+		url.QueryEscape(username), perPage, page)
 	
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, http.NoBody)
 	if err != nil {
@@ -1126,7 +1139,10 @@ func (d *Detector) fetchCommitPage(ctx context.Context, username string, page in
 	}()
 	
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response body: %w", err)
+		}
 		d.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
 		return timestamps, fmt.Errorf("GitHub API error: %d", resp.StatusCode)
 	}

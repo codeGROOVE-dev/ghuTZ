@@ -11,8 +11,9 @@ func offsetFromNamedTimezone(tzName string) int {
 	// Handle UTC offset strings like "UTC-4" or "UTC+8"
 	if strings.HasPrefix(tzName, "UTC") {
 		var offset int
-		fmt.Sscanf(tzName, "UTC%d", &offset)
-		return offset
+		if n, err := fmt.Sscanf(tzName, "UTC%d", &offset); n == 1 && err == nil {
+			return offset
+		}
 	}
 	
 	// Load the IANA timezone location

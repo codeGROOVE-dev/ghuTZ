@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -134,6 +135,43 @@ func (d *Detector) isValidGitHubToken(token string) bool {
 	return githubPATRegex.MatchString(token) ||
 		githubAppTokenRegex.MatchString(token) ||
 		githubFineGrainedRegex.MatchString(token)
+}
+
+// isValidGitHubUsername validates GitHub username format for security.
+func isValidGitHubUsername(username string) bool {
+	// SECURITY: Validate username to prevent injection attacks
+	username = strings.TrimSpace(username)
+	
+	if username == "" {
+		return false
+	}
+	
+	// GitHub username rules:
+	// - Max 39 characters
+	// - May contain alphanumeric characters and hyphens
+	// - Cannot start or end with hyphen
+	// - Cannot have consecutive hyphens
+	if len(username) > 39 || len(username) == 0 {
+		return false
+	}
+	
+	if username[0] == '-' || username[len(username)-1] == '-' {
+		return false
+	}
+	
+	if strings.Contains(username, "--") {
+		return false
+	}
+	
+	// Only allow alphanumeric and hyphens
+	for _, ch := range username {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || 
+			 (ch >= '0' && ch <= '9') || ch == '-') {
+			return false
+		}
+	}
+	
+	return true
 }
 
 func New(ctx context.Context, opts ...Option) *Detector {
@@ -374,11 +412,19 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 		repoWg.Add(2)
 		go func() {
 			defer repoWg.Done()
-			pinnedRepos, _ = d.fetchPinnedRepositories(ctx, username)
+			var err error
+			pinnedRepos, err = d.fetchPinnedRepositories(ctx, username)
+			if err != nil {
+				d.logger.Debug("failed to fetch pinned repositories", "username", username, "error", err)
+			}
 		}()
 		go func() {
 			defer repoWg.Done()
-			popularRepos, _ = d.fetchPopularRepositories(ctx, username)
+			var err error
+			popularRepos, err = d.fetchPopularRepositories(ctx, username)
+			if err != nil {
+				d.logger.Debug("failed to fetch popular repositories", "username", username, "error", err)
+			}
 		}()
 		repoWg.Wait()
 		
@@ -413,7 +459,10 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking starred repositories", "username", username)
-		_, starredRepos, _ := d.fetchStarredRepositories(ctx, username)
+		_, starredRepos, err := d.fetchStarredRepositories(ctx, username)
+		if err != nil {
+			d.logger.Debug("failed to fetch starred repositories", "username", username, "error", err)
+		}
 		mu.Lock()
 		userCtx.StarredRepos = starredRepos
 		mu.Unlock()
@@ -424,7 +473,10 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking pull requests", "username", username)
-		prs, _ := d.fetchPullRequests(ctx, username)
+		prs, err := d.fetchPullRequests(ctx, username)
+		if err != nil {
+			d.logger.Debug("failed to fetch pull requests", "username", username, "error", err)
+		}
 		mu.Lock()
 		userCtx.PullRequests = prs
 		mu.Unlock()
@@ -435,7 +487,10 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking issues", "username", username)
-		issues, _ := d.fetchIssues(ctx, username)
+		issues, err := d.fetchIssues(ctx, username)
+		if err != nil {
+			d.logger.Debug("failed to fetch issues", "username", username, "error", err)
+		}
 		mu.Lock()
 		userCtx.Issues = issues
 		mu.Unlock()
@@ -446,7 +501,10 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking comments", "username", username)
-		comments, _ := d.fetchUserComments(ctx, username)
+		comments, err := d.fetchUserComments(ctx, username)
+		if err != nil {
+			d.logger.Debug("failed to fetch user comments", "username", username, "error", err)
+		}
 		mu.Lock()
 		userCtx.Comments = comments
 		mu.Unlock()
@@ -457,7 +515,10 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking gists", "username", username)
-		gists, _ := d.fetchUserGists(ctx, username)
+		gists, err := d.fetchUserGists(ctx, username)
+		if err != nil {
+			d.logger.Debug("failed to fetch user gists", "username", username, "error", err)
+		}
 		mu.Lock()
 		userCtx.Gists = gists
 		mu.Unlock()
@@ -482,21 +543,9 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 }
 
 func (d *Detector) Detect(ctx context.Context, username string) (*Result, error) {
-	if username == "" {
-		return nil, errors.New("username cannot be empty")
-	}
-
-	// Validate username to prevent injection attacks
-	// GitHub usernames can only contain alphanumeric characters or hyphens
-	// Cannot have multiple consecutive hyphens
-	// Cannot begin or end with a hyphen
-	// Maximum 39 characters
-	if len(username) > 39 {
-		return nil, errors.New("username too long (max 39 characters)")
-	}
-
-	if !validUsernameRegex.MatchString(username) {
-		return nil, errors.New("invalid username format")
+	// SECURITY: Validate username to prevent injection attacks
+	if !isValidGitHubUsername(username) {
+		return nil, errors.New("invalid GitHub username format")
 	}
 
 	d.logger.Info("detecting timezone", "username", username)
@@ -559,9 +608,9 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 
 // fetchProfileHTML fetches the GitHub profile HTML for a user.
 func (d *Detector) fetchProfileHTML(ctx context.Context, username string) string {
-	url := fmt.Sprintf("https://github.com/%s", username)
+	profileURL := fmt.Sprintf("https://github.com/%s", url.PathEscape(username))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, profileURL, http.NoBody)
 	if err != nil {
 		return ""
 	}
@@ -596,9 +645,9 @@ func (d *Detector) fetchProfileHTML(ctx context.Context, username string) string
 func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Result {
 	html := d.fetchProfileHTML(ctx, username)
 	if html == "" {
-		url := fmt.Sprintf("https://github.com/%s", username)
+		profileURL := fmt.Sprintf("https://github.com/%s", url.PathEscape(username))
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, profileURL, http.NoBody)
 		if err != nil {
 			return nil
 		}

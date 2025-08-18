@@ -442,45 +442,6 @@ func calculateTimezoneOffset(timezone string) int {
 	return 0
 }
 
-func formatRelativeTime(hours float64) string {
-	if hours < -12 || hours > 12 {
-		return "" // Too far in past/future
-	}
-
-	absHours := hours
-	if absHours < 0 {
-		absHours = -absHours
-	}
-
-	// Convert to minutes for better precision
-	totalMinutes := int(absHours * 60)
-	h := totalMinutes / 60
-	m := totalMinutes % 60
-
-	// Format tersely
-	if hours < 0 {
-		// In the past
-		switch {
-		case h == 0:
-			return fmt.Sprintf("%dm ago", m)
-		case m == 0:
-			return fmt.Sprintf("%dh ago", h)
-		default:
-			return fmt.Sprintf("%dh%dm ago", h, m)
-		}
-	} else {
-		// In the future
-		switch {
-		case h == 0:
-			return fmt.Sprintf("in %dm", m)
-		case m == 0:
-			return fmt.Sprintf("in %dh", h)
-		default:
-			// For future times, keep it simple
-			return fmt.Sprintf("in %dh", h+(m+29)/60) // Round to nearest hour
-		}
-	}
-}
 
 func formatMethodName(method string) string {
 	methodNames := map[string]string{
