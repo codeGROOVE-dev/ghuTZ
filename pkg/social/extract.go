@@ -35,7 +35,7 @@ func Extract(ctx context.Context, data map[string]string, logger *slog.Logger) [
 			defer wg.Done()
 
 			var content *Content
-			
+
 			switch strings.ToLower(k) {
 			case "mastodon":
 				content = extractMastodon(ctx, u, logger)
@@ -72,7 +72,7 @@ func extractMastodon(ctx context.Context, mastodonURL string, logger *slog.Logge
 	if profileData == nil {
 		profileData = fetchMastodonProfile(ctx, mastodonURL, logger)
 	}
-	
+
 	if profileData == nil {
 		return nil
 	}
@@ -113,14 +113,14 @@ func extractMastodon(ctx context.Context, mastodonURL string, logger *slog.Logge
 	if profileData.JoinedDate != "" {
 		md.WriteString("\n**Joined:** " + profileData.JoinedDate + "\n")
 	}
-	
+
 	content.Markdown = md.String()
-	
+
 	// Extract location from profile fields if present
 	for key, value := range profileData.ProfileFields {
 		lowerKey := strings.ToLower(key)
-		if strings.Contains(lowerKey, "location") || strings.Contains(lowerKey, "city") || 
-		   strings.Contains(lowerKey, "country") || strings.Contains(lowerKey, "place") {
+		if strings.Contains(lowerKey, "location") || strings.Contains(lowerKey, "city") ||
+			strings.Contains(lowerKey, "country") || strings.Contains(lowerKey, "place") {
 			content.Location = value
 			break
 		}
@@ -156,9 +156,9 @@ func extractTwitter(ctx context.Context, twitterURL string, logger *slog.Logger)
 		Kind:     "twitter",
 		URL:      twitterURL,
 		Username: username,
-		Name:     username, // Would be fetched from profile
-		Bio:      "", // Would be fetched from profile
-		Location: "", // Would be fetched from profile
+		Name:     username,   // Would be fetched from profile
+		Bio:      "",         // Would be fetched from profile
+		Location: "",         // Would be fetched from profile
 		Tags:     []string{}, // Would extract hashtags from bio
 		Fields:   make(map[string]string),
 	}
@@ -170,11 +170,11 @@ func extractTwitter(ctx context.Context, twitterURL string, logger *slog.Logger)
 		md.WriteString("**Username:** @" + username + "\n")
 		md.WriteString("\n*Note: Full profile data extraction not yet implemented*\n")
 	}
-	
+
 	content.Markdown = md.String()
-	
+
 	logger.Debug("extracted Twitter profile (dummy)", "url", twitterURL, "username", username)
-	
+
 	return content
 }
 
@@ -209,11 +209,11 @@ func extractLinkedIn(ctx context.Context, linkedinURL string, logger *slog.Logge
 		md.WriteString("**Profile:** " + profileID + "\n")
 	}
 	md.WriteString("\n*Note: LinkedIn profile data extraction not yet implemented*\n")
-	
+
 	content.Markdown = md.String()
-	
+
 	logger.Debug("extracted LinkedIn profile (dummy)", "url", linkedinURL, "profile_id", profileID)
-	
+
 	return content
 }
 
@@ -227,7 +227,7 @@ func extractWebsite(ctx context.Context, websiteURL string, logger *slog.Logger)
 
 	// Convert HTML to markdown
 	markdown := htmlToMarkdown(htmlContent)
-	
+
 	content := &Content{
 		Kind:     "website",
 		URL:      websiteURL,
@@ -423,11 +423,11 @@ func extractSocialMediaFromHTML(htmlContent string) []string {
 		`https?://(?:www\.)?facebook\.com/[\w.]+`,
 		`https?://(?:www\.)?youtube\.com/[\w/-]+`,
 		`https?://(?:www\.)?twitch\.tv/[\w]+`,
-		`https?://[\w.-]+\.social/@[\w]+`,      // Generic Mastodon pattern
-		`https?://mastodon\.[\w.-]+/@[\w]+`,    // Mastodon instances
-		`https?://fosstodon\.org/@[\w]+`,       // Popular Mastodon instance
-		`https?://techhub\.social/@[\w]+`,      // Tech Mastodon instance
-		`https?://infosec\.exchange/@[\w]+`,    // InfoSec Mastodon instance
+		`https?://[\w.-]+\.social/@[\w]+`,   // Generic Mastodon pattern
+		`https?://mastodon\.[\w.-]+/@[\w]+`, // Mastodon instances
+		`https?://fosstodon\.org/@[\w]+`,    // Popular Mastodon instance
+		`https?://techhub\.social/@[\w]+`,   // Tech Mastodon instance
+		`https?://infosec\.exchange/@[\w]+`, // InfoSec Mastodon instance
 	}
 
 	for _, pattern := range socialPatterns {

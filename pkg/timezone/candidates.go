@@ -25,40 +25,39 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 	// This ensures --force-offset works for any valid timezone
 	minOffset := -12
 	maxOffset := 14
-	
+
 	for testOffset := minOffset; testOffset <= maxOffset; testOffset++ {
-		
+
 		// Calculate metrics for this offset
 		// 1. Lunch timing analysis
 		testLunchStart, testLunchEnd, testLunchConf := lunch.DetectLunchBreakNoonCentered(halfHourCounts, testOffset)
-		
+
 		lunchLocalStart := math.Mod(testLunchStart+float64(testOffset)+24, 24)
-		
+
 		// Work start time (needed to validate lunch)
 		testWorkStart := (activeStart + testOffset + 24) % 24
-		
+
 		// Find first SIGNIFICANT activity in this timezone (more accurate than activeStart which uses initial offset)
 		// Look for sustained activity (>5 events) not just any blip
 		firstActivityLocal := 24.0
 		for utcHour := 0; utcHour < 24; utcHour++ {
-			if hourCounts[utcHour] > 5 {  // Changed from > 0 to > 5 for significant activity
+			if hourCounts[utcHour] > 5 { // Changed from > 0 to > 5 for significant activity
 				localHour := float64((utcHour + testOffset + 24) % 24)
 				if localHour < firstActivityLocal {
 					firstActivityLocal = localHour
 				}
 			}
 		}
-		
+
 		// Lunch is only reasonable if:
 		// 1. Detected in the 10am-2:30pm window
 		// 2. At least 1 hour after first activity (can't have lunch right after arriving)
-		lunchReasonable := testLunchStart >= 0 && 
-			lunchLocalStart >= 10.0 && 
-			lunchLocalStart <= 14.5 && 
+		lunchReasonable := testLunchStart >= 0 &&
+			lunchLocalStart >= 10.0 &&
+			lunchLocalStart <= 14.5 &&
 			testLunchConf >= 0.3 &&
-			lunchLocalStart >= firstActivityLocal + 1.0 // At least 1 hour after first activity
-		
-		
+			lunchLocalStart >= firstActivityLocal+1.0 // At least 1 hour after first activity
+
 		// Calculate lunch dip strength
 		lunchDipStrength := 0.0
 		if testLunchConf > 0 && testLunchStart >= 0 {
@@ -73,18 +72,18 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				lunchDipStrength = (beforeActivity - lunchActivity) / beforeActivity
 			}
 		}
-		
-		// 2. Sleep timing analysis  
+
+		// 2. Sleep timing analysis
 		// Calculate what local sleep time would be for this offset
 		sleepLocalMid := math.Mod(midQuiet+float64(testOffset)+24, 24)
 		// Sleep is reasonable if mid-sleep is between 10pm and 5am
 		sleepReasonable := (sleepLocalMid >= 0 && sleepLocalMid <= 5) || sleepLocalMid >= 22
-		
+
 		// 3. Work hours analysis
 		// testWorkStart already calculated above for lunch validation
 		// Check if work hours are reasonable based on ACTUAL first activity, not initial guess
 		workReasonable := firstActivityLocal >= 6 && firstActivityLocal <= 10 // Allow 6am starts for early risers
-		
+
 		// 4. Evening activity (7-11pm local)
 		// To convert local hour to UTC: UTC = local - offset
 		// For UTC-5: 7pm local = 19:00 local = 19 - (-5) = 24 = 0 UTC
@@ -93,7 +92,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 			utcHour := (localHour - testOffset + 24) % 24
 			eveningActivity += hourCounts[utcHour]
 		}
-		
+
 		// 5. European timezone validation - Europeans should have morning activity by 10am latest
 		europeanMorningActivityCheck := true
 		if testOffset >= 0 && testOffset <= 3 { // European timezones (UTC+0 to UTC+3)
@@ -108,13 +107,13 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				europeanMorningActivityCheck = false
 			}
 		}
-		
+
 		// Calculate overall confidence score on 0-100 scale
 		// Prioritize lunch and sleep times over evening activity
 		testConfidence := 0.0
 		adjustments := []string{} // Track all adjustments for debugging
 		adjustments = append(adjustments, fmt.Sprintf("base score for UTC%+d", testOffset))
-		
+
 		// Sleep timing (most reliable) - 15 points max (increased weight)
 		// Early sleep (9-10pm) is a strong Pacific Time indicator
 		if sleepReasonable {
@@ -124,7 +123,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 			if len(quietHours) > 0 {
 				sleepStartUTC = quietHours[0]
 			}
-			
+
 			if sleepLocalMid >= 1 && sleepLocalMid <= 4 {
 				testConfidence += 12 // Perfect sleep timing (1-4am)
 				adjustments = append(adjustments, fmt.Sprintf("+12 (perfect sleep 1-4am, mid=%.1f)", sleepLocalMid))
@@ -154,22 +153,22 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 		} else {
 			adjustments = append(adjustments, "0 (no reasonable sleep pattern)")
 		}
-		
+
 		// STEP 2: Distance-from-noon lunch bonus system
 		noonDistanceBonus := 0.0
 		if bestGlobalLunch.Confidence > 0 {
 			// Calculate what local time the global lunch would be for this timezone
 			globalLunchLocalTime := math.Mod(bestGlobalLunch.StartUTC+float64(testOffset)+24, 24)
-			
+
 			// Calculate distance from noon (12:00) in 30-minute buckets
 			distanceFromNoon := math.Abs(globalLunchLocalTime - 12.0)
-			
+
 			// Convert distance to number of 30-minute buckets
 			bucketsFromNoon := distanceFromNoon / 0.5
-			
-			// Moderate bonus based on proximity to noon  
+
+			// Moderate bonus based on proximity to noon
 			// Perfect noon (0 buckets away) = 10 points
-			// 1 bucket away (30 min) = 6 points  
+			// 1 bucket away (30 min) = 6 points
 			// 2 buckets away (1 hour) = 3 points
 			// 3 buckets away (1.5 hours) = 1 point
 			// 4+ buckets away (2+ hours) = minimal points
@@ -192,10 +191,10 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				noonDistanceBonus = 0.2 * bestGlobalLunch.Confidence // Too far from reasonable lunch time
 				adjustments = append(adjustments, fmt.Sprintf("+%.1f (lunch >2hr from noon)", noonDistanceBonus))
 			}
-			
+
 			testConfidence += noonDistanceBonus
 		}
-		
+
 		// Lunch timing - 15 points max (strong signal when clear)
 		if lunchReasonable {
 			lunchScore := 0.0
@@ -232,7 +231,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				adjustments = append(adjustments, fmt.Sprintf("+%.1f (lunch dip strength %.1f%%)", dipBonus, lunchDipStrength*100))
 			}
 			lunchScore += dipBonus
-			
+
 			// PENALTY for weak lunch signals after 1:30pm
 			// A 25% drop at 2pm is likely not a real lunch
 			if lunchLocalStart > 13.5 && lunchDipStrength < 0.4 {
@@ -240,7 +239,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				lunchScore *= 0.3 // Severely reduce score for weak late lunches
 				adjustments = append(adjustments, fmt.Sprintf("-%.1f (weak late lunch penalty)", oldScore-lunchScore))
 			}
-			
+
 			finalLunchScore := math.Min(15, lunchScore)
 			testConfidence += finalLunchScore
 		} else if testLunchStart < 0 {
@@ -249,7 +248,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 			testConfidence -= 5
 			adjustments = append(adjustments, "-5 (no lunch detected)")
 		}
-		
+
 		// Work hours - 8 points max, with penalties for too-early starts
 		// CRITICAL: Use firstActivityLocal which is calculated per-timezone, not testWorkStart
 		if workReasonable && firstActivityLocal < 24 {
@@ -285,14 +284,14 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				adjustments = append(adjustments, "-8 (very early 5am start)")
 			}
 		}
-		
+
 		// Evening activity - up to 1 point (very weak signal, many users only use GitHub for work)
 		// NOT ALL GITHUB USERS CODE IN THE EVENING
 		// What looks like "evening" in one timezone might be afternoon work in another
 		// Example: 19:00-23:00 UTC is 7-11pm for UTC+1 but 3-7pm for UTC-4 (normal work hours)
 		if eveningActivity > 0 {
 			eveningRatio := float64(eveningActivity) / float64(totalActivity)
-			
+
 			// Only give points if evening activity is VERY SUBSTANTIAL (>30% of total)
 			// This helps avoid misinterpreting afternoon work as evening coding
 			if eveningRatio > 0.3 {
@@ -302,7 +301,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				adjustments = append(adjustments, fmt.Sprintf("+%.1f (evening activity %.1f%%)", eveningPoints, eveningRatio*100))
 			}
 			// No points for <30% evening activity - likely just late afternoon work
-			
+
 			// PENALTY if low evening activity but interpreted as high due to timezone
 			// If <10% evening activity, this timezone might be wrong
 			if eveningRatio < 0.1 && testOffset >= -5 && testOffset <= -3 {
@@ -311,7 +310,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				adjustments = append(adjustments, fmt.Sprintf("-2 (low evening %.1f%% for Eastern)", eveningRatio*100))
 			}
 		}
-		
+
 		// Work hours activity bonus - 2 points max
 		// Check activity during expected work hours (9am-5pm local) for this timezone
 		workHoursActivity := 0
@@ -328,7 +327,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				adjustments = append(adjustments, fmt.Sprintf("+%.1f (work hours activity %.1f%%)", workHoursBonus, workRatio*100))
 			}
 		}
-		
+
 		// Peak activity timing bonus - 5 points max
 		// Find the hour with maximum activity and check if it occurs during ideal work hours (10am-4pm local)
 		maxActivity := 0
@@ -347,7 +346,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				// Perfect timing: 5 points for peak during 1-3pm, 3 points for 12-2pm or 3-4pm
 				peakBonus := 3.0
 				if peakLocalHour >= 13 && peakLocalHour <= 15 {
-					// 1-3pm is ideal afternoon work time  
+					// 1-3pm is ideal afternoon work time
 					peakBonus = 5.0
 					adjustments = append(adjustments, fmt.Sprintf("+5 (peak at %dpm ideal)", peakLocalHour-12))
 				} else if peakLocalHour >= 12 && peakLocalHour <= 16 {
@@ -355,13 +354,13 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 					peakBonus = 3.0
 					adjustments = append(adjustments, fmt.Sprintf("+3 (peak at %d good work time)", peakLocalHour))
 				} else {
-					// 10-12pm is morning work time  
+					// 10-12pm is morning work time
 					peakBonus = 2.0
 					adjustments = append(adjustments, fmt.Sprintf("+2 (peak at %dam morning)", peakLocalHour))
 				}
 				testConfidence += peakBonus
 			}
-			
+
 			// REDUCED PENALTY for late peak activity (5-7pm)
 			// Some people do their best work in the evening, especially remote workers
 			// Only penalize peaks after 7pm as those are truly unusual
@@ -372,7 +371,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				testConfidence -= 3 // Small penalty for 5-7pm peak (could be valid)
 				adjustments = append(adjustments, fmt.Sprintf("-3 (evening peak at %dpm)", peakLocalHour-12))
 			}
-			
+
 			// PENALTY for very late work start (after 2pm)
 			// Nobody regularly starts work at 2:30pm regardless of timezone
 			if firstActivityLocal >= 14 {
@@ -383,13 +382,13 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				adjustments = append(adjustments, fmt.Sprintf("-10 (work starts after noon at %.1f)", firstActivityLocal))
 			}
 		}
-		
+
 		// Pacific timezone pattern recognition - 25 points max (increased)
 		// Check for classic Pacific timezone indicators
 		if testOffset == -8 || testOffset == -7 { // PST or PDT
 			// Strong Pacific indicators
 			pacificBonus := 0.0
-			
+
 			// astrojerms pattern: Peak at 18-19 UTC (10-11am Pacific)
 			morning18 := hourCounts[18] // 10am Pacific
 			morning19 := hourCounts[19] // 11am Pacific
@@ -400,15 +399,15 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				pacificBonus += 3.0 // Reduced: Moderate morning activity (was 6)
 				adjustments = append(adjustments, fmt.Sprintf("+3 (Pacific moderate morning %d/%d)", morning18, morning19))
 			}
-			
+
 			// Lunch dip at 20 UTC (noon Pacific) - astrojerms pattern
-			lunch20 := hourCounts[20] // 12pm Pacific
+			lunch20 := hourCounts[20]     // 12pm Pacific
 			beforeLunch := hourCounts[19] // 11am Pacific
 			if beforeLunch > 0 && lunch20 > 0 && float64(lunch20) < float64(beforeLunch)*0.8 {
 				pacificBonus += 5.0 // Clear lunch dip at noon
 				adjustments = append(adjustments, fmt.Sprintf("+5 (Pacific noon lunch dip %d->%d)", beforeLunch, lunch20))
 			}
-			
+
 			// Work starts early: 14-16 UTC (6-8am Pacific)
 			// BUT ONLY if actual work start is reasonable (not midnight!)
 			early14 := hourCounts[14] // 6am Pacific
@@ -418,35 +417,35 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				pacificBonus += 2.0 // Reduced: Early morning start (was 5)
 				adjustments = append(adjustments, fmt.Sprintf("+2 (Pacific early start %d/%d/%d)", early14, early15, early16))
 			}
-			
+
 			// Low late evening activity: 0-4 UTC (4-8pm Pacific)
-			late0 := hourCounts[0]  // 4pm Pacific
-			late1 := hourCounts[1]  // 5pm Pacific
-			late2 := hourCounts[2]  // 6pm Pacific
-			late3 := hourCounts[3]  // 7pm Pacific
-			late4 := hourCounts[4]  // 8pm Pacific
+			late0 := hourCounts[0] // 4pm Pacific
+			late1 := hourCounts[1] // 5pm Pacific
+			late2 := hourCounts[2] // 6pm Pacific
+			late3 := hourCounts[3] // 7pm Pacific
+			late4 := hourCounts[4] // 8pm Pacific
 			lateTotal := late0 + late1 + late2 + late3 + late4
 			if lateTotal > 0 && lateTotal < 50 {
 				pacificBonus += 3.0 // Moderate late afternoon/evening activity
 				adjustments = append(adjustments, fmt.Sprintf("+3 (Pacific moderate evening %d total)", lateTotal))
 			}
-			
+
 			// Early sleep pattern: quiet at 5-9 UTC (9pm-1am Pacific)
 			if hourCounts[5] == 0 && hourCounts[6] == 0 && hourCounts[7] == 0 {
 				pacificBonus += 2.0 // Clear early sleep pattern
 				adjustments = append(adjustments, "+2 (Pacific early sleep 9pm-1am)")
 			}
-			
+
 			if pacificBonus > 0 {
 				testConfidence += pacificBonus
 			}
 		}
-		
+
 		// Mountain timezone pattern recognition - 6 points max
 		// Check for classic Mountain timezone indicators (UTC-6/UTC-7)
 		if testOffset == -6 || testOffset == -7 {
 			mountainBonus := 0.0
-			
+
 			// Strong 1:30pm lunch pattern like IdlePhysicist
 			// For UTC-6: 13:30 local = 19:30 UTC
 			// For UTC-7: 13:30 local = 20:30 UTC
@@ -455,36 +454,36 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				lunchBucket = 20.5
 			}
 			beforeLunchBucket := lunchBucket - 0.5
-			
+
 			// Check for significant drop at 1:30pm (like IdlePhysicist's 58% drop)
 			// But also check that it's actually the strongest lunch signal
 			if beforeCount, exists := halfHourCounts[beforeLunchBucket]; exists && beforeCount > 10 {
 				if lunchCount, exists := halfHourCounts[lunchBucket]; exists {
 					dropRatio := float64(beforeCount-lunchCount) / float64(beforeCount)
 					// Only apply bonus if this is a strong drop AND lunch was detected here
-					if dropRatio > 0.5 && lunchLocalStart >= 13.0 && lunchLocalStart <= 14.0 { 
+					if dropRatio > 0.5 && lunchLocalStart >= 13.0 && lunchLocalStart <= 14.0 {
 						// 50%+ drop at 1:30pm AND lunch was actually detected in that range
 						mountainBonus += 6.0 // Mountain lunch pattern (reduced from 8)
 						adjustments = append(adjustments, fmt.Sprintf("+6 (Mountain 1:30pm lunch %.1f%% drop)", dropRatio*100))
 					}
 				}
 			}
-			
+
 			// Check for caving/outdoor activity patterns (weekend mornings)
 			// Mountain timezone folks often have outdoor hobbies
 			// This would show as activity patterns different on weekends
 			// but we don't have day-of-week data yet
-			
+
 			if mountainBonus > 0 {
 				testConfidence += mountainBonus
 			}
 		}
-		
+
 		// Eastern timezone pattern recognition - 8 points max
 		// Check for classic Eastern timezone indicators (UTC-4/UTC-5)
 		if testOffset == -4 || testOffset == -5 {
 			easternBonus := 0.0
-			
+
 			// Early lunch pattern (11:30am-12:00pm) common in East Coast
 			// For UTC-4: 11:30 local = 15:30 UTC
 			// For UTC-5: 11:30 local = 16:30 UTC
@@ -493,7 +492,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				earlyLunchBucket = 16.5
 			}
 			beforeEarlyLunchBucket := earlyLunchBucket - 0.5
-			
+
 			// Check for significant drop at 11:30am (tstromberg pattern)
 			if beforeCount, exists := halfHourCounts[beforeEarlyLunchBucket]; exists && beforeCount > 20 {
 				if lunchCount, exists := halfHourCounts[earlyLunchBucket]; exists {
@@ -504,13 +503,13 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 						easternBonus += 8.0 // Strong Eastern early lunch pattern
 						adjustments = append(adjustments, fmt.Sprintf("+8 (Eastern 11:30am lunch %.1f%% drop)", dropRatio*100))
 					} else if dropRatio > 0.5 && lunchLocalStart >= 11.0 && lunchLocalStart <= 12.5 {
-						// 50%+ drop around 11:30am-12:30pm  
+						// 50%+ drop around 11:30am-12:30pm
 						easternBonus += 5.0 // Moderate Eastern lunch pattern
 						adjustments = append(adjustments, fmt.Sprintf("+5 (Eastern lunch %.1f%% drop)", dropRatio*100))
 					}
 				}
 			}
-			
+
 			// High morning productivity (9-11am) typical of East Coast
 			morningActivity := 0
 			for localHour := 9.0; localHour <= 11.0; localHour += 0.5 {
@@ -528,7 +527,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				easternBonus += 2.0
 				adjustments = append(adjustments, fmt.Sprintf("+2 (Eastern high morning activity %d)", morningActivity))
 			}
-			
+
 			// CRITICAL Eastern pattern: 5pm end-of-day peak (very common)
 			// For UTC-4: 17:00 local = 21:00 UTC
 			// For UTC-5: 17:00 local = 22:00 UTC
@@ -536,7 +535,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 			if testOffset == -5 {
 				endOfDayUTC = 22
 			}
-			
+
 			// 5pm activity is NOT a good signal - many people are commuting
 			// Only give a small bonus if there's VERY high activity suggesting they work on the train/from home
 			if hourCounts[endOfDayUTC] >= 30 {
@@ -544,7 +543,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				easternBonus += 2.0
 				adjustments = append(adjustments, fmt.Sprintf("+2 (High 5pm activity %d - possible remote work)", hourCounts[endOfDayUTC]))
 			}
-			
+
 			// Check for 12pm lunch dip pattern (even if weak)
 			// For UTC-4: 12:00 local = 16:00 UTC
 			// For UTC-5: 12:00 local = 17:00 UTC
@@ -554,41 +553,41 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 			}
 			beforeNoon := noonUTC - 1
 			afterNoon := noonUTC + 1
-			
+
 			// Even a small dip at noon is meaningful for Eastern
 			if hourCounts[beforeNoon] > hourCounts[noonUTC] && hourCounts[afterNoon] > hourCounts[noonUTC] {
-				dropPercent := float64(hourCounts[beforeNoon] - hourCounts[noonUTC]) / float64(hourCounts[beforeNoon]) * 100
+				dropPercent := float64(hourCounts[beforeNoon]-hourCounts[noonUTC]) / float64(hourCounts[beforeNoon]) * 100
 				easternBonus += 3.0
 				adjustments = append(adjustments, fmt.Sprintf("+3 (Eastern noon dip pattern %.1f%%)", dropPercent))
 			}
-			
+
 			if easternBonus > 0 {
 				testConfidence += easternBonus
 			}
 		}
-		
+
 		// South American timezone pattern recognition (UTC-3)
 		// Brazil, Argentina, Uruguay, etc. have distinct patterns
 		if testOffset == -3 {
 			southAmericaBonus := 0.0
-			
+
 			// UTC-3 typically has lunch at 12:00-1:00pm (not early like US)
 			// Check for noon lunch pattern
 			if lunchLocalStart >= 11.5 && lunchLocalStart <= 13.0 && testLunchConf > 0.5 {
 				southAmericaBonus += 6.0
 				adjustments = append(adjustments, fmt.Sprintf("+6 (South America noon lunch at %.1f)", lunchLocalStart))
 			}
-			
+
 			// CRITICAL: 6pm end-of-day peak is common in South America
 			// For UTC-3: 18:00 local = 21:00 UTC
 			endOfDayUTC := 21
-			
+
 			// Check if 6pm has significant activity
 			if hourCounts[endOfDayUTC] >= 20 {
 				// Strong 6pm activity is typical for Brazil/Argentina
 				southAmericaBonus += 8.0
 				adjustments = append(adjustments, fmt.Sprintf("+8 (South America 6pm peak with %d events)", hourCounts[endOfDayUTC]))
-				
+
 				// If 21:00 UTC is a peak hour, that's very strong for UTC-3
 				isPeak := true
 				for h := 0; h < 24; h++ {
@@ -602,16 +601,16 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 					adjustments = append(adjustments, "+4 (6pm is peak hour - typical South America)")
 				}
 			}
-			
+
 			// Morning start pattern - South Americans often start 8-9am (not as early as US)
 			morningStartUTC := 11 // 8am local in UTC-3
 			lateStartUTC := 12    // 9am local in UTC-3
-			
+
 			if hourCounts[morningStartUTC] > 10 || hourCounts[lateStartUTC] > 10 {
 				southAmericaBonus += 3.0
 				adjustments = append(adjustments, "+3 (South America 8-9am work start)")
 			}
-			
+
 			// Check for evening activity (7-10pm) - common in South America
 			eveningActivity := 0
 			for h := 22; h <= 24; h++ { // 7-9pm local
@@ -620,29 +619,29 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				}
 			}
 			eveningActivity += hourCounts[0] + hourCounts[1] // 9-11pm local
-			
+
 			if eveningActivity > 40 {
 				southAmericaBonus += 2.0
 				adjustments = append(adjustments, fmt.Sprintf("+2 (South America evening activity %d events)", eveningActivity))
 			}
-			
+
 			// Population center bonus - Brazil/Argentina are major tech hubs
 			southAmericaBonus += 2.0
 			adjustments = append(adjustments, "+2 (South America population centers)")
-			
+
 			if southAmericaBonus > 0 {
 				testConfidence += southAmericaBonus
 			}
 		}
-		
+
 		// Apply penalties for unlikely scenarios (subtract points)
-		
+
 		// Small penalty if no lunch can be detected at all (suggests wrong timezone)
 		if testLunchStart < 0 || testLunchConf < 0.2 {
 			testConfidence -= 1.0 // Small penalty for no detectable lunch pattern
 			adjustments = append(adjustments, "-1 (weak/no lunch pattern)")
 		}
-		
+
 		// Penalize if lunch is at an unusual time despite having a dip
 		if testLunchStart >= 0 && testLunchConf > 0.3 {
 			if lunchLocalStart < 10.5 || lunchLocalStart > 14.5 {
@@ -667,10 +666,10 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				adjustments = append(adjustments, fmt.Sprintf("-20 (lunch after 3pm at %.1f)", lunchLocalStart))
 			}
 		}
-		
+
 		// Note: Work start penalty is now applied globally based on firstActivityLocal
 		// in the peak activity timing section above
-		
+
 		// Apply statistics-based population adjustments for Americas tech workers
 		// Based on Stack Overflow surveys, GitHub data, and tech employment statistics
 		// Total tech workers by timezone (approximate):
@@ -679,7 +678,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 		// Central (UTC-6): ~500K workers (20% of US) - Austin, Chicago, Dallas, Houston
 		// Mountain (UTC-7/-6): ~200K workers (8% of US) - Denver, Phoenix, SLC
 		// Brazil/Argentina (UTC-3): ~300K workers - São Paulo, Buenos Aires, Rio
-		
+
 		switch testOffset {
 		case -8: // Pacific Standard Time
 			testConfidence += 4.5 // Highest concentration: Silicon Valley effect
@@ -740,7 +739,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 			testConfidence -= 12 // Large penalty - almost no population
 			adjustments = append(adjustments, "-12 (Pacific ocean almost no land)")
 		}
-		
+
 		// Special bonus for UTC+10 when there are clear evening activity patterns
 		// This helps identify Sydney/Brisbane over Japan/Korea time
 		if testOffset == 10 && eveningActivity > 50 {
@@ -748,16 +747,16 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 			testConfidence += australiaBonus
 			adjustments = append(adjustments, fmt.Sprintf("+%.1f (strong evening activity suggests Australia UTC+10)", australiaBonus))
 		}
-		
-		// Apply European morning activity penalty 
+
+		// Apply European morning activity penalty
 		if !europeanMorningActivityCheck {
 			testConfidence -= 15 // Heavy penalty for European timezones with no morning activity
 			adjustments = append(adjustments, "-15 (European timezone but no morning activity)")
 		}
-		
+
 		// Ensure confidence stays above 0 (no upper cap - let real scores determine ranking)
 		testConfidence = math.Max(0, testConfidence)
-		
+
 		// Add to candidates if confidence is reasonable (at least 10%)
 		if testConfidence >= 10 {
 			candidate := TimezoneCandidate{
@@ -771,14 +770,14 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				WorkStartLocal:   testWorkStart,
 				SleepMidLocal:    sleepLocalMid,
 				LunchDipStrength: lunchDipStrength,
-				LunchStartUTC:    testLunchStart,  // Store for reuse
-				LunchEndUTC:      testLunchEnd,    // Store for reuse
-				LunchConfidence:  testLunchConf,   // Store for reuse
+				LunchStartUTC:    testLunchStart, // Store for reuse
+				LunchEndUTC:      testLunchEnd,   // Store for reuse
+				LunchConfidence:  testLunchConf,  // Store for reuse
 			}
 			candidates = append(candidates, candidate)
 		}
 	}
-	
+
 	// Sort candidates by confidence score
 	for i := 0; i < len(candidates)-1; i++ {
 		for j := i + 1; j < len(candidates); j++ {

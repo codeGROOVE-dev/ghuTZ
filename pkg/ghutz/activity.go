@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-	
+
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/sleep"
@@ -20,12 +20,12 @@ import (
 // This keeps CLI output and Gemini communication simple while using 30-min precision internally
 func aggregateHalfHoursToHours(halfHourCounts map[float64]int) map[int]int {
 	hourCounts := make(map[int]int)
-	
+
 	for bucket, count := range halfHourCounts {
 		hour := int(bucket) // Convert 12.0 and 12.5 both to hour 12
 		hourCounts[hour] += count
 	}
-	
+
 	return hourCounts
 }
 
@@ -38,7 +38,6 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// Collect all timestamps from various sources
 	allTimestamps, orgCounts := d.collectActivityTimestamps(ctx, username, events)
 
-	
 	// Track the oldest event to check data coverage
 	var oldestEventTime time.Time
 	if len(events) > 0 {
@@ -61,7 +60,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// Deduplicate all unique timestamps (no cap with adaptive collection)
 	uniqueTimestamps := make(map[time.Time]bool)
 	hourCounts := make(map[int]int)
-	halfHourCounts := make(map[float64]int) // 30-minute buckets: 0.0, 0.5, 1.0, 1.5, etc.
+	halfHourCounts := make(map[float64]int)         // 30-minute buckets: 0.0, 0.5, 1.0, 1.5, etc.
 	hourOrgActivity := make(map[int]map[string]int) // Track org activity by hour
 	duplicates := 0
 
@@ -70,10 +69,10 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			uniqueTimestamps[entry.time] = true
 			hour := entry.time.UTC().Hour()
 			minute := entry.time.UTC().Minute()
-			
+
 			// Traditional hourly counting (keep for backwards compatibility)
 			hourCounts[hour]++
-			
+
 			// 30-minute bucket counting: 0-29 minutes = .0, 30-59 minutes = .5
 			halfHourBucket := float64(hour)
 			if minute >= 30 {
@@ -97,7 +96,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 
 	// Count total unique activities used
 	totalActivity := len(uniqueTimestamps)
-	
+
 	// For CLI output and Gemini communication, aggregate halfHourCounts back to hourly buckets
 	// This keeps output simple and readable while using 30-min precision for internal calculations
 	displayHourCounts := aggregateHalfHoursToHours(halfHourCounts)
@@ -278,7 +277,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// We need to adjust assumed sleep midpoints based on patterns
 	var offsetFromUTC float64
 	var candidates []timezone.TimezoneCandidate // Store timezone candidates for Gemini
-	
+
 	if float64(europeanActivity) > float64(americanActivity)*1.2 {
 		// European/Asian pattern - need to distinguish between them
 		// Asian timezones (UTC+8/+9) have sleep around 15-20 UTC (midnight-5am local)
@@ -330,13 +329,13 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 
 			// Simple initial guess based on sleep pattern
 			// Let the lunch+sleep scoring system refine this
-			// 
+			//
 			// For midQuiet = 5 (tstromberg's case):
 			// 5am UTC = 1am EDT (UTC-4) - reasonable sleep time
 			// 5am UTC = 12am CDT (UTC-5) - reasonable sleep time
 			// 5am UTC = 11pm MDT (UTC-6) - early sleep
 			// 5am UTC = 10pm PDT (UTC-7) - very early sleep
-			
+
 			// Make a simple initial guess based on midQuiet hour
 			if midQuiet <= 5 {
 				offsetFromUTC = -4.0 // Likely Eastern (EDT)
@@ -349,10 +348,10 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			} else {
 				offsetFromUTC = -8.0 // Likely Pacific (PST)
 			}
-			
+
 			d.logger.Debug("initial US timezone guess based on sleep", "username", username,
 				"midQuiet", midQuiet, "initial_offset", offsetFromUTC)
-			
+
 			// The candidate evaluation system below will refine this using lunch+sleep patterns
 		} else {
 			// Clear sleep pattern, use original logic
@@ -424,14 +423,14 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// Calculate typical active hours in local time (excluding outliers)
 	// We need to convert from UTC to local time
 	activeStart, activeEnd := calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
-	
+
 	// STEP 1: Find the best global lunch pattern in UTC (timezone-independent)
 	bestGlobalLunch := lunch.FindBestGlobalLunchPattern(halfHourCounts)
-	d.logger.Debug("best global lunch pattern", "username", username, 
-		"start_utc", bestGlobalLunch.StartUTC, 
+	d.logger.Debug("best global lunch pattern", "username", username,
+		"start_utc", bestGlobalLunch.StartUTC,
 		"confidence", bestGlobalLunch.Confidence,
 		"drop_percent", bestGlobalLunch.DropPercent)
-	
+
 	// DEBUG: Let's see what the half-hour data looks like around the detected lunch time
 	if bestGlobalLunch.StartUTC > 0 {
 		debugStart := bestGlobalLunch.StartUTC - 1.0
@@ -443,8 +442,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			fmt.Sprintf("%.1f", bestGlobalLunch.StartUTC+0.5), halfHourCounts[bestGlobalLunch.StartUTC+0.5],
 			fmt.Sprintf("%.1f", debugEnd), halfHourCounts[debugEnd])
 	}
-	
-	
+
 	// Evaluate timezone candidates using the new timezone package
 	candidates = timezone.EvaluateTimezoneCandidates(username, hourCounts, halfHourCounts, totalActivity, quietHours, midQuiet, activeStart, timezone.GlobalLunchPattern{
 		StartUTC:    bestGlobalLunch.StartUTC,
@@ -452,18 +450,18 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		Confidence:  bestGlobalLunch.Confidence,
 		DropPercent: bestGlobalLunch.DropPercent,
 	})
-	
+
 	// Keep ALL candidates for --force-offset support
 	// We've already analyzed all 27 possible offsets (-12 to +14)
 	// so we have complete data for any forced offset the user might choose
-	
+
 	// Log the top candidates and use the best one
 	if len(candidates) > 0 {
 		d.logger.Debug("top timezone candidates", "username", username,
 			"count", len(candidates),
 			"top_offset", candidates[0].Offset,
 			"top_confidence", candidates[0].Confidence)
-		
+
 		for i, c := range candidates {
 			if i >= 5 {
 				break
@@ -476,7 +474,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				"lunch_reasonable", c.LunchReasonable,
 				"work_hours_normal", c.WorkHoursNormal)
 		}
-		
+
 		// Use the top candidate's offset instead of the initial detection
 		// This gives us better lunch/peak detection
 		if candidates[0].Confidence > confidence {
@@ -500,7 +498,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// Use the lunch times from the winning candidate if available
 	// This avoids recalculating and ensures consistency
 	var lunchStart, lunchEnd, lunchConfidence float64
-	
+
 	// Check if we have a winning candidate with lunch data
 	if len(candidates) > 0 && int(candidates[0].Offset) == offsetInt && candidates[0].LunchStartUTC >= 0 {
 		// Reuse the lunch calculation from the winning candidate
@@ -515,13 +513,13 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		d.logger.Debug("calculated new lunch", "username", username,
 			"offset", offsetInt, "lunch_start_utc", lunchStart, "lunch_end_utc", lunchEnd, "confidence", lunchConfidence)
 	}
-	
+
 	// Only use global lunch pattern if we don't already have a high-confidence lunch
 	// Global patterns can be misleading - a consistent 2pm drop might be meetings, not lunch
 	if bestGlobalLunch.Confidence > 0.5 && bestGlobalLunch.StartUTC >= 0 && lunchConfidence < 0.7 {
 		// Calculate what local time the global lunch would be
 		globalLunchLocal := math.Mod(bestGlobalLunch.StartUTC+float64(offsetInt)+24, 24)
-		
+
 		// Only use if it's in a more typical lunch range (11:30am-1:30pm)
 		// 2pm is too late and likely represents something else
 		if globalLunchLocal >= 11.5 && globalLunchLocal <= 13.5 {
@@ -787,7 +785,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 
 	// Detect sleep periods using 30-minute resolution with buffer
 	sleepBuckets := sleep.DetectSleepPeriodsWithHalfHours(halfHourCounts)
-	
+
 	result := &Result{
 		Username:         username,
 		Timezone:         detectedTimezone,
@@ -805,9 +803,9 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		Confidence:                 confidence,
 		Method:                     "activity_patterns",
 		HourlyActivityUTC:          displayHourCounts, // Store aggregated hourly data for histogram generation
-		HalfHourlyActivityUTC:      halfHourCounts,   // Store 30-minute resolution data
-		HourlyOrganizationActivity: hourOrgActivity, // Store org-specific activity
-		TimezoneCandidates:         candidates, // Top 3 timezone candidates with analysis
+		HalfHourlyActivityUTC:      halfHourCounts,    // Store 30-minute resolution data
+		HourlyOrganizationActivity: hourOrgActivity,   // Store org-specific activity
+		TimezoneCandidates:         candidates,        // Top 3 timezone candidates with analysis
 	}
 
 	// Add activity date range information
@@ -825,8 +823,8 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		End        float64 `json:"end"`
 		Confidence float64 `json:"confidence"`
 	}{
-		Start:      lunchStart,  // Already in UTC
-		End:        lunchEnd,    // Already in UTC
+		Start:      lunchStart, // Already in UTC
+		End:        lunchEnd,   // Already in UTC
 		Confidence: lunchConfidence,
 	}
 
@@ -836,8 +834,8 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		End   float64 `json:"end"`
 		Count int     `json:"count"`
 	}{
-		Start: peakStart,  // Already in UTC
-		End:   peakEnd,    // Already in UTC
+		Start: peakStart, // Already in UTC
+		End:   peakEnd,   // Already in UTC
 		Count: peakCount,
 	}
 
@@ -940,25 +938,25 @@ func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, usern
 		starComments := make([]github.Comment, len(res.stars))
 		for i, starTime := range res.stars {
 			starComments[i] = github.Comment{
-				CreatedAt:  starTime,
-				Body:       "starred repository",
-				HTMLURL:    "",
+				CreatedAt: starTime,
+				Body:      "starred repository",
+				HTMLURL:   "",
 			}
 		}
-		
+
 		// Convert commit timestamps to comments for inclusion in activity analysis
 		commitComments := make([]github.Comment, len(res.commits))
 		for i, commitTime := range res.commits {
 			commitComments[i] = github.Comment{
-				CreatedAt:  commitTime,
-				Body:       "authored commit",
-				HTMLURL:    "",
+				CreatedAt: commitTime,
+				Body:      "authored commit",
+				HTMLURL:   "",
 			}
 		}
-		
+
 		// Combine all comment types
 		allComments := append(append(res.comments, starComments...), commitComments...)
-		
+
 		return &ActivityData{
 			PullRequests: res.prs,
 			Issues:       res.issues,
@@ -969,4 +967,3 @@ func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, usern
 		return &ActivityData{}
 	}
 }
-

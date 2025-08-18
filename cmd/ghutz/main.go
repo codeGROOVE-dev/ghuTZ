@@ -29,7 +29,6 @@ var (
 	forceOffset  = flag.Int("force-offset", 99, "Force a specific UTC offset for visualization (-12 to +14)")
 )
 
-
 func main() {
 	flag.Parse()
 
@@ -126,7 +125,7 @@ func main() {
 		// Use forced offset if specified, otherwise use detected timezone
 		displayTimezone := result.Timezone
 		displayResult := result
-		
+
 		if *forceOffset >= -12 && *forceOffset <= 14 {
 			// Convert forced offset to UTC+/- format
 			if *forceOffset >= 0 {
@@ -134,7 +133,7 @@ func main() {
 			} else {
 				displayTimezone = fmt.Sprintf("UTC%d", *forceOffset)
 			}
-			
+
 			// Check if this offset matches one of our analyzed candidates
 			foundCandidate := false
 			for _, candidate := range result.TimezoneCandidates {
@@ -150,9 +149,9 @@ func main() {
 						break
 					}
 				}
-				fmt.Printf("\n🔧 Using forced offset %s for visualization (analyzed candidate #%d)\n", 
+				fmt.Printf("\n🔧 Using forced offset %s for visualization (analyzed candidate #%d)\n",
 					displayTimezone, rank)
-				
+
 				// Create a modified result with the candidate's lunch data
 				modifiedResult := *result
 				modifiedResult.LunchHoursUTC = ghutz.LunchBreak{
@@ -165,21 +164,21 @@ func main() {
 				foundCandidate = true
 				break
 			}
-			
+
 			if !foundCandidate {
 				// Not in our candidates - clear all markers as they would be misleading
 				fmt.Printf("\n🔧 Using forced offset %s for visualization\n", displayTimezone)
 				fmt.Printf("    (Note: No lunch/peak markers - offset not in analyzed candidates)\n")
-				
+
 				modifiedResult := *result
-				modifiedResult.LunchHoursUTC = ghutz.LunchBreak{} // Clear lunch markers
+				modifiedResult.LunchHoursUTC = ghutz.LunchBreak{}  // Clear lunch markers
 				modifiedResult.PeakProductivity = ghutz.PeakTime{} // Clear peak markers
-				modifiedResult.SleepHoursUTC = nil // Clear sleep hour markers
-				modifiedResult.SleepBucketsUTC = nil // Clear sleep markers
+				modifiedResult.SleepHoursUTC = nil                 // Clear sleep hour markers
+				modifiedResult.SleepBucketsUTC = nil               // Clear sleep markers
 				displayResult = &modifiedResult
 			}
 		}
-		
+
 		histogramOutput := ghutz.GenerateHistogram(displayResult, displayResult.HourlyActivityUTC, displayTimezone)
 		fmt.Print(histogramOutput)
 	}
@@ -223,7 +222,7 @@ func printLocation(result *ghutz.Result) {
 
 func printTimezone(result *ghutz.Result) {
 	tzName := result.Timezone
-	
+
 	// Try to load the timezone
 	if loc, err := time.LoadLocation(tzName); err == nil {
 		now := time.Now().In(loc)
@@ -381,7 +380,7 @@ func printActivitySummary(result *ghutz.Result) {
 		// Format the date range
 		oldestStr := result.ActivityDateRange.OldestActivity.Format("2006-01-02")
 		newestStr := result.ActivityDateRange.NewestActivity.Format("2006-01-02")
-		
+
 		if totalEvents > 0 {
 			fmt.Printf("📊 Activity:      %d events from %s to %s",
 				totalEvents,
@@ -435,7 +434,6 @@ func calculateTimezoneOffset(timezone string) int {
 	}
 	return 0
 }
-
 
 func formatMethodName(method string) string {
 	methodNames := map[string]string{

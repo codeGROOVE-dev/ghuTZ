@@ -45,4 +45,3 @@ type cachedHTTPClient struct {
 func (c *cachedHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	return c.doFunc(req)
 }
-

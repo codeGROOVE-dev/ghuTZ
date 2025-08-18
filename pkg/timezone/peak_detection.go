@@ -9,7 +9,7 @@ func DetectPeakProductivityWithHalfHours(halfHourCounts map[float64]int, utcOffs
 	// Find the bucket with maximum activity
 	var maxBucket float64
 	maxCount := 0
-	
+
 	for bucket, activityCount := range halfHourCounts {
 		if activityCount > maxCount {
 			maxCount = activityCount

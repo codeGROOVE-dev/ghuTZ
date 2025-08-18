@@ -3,7 +3,7 @@ package ghutz
 import (
 	"math"
 	"testing"
-	
+
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/sleep"
 )
@@ -234,6 +234,7 @@ func TestEveningActivityDetection(t *testing.T) {
 		})
 	}
 }
+
 // TestWorkScheduleCorrection tests the timezone correction based on work schedule patterns
 func TestWorkScheduleCorrection(t *testing.T) {
 	t.Skip("Skipping work schedule correction test - needs updating for new UTC data handling")
@@ -492,64 +493,63 @@ func TestQuietHoursToTimezone(t *testing.T) {
 	}
 }
 
-
 // TestTstrombergLunchDetection tests 30-minute bucket lunch detection
 // This correctly detects lunch at 16:00 UTC (noon EST) with higher precision than hourly buckets
 func TestTstrombergLunchDetection(t *testing.T) {
 	// Create 30-minute buckets for the problematic data pattern
 	// 16.0 = 12:00-12:29 PM EST, 16.5 = 12:30-12:59 PM EST
 	halfHourCounts := make(map[float64]int)
-	
+
 	// Populate with a realistic work pattern with clear noon lunch dip
-	halfHourCounts[14.0] = 18  // 10:00-10:29 AM EST
-	halfHourCounts[14.5] = 22  // 10:30-10:59 AM EST
-	halfHourCounts[15.0] = 25  // 11:00-11:29 AM EST
-	halfHourCounts[15.5] = 20  // 11:30-11:59 AM EST
-	halfHourCounts[16.0] = 8   // 12:00-12:29 PM EST (noon lunch dip!)  
-	halfHourCounts[16.5] = 6   // 12:30-12:59 PM EST (lunch continues)
-	halfHourCounts[17.0] = 22  // 1:00-1:29 PM EST (back to work)
-	halfHourCounts[17.5] = 18  // 1:30-1:59 PM EST
-	halfHourCounts[18.0] = 20  // 2:00-2:29 PM EST
-	halfHourCounts[18.5] = 15  // 2:30-2:59 PM EST  
-	halfHourCounts[19.0] = 12  // 3:00-3:29 PM EST
-	halfHourCounts[19.5] = 14  // 3:30-3:59 PM EST
-	halfHourCounts[20.0] = 35  // 4:00-4:29 PM EST (afternoon productivity)
-	halfHourCounts[20.5] = 28  // 4:30-4:59 PM EST
-	
+	halfHourCounts[14.0] = 18 // 10:00-10:29 AM EST
+	halfHourCounts[14.5] = 22 // 10:30-10:59 AM EST
+	halfHourCounts[15.0] = 25 // 11:00-11:29 AM EST
+	halfHourCounts[15.5] = 20 // 11:30-11:59 AM EST
+	halfHourCounts[16.0] = 8  // 12:00-12:29 PM EST (noon lunch dip!)
+	halfHourCounts[16.5] = 6  // 12:30-12:59 PM EST (lunch continues)
+	halfHourCounts[17.0] = 22 // 1:00-1:29 PM EST (back to work)
+	halfHourCounts[17.5] = 18 // 1:30-1:59 PM EST
+	halfHourCounts[18.0] = 20 // 2:00-2:29 PM EST
+	halfHourCounts[18.5] = 15 // 2:30-2:59 PM EST
+	halfHourCounts[19.0] = 12 // 3:00-3:29 PM EST
+	halfHourCounts[19.5] = 14 // 3:30-3:59 PM EST
+	halfHourCounts[20.0] = 35 // 4:00-4:29 PM EST (afternoon productivity)
+	halfHourCounts[20.5] = 28 // 4:30-4:59 PM EST
+
 	// Some evening activity
 	halfHourCounts[21.0] = 15
 	halfHourCounts[21.5] = 9
 	halfHourCounts[22.0] = 10
 	halfHourCounts[22.5] = 9
-	
+
 	// Eastern Time offset
 	utcOffset := -4
-	
+
 	// Detect lunch using 30-minute buckets
 	lunchStart, lunchEnd, lunchConfidence := lunch.DetectLunchBreakNoonCentered(halfHourCounts, utcOffset)
-	
+
 	// Convert to local time for logging
 	lunchStartLocal := lunchStart + float64(utcOffset)
 	if lunchStartLocal < 0 {
 		lunchStartLocal += 24
 	}
-	lunchEndLocal := lunchEnd + float64(utcOffset) 
+	lunchEndLocal := lunchEnd + float64(utcOffset)
 	if lunchEndLocal < 0 {
 		lunchEndLocal += 24
 	}
-	
+
 	t.Logf("30-minute bucket lunch detection: UTC lunch %.1f-%.1f, local lunch %.1f-%.1f, confidence %.2f",
 		lunchStart, lunchEnd, lunchStartLocal, lunchEndLocal, lunchConfidence)
-	
+
 	// Log the activity pattern around lunch time
-	t.Logf("Half-hour activity: 15.0=%d (11am), 16.0=%d (noon), 16.5=%d, 17.0=%d (1pm), 18.0=%d", 
+	t.Logf("Half-hour activity: 15.0=%d (11am), 16.0=%d (noon), 16.5=%d, 17.0=%d (1pm), 18.0=%d",
 		halfHourCounts[15.0], halfHourCounts[16.0], halfHourCounts[16.5], halfHourCounts[17.0], halfHourCounts[18.0])
-	
+
 	// Test that lunch is detected with reasonable confidence
 	if lunchConfidence < 0.3 {
 		t.Errorf("30-minute bucket lunch confidence too low: %.2f, expected >= 0.3", lunchConfidence)
 	}
-	
+
 	// CRITICAL TEST: With 30-minute buckets, lunch should be detected around noon (16.0 UTC)
 	// The algorithm should now be able to detect the 16.0 bucket (12:00-12:29 PM EST) as lunch
 	expectedLunchBucket := 16.0

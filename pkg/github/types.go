@@ -7,20 +7,20 @@ import (
 
 // GitHubUser represents a GitHub user profile.
 type GitHubUser struct {
-	Login          string    `json:"login"`
-	Name           string    `json:"name"`
-	Location       string    `json:"location"`
-	Bio            string    `json:"bio"`
-	Blog           string    `json:"blog"`
-	Company        string    `json:"company"`
-	Email          string    `json:"email"`
-	TwitterHandle  string    `json:"twitter_username"`
-	Followers      int       `json:"followers"`
-	Following      int       `json:"following"`
-	PublicRepos    int       `json:"public_repos"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	ProfileHTML    string    // HTML content of profile page
+	Login          string          `json:"login"`
+	Name           string          `json:"name"`
+	Location       string          `json:"location"`
+	Bio            string          `json:"bio"`
+	Blog           string          `json:"blog"`
+	Company        string          `json:"company"`
+	Email          string          `json:"email"`
+	TwitterHandle  string          `json:"twitter_username"`
+	Followers      int             `json:"followers"`
+	Following      int             `json:"following"`
+	PublicRepos    int             `json:"public_repos"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+	ProfileHTML    string          // HTML content of profile page
 	SocialAccounts []SocialAccount `json:"socialAccounts,omitempty"`
 }
 
@@ -91,15 +91,15 @@ type Issue struct {
 
 // PullRequest represents a GitHub pull request
 type PullRequest struct {
-	Number    int       `json:"number"`
-	Title     string    `json:"title"`
-	Body      string    `json:"body"`
-	State     string    `json:"state"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Number    int        `json:"number"`
+	Title     string     `json:"title"`
+	Body      string     `json:"body"`
+	State     string     `json:"state"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 	MergedAt  *time.Time `json:"merged_at"`
-	HTMLURL   string    `json:"html_url"`
-	RepoName  string    // Added to track which repo this PR belongs to
+	HTMLURL   string     `json:"html_url"`
+	RepoName  string     // Added to track which repo this PR belongs to
 }
 
 // PRSearchItem represents a GitHub pull request search result

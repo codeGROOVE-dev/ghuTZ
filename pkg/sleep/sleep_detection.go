@@ -13,7 +13,7 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 		end    float64
 		length int // number of buckets
 	}
-	
+
 	var quietBuckets []float64
 	for bucket := 0.0; bucket < 24.0; bucket += 0.5 {
 		if count, exists := halfHourCounts[bucket]; exists && count == 0 {
@@ -23,21 +23,21 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 			quietBuckets = append(quietBuckets, bucket)
 		}
 	}
-	
+
 	if len(quietBuckets) == 0 {
 		return []float64{}
 	}
-	
+
 	// Sort buckets
 	sort.Float64s(quietBuckets)
-	
+
 	// Find continuous quiet periods (with wraparound handling)
 	var periods []quietPeriod
 	currentPeriod := quietPeriod{start: quietBuckets[0], end: quietBuckets[0], length: 1}
-	
+
 	for i := 1; i < len(quietBuckets); i++ {
 		// Check if consecutive (0.5 apart) or wraparound (23.5 to 0.0)
-		if quietBuckets[i] == currentPeriod.end + 0.5 {
+		if quietBuckets[i] == currentPeriod.end+0.5 {
 			currentPeriod.end = quietBuckets[i]
 			currentPeriod.length++
 		} else if currentPeriod.end == 23.5 && quietBuckets[i] == 0.0 {
@@ -52,17 +52,17 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 			currentPeriod = quietPeriod{start: quietBuckets[i], end: quietBuckets[i], length: 1}
 		}
 	}
-	
+
 	// Don't forget the last period
 	if currentPeriod.length >= 6 {
 		periods = append(periods, currentPeriod)
 	}
-	
+
 	// Check for wraparound merge (if first and last periods connect)
 	if len(periods) >= 2 {
 		first := periods[0]
 		last := periods[len(periods)-1]
-		
+
 		// If last ends at 23.5 and first starts at 0.0, merge them
 		if last.end == 23.5 && first.start == 0.0 {
 			merged := quietPeriod{
@@ -78,7 +78,7 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 			periods = newPeriods
 		}
 	}
-	
+
 	// Apply 30-minute buffer to all periods: sleep doesn't start until 30 minutes after last activity
 	// and ends 30 minutes before first activity
 	var adjustedPeriods []quietPeriod
@@ -89,7 +89,7 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 			if bufferStart < 0 {
 				bufferStart += 24
 			}
-			
+
 			// If there's any activity in the buffer bucket, move start forward
 			if count, exists := halfHourCounts[bufferStart]; exists && count > 1 {
 				period.start += 0.5
@@ -97,7 +97,7 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 					period.start -= 24
 				}
 				period.length--
-				
+
 				// Stop if we've adjusted too much
 				if period.length < 4 {
 					break
@@ -106,14 +106,14 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 				break
 			}
 		}
-		
+
 		// Adjust end: keep moving backward while there's activity in the next bucket
 		for {
 			bufferEnd := period.end + 0.5
 			if bufferEnd >= 24 {
 				bufferEnd -= 24
 			}
-			
+
 			// If there's any activity in the buffer bucket, move end backward
 			if count, exists := halfHourCounts[bufferEnd]; exists && count > 1 {
 				period.end -= 0.5
@@ -121,7 +121,7 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 					period.end += 24
 				}
 				period.length--
-				
+
 				// Stop if we've adjusted too much
 				if period.length < 4 {
 					break
@@ -130,13 +130,13 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 				break
 			}
 		}
-		
+
 		// Only keep periods that are still at least 2 hours after buffer adjustment
 		if period.length >= 4 {
 			adjustedPeriods = append(adjustedPeriods, period)
 		}
 	}
-	
+
 	// Convert all quiet periods to list of buckets
 	var sleepBuckets []float64
 	for _, period := range adjustedPeriods {
@@ -155,7 +155,7 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 			}
 		}
 	}
-	
+
 	return sleepBuckets
 }
 
@@ -170,31 +170,31 @@ func FindSleepHours(hourCounts map[int]int) []int {
 			maxActivity = count
 		}
 	}
-	
+
 	// If very little data, use default sleep hours
 	if totalActivity < 50 {
 		return []int{2, 3, 4, 5, 6} // Default UTC sleep hours
 	}
-	
+
 	// First, find all hours with very low activity (less than 10% of max hour)
 	threshold := float64(maxActivity) * 0.1
 	if threshold < 2 {
 		threshold = 2 // At least 2 events to not be considered quiet
 	}
-	
+
 	var quietHours []int
 	for hour := 0; hour < 24; hour++ {
 		if float64(hourCounts[hour]) <= threshold {
 			quietHours = append(quietHours, hour)
 		}
 	}
-	
+
 	// If we found 4-12 quiet hours (sleep time), use them
 	// User specified 4-9 hours of sleep is most likely
 	if len(quietHours) >= 4 && len(quietHours) <= 12 {
 		return quietHours
 	}
-	
+
 	// If we found more than 12 quiet hours, cap at 12
 	if len(quietHours) > 12 {
 		// Find the quietest consecutive 12-hour period
@@ -214,13 +214,13 @@ func FindSleepHours(hourCounts map[int]int) []int {
 		}
 		return quietHours[bestStart:min(bestStart+12, len(quietHours))]
 	}
-	
+
 	// Otherwise, find the quietest consecutive period using a sliding window
 	// Try different window sizes from 4 to 12 hours (sleep time)
 	bestWindowSize := 4
 	bestSum := totalActivity
 	bestStart := 0
-	
+
 	for windowSize := 4; windowSize <= 12; windowSize++ {
 		for start := 0; start < 24; start++ {
 			sum := 0
@@ -228,11 +228,11 @@ func FindSleepHours(hourCounts map[int]int) []int {
 				hour := (start + i) % 24
 				sum += hourCounts[hour]
 			}
-			
+
 			// Prefer longer windows if the activity per hour is similar
 			avgPerHour := float64(sum) / float64(windowSize)
 			bestAvgPerHour := float64(bestSum) / float64(bestWindowSize)
-			
+
 			// Accept longer window if avg activity per hour is within 20% of best
 			if sum < bestSum || (avgPerHour <= bestAvgPerHour*1.2 && windowSize > bestWindowSize) {
 				bestSum = sum
@@ -241,17 +241,17 @@ func FindSleepHours(hourCounts map[int]int) []int {
 			}
 		}
 	}
-	
+
 	// Build the sleep hours array
 	var sleepHours []int
 	for i := 0; i < bestWindowSize; i++ {
 		sleepHours = append(sleepHours, (bestStart+i)%24)
 	}
-	
+
 	// Check if we should extend the quiet period further
 	// If the average activity during quiet hours is very low, we found good sleep hours
 	// Variables removed as they were unused - validation happens through the window selection above
-	
+
 	return sleepHours
 }
 

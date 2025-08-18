@@ -18,7 +18,7 @@ type Response struct {
 	DetectedLocation   string `json:"detected_location"`
 	ConfidenceLevel    string `json:"confidence_level"` // "high", "medium", or "low"
 	DetectionReasoning string `json:"detection_reasoning"`
-	
+
 	// Fallback fields for old format (deprecated)
 	Timezone       string      `json:"timezone,omitempty"`
 	Location       string      `json:"location,omitempty"`
@@ -139,7 +139,7 @@ func (c *Client) CallWithSDK(ctx context.Context, prompt string, verbose bool, c
 	}
 
 	temperature := float32(0.1)
-	
+
 	// Pro models require thinking, others can have 0
 	// -1 enables dynamic thinking for pro models
 	var thinkingBudget int32
@@ -148,7 +148,7 @@ func (c *Client) CallWithSDK(ctx context.Context, prompt string, verbose bool, c
 	} else {
 		thinkingBudget = 0 // Disable thinking for faster responses on other models
 	}
-	
+
 	genConfig := &genai.GenerateContentConfig{
 		Temperature:      &temperature,
 		MaxOutputTokens:  maxTokens,
@@ -222,27 +222,27 @@ func (c *Client) CallWithSDK(ctx context.Context, prompt string, verbose bool, c
 		logger.Error("Gemini API returned nil response")
 		return nil, fmt.Errorf("nil response from Gemini API")
 	}
-	
+
 	if len(resp.Candidates) == 0 {
-		logger.Error("Gemini API returned no candidates", 
+		logger.Error("Gemini API returned no candidates",
 			"usage", resp.UsageMetadata,
 			"model", modelName)
 		return nil, fmt.Errorf("no candidates in Gemini API response")
 	}
 
 	candidate := resp.Candidates[0]
-	
+
 	// Log candidate details
 	logger.Debug("Gemini candidate details",
 		"finish_reason", candidate.FinishReason,
 		"safety_ratings", candidate.SafetyRatings,
 		"content_parts_count", len(candidate.Content.Parts))
-	
+
 	if candidate.Content == nil {
 		logger.Error("Gemini candidate has nil content")
 		return nil, fmt.Errorf("nil content in Gemini response")
 	}
-	
+
 	if len(candidate.Content.Parts) == 0 {
 		logger.Error("Gemini candidate has no content parts",
 			"finish_reason", candidate.FinishReason)
@@ -277,9 +277,9 @@ func (c *Client) CallWithSDK(ctx context.Context, prompt string, verbose bool, c
 		logger.Warn("failed to parse Gemini JSON response", "error", err, "raw", jsonText)
 		return nil, fmt.Errorf("failed to parse Gemini response: %w", err)
 	}
-	
+
 	// Always log the parsed response for debugging
-	logger.Debug("Parsed Gemini response", 
+	logger.Debug("Parsed Gemini response",
 		"timezone", geminiResp.DetectedTimezone,
 		"location", geminiResp.DetectedLocation,
 		"confidence", geminiResp.ConfidenceLevel,

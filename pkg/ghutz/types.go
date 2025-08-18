@@ -2,7 +2,7 @@ package ghutz
 
 import (
 	"time"
-	
+
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/timezone"
 )
@@ -112,31 +112,31 @@ type OrgActivity struct {
 
 // Result represents timezone detection results.
 type Result struct {
-	DetectionTime              time.Time              `json:"detection_time"`
-	Location                   *Location              `json:"location,omitempty"`
-	HourlyOrganizationActivity map[int]map[string]int `json:"hourly_organization_activity,omitempty"`
-	HourlyActivityUTC          map[int]int            `json:"hourly_activity_utc"`
-	HalfHourlyActivityUTC      map[float64]int        `json:"-"`
-	Method                     string                 `json:"method"`
-	LocationName               string                 `json:"location_name,omitempty"`
-	GeminiSuggestedLocation    string                 `json:"gemini_suggested_location,omitempty"`
-	Name                       string                 `json:"name,omitempty"`
-	Timezone                   string                 `json:"timezone"`
-	GeminiReasoning            string                 `json:"gemini_reasoning,omitempty"`
-	Username                   string                 `json:"username"`
-	ActivityTimezone           string                 `json:"activity_timezone,omitempty"`
-	GeminiPrompt               string                 `json:"gemini_prompt,omitempty"`
-	ActivityDateRange          DateRange              `json:"activity_date_range,omitempty"`
-	TopOrganizations           []OrgActivity          `json:"top_organizations"`
-	SleepHoursUTC              []int                  `json:"sleep_hours_utc,omitempty"`
-	SleepBucketsUTC            []float64              `json:"sleep_buckets_utc,omitempty"`
-	LunchHoursUTC              LunchBreak             `json:"lunch_hours_utc,omitempty"`
-	PeakProductivity           PeakTime               `json:"peak_productivity"`
-	ActiveHoursLocal           ActiveHours            `json:"active_hours_local,omitempty"`
-	LocationConfidence         float64                `json:"location_confidence,omitempty"`
-	TimezoneConfidence         float64                `json:"timezone_confidence,omitempty"`
-	Confidence                 float64                `json:"confidence"`
-	TimezoneCandidates         []timezone.TimezoneCandidate    `json:"timezone_candidates,omitempty"`
+	DetectionTime              time.Time                    `json:"detection_time"`
+	Location                   *Location                    `json:"location,omitempty"`
+	HourlyOrganizationActivity map[int]map[string]int       `json:"hourly_organization_activity,omitempty"`
+	HourlyActivityUTC          map[int]int                  `json:"hourly_activity_utc"`
+	HalfHourlyActivityUTC      map[float64]int              `json:"-"`
+	Method                     string                       `json:"method"`
+	LocationName               string                       `json:"location_name,omitempty"`
+	GeminiSuggestedLocation    string                       `json:"gemini_suggested_location,omitempty"`
+	Name                       string                       `json:"name,omitempty"`
+	Timezone                   string                       `json:"timezone"`
+	GeminiReasoning            string                       `json:"gemini_reasoning,omitempty"`
+	Username                   string                       `json:"username"`
+	ActivityTimezone           string                       `json:"activity_timezone,omitempty"`
+	GeminiPrompt               string                       `json:"gemini_prompt,omitempty"`
+	ActivityDateRange          DateRange                    `json:"activity_date_range,omitempty"`
+	TopOrganizations           []OrgActivity                `json:"top_organizations"`
+	SleepHoursUTC              []int                        `json:"sleep_hours_utc,omitempty"`
+	SleepBucketsUTC            []float64                    `json:"sleep_buckets_utc,omitempty"`
+	LunchHoursUTC              LunchBreak                   `json:"lunch_hours_utc,omitempty"`
+	PeakProductivity           PeakTime                     `json:"peak_productivity"`
+	ActiveHoursLocal           ActiveHours                  `json:"active_hours_local,omitempty"`
+	LocationConfidence         float64                      `json:"location_confidence,omitempty"`
+	TimezoneConfidence         float64                      `json:"timezone_confidence,omitempty"`
+	Confidence                 float64                      `json:"confidence"`
+	TimezoneCandidates         []timezone.TimezoneCandidate `json:"timezone_candidates,omitempty"`
 }
 
 // Location represents geographic coordinates.
@@ -150,9 +150,8 @@ type Location struct {
 
 // ActivityData holds all activity data for timezone detection.
 type ActivityData struct {
-	PullRequests   []github.PullRequest
-	Issues         []github.Issue
-	Comments       []github.Comment
-	StarredRepos   []github.Repository
+	PullRequests []github.PullRequest
+	Issues       []github.Issue
+	Comments     []github.Comment
+	StarredRepos []github.Repository
 }
-

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	
+
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/timezone"
 )
@@ -15,7 +15,7 @@ func (d *Detector) formatEvidenceForGeminiImproved(contextData map[string]interf
 
 	// SECTION 1: PRIMARY LOCATION SIGNALS
 	sb.WriteString("=== PRIMARY LOCATION SIGNALS ===\n\n")
-	
+
 	// User profile information (most direct signals)
 	if user, ok := contextData["user"].(*github.GitHubUser); ok && user != nil {
 		sb.WriteString("GitHub Profile:\n")
@@ -49,22 +49,22 @@ func (d *Detector) formatEvidenceForGeminiImproved(contextData map[string]interf
 	if repos, ok := contextData["repositories"].([]github.Repository); ok && len(repos) > 0 {
 		for _, repo := range repos {
 			repoLower := strings.ToLower(repo.Name + " " + repo.Description)
-			if strings.Contains(repoLower, "canada") || 
-			   strings.Contains(repoLower, "canadian") ||
-			   strings.Contains(repoLower, "toronto") ||
-			   strings.Contains(repoLower, "montreal") ||
-			   strings.Contains(repoLower, "vancouver") ||
-			   strings.Contains(repoLower, "ottawa") ||
-			   strings.Contains(repoLower, "calgary") ||
-			   strings.Contains(repoLower, "halifax") ||
-			   strings.Contains(repo.Name, ".ca") ||
-			   strings.Contains(repoLower, "pycon.ca") {
-				canadianIndicators = append(canadianIndicators, 
+			if strings.Contains(repoLower, "canada") ||
+				strings.Contains(repoLower, "canadian") ||
+				strings.Contains(repoLower, "toronto") ||
+				strings.Contains(repoLower, "montreal") ||
+				strings.Contains(repoLower, "vancouver") ||
+				strings.Contains(repoLower, "ottawa") ||
+				strings.Contains(repoLower, "calgary") ||
+				strings.Contains(repoLower, "halifax") ||
+				strings.Contains(repo.Name, ".ca") ||
+				strings.Contains(repoLower, "pycon.ca") {
+				canadianIndicators = append(canadianIndicators,
 					fmt.Sprintf("- %s: %s", repo.Name, repo.Description))
 			}
 		}
 	}
-	
+
 	if len(canadianIndicators) > 0 {
 		sb.WriteString("🇨🇦 CANADIAN INDICATORS IN REPOSITORIES:\n")
 		for _, indicator := range canadianIndicators {
@@ -77,29 +77,29 @@ func (d *Detector) formatEvidenceForGeminiImproved(contextData map[string]interf
 	if websiteContent, ok := contextData["website_content"].(string); ok && websiteContent != "" {
 		websiteLower := strings.ToLower(websiteContent)
 		canadianRefs := []string{}
-		
+
 		// Check for Canadian cities
-		canadianCities := []string{"toronto", "montreal", "vancouver", "ottawa", "calgary", 
+		canadianCities := []string{"toronto", "montreal", "vancouver", "ottawa", "calgary",
 			"edmonton", "winnipeg", "quebec", "hamilton", "kitchener", "waterloo", "halifax"}
 		for _, city := range canadianCities {
 			if strings.Contains(websiteLower, city) {
 				canadianRefs = append(canadianRefs, city)
 			}
 		}
-		
+
 		// Check for Canadian provinces
-		canadianProvinces := []string{"ontario", "quebec", "british columbia", "alberta", 
+		canadianProvinces := []string{"ontario", "quebec", "british columbia", "alberta",
 			"manitoba", "saskatchewan", "nova scotia", "newfoundland"}
 		for _, province := range canadianProvinces {
 			if strings.Contains(websiteLower, province) {
 				canadianRefs = append(canadianRefs, province)
 			}
 		}
-		
+
 		if strings.Contains(websiteLower, "canada") || strings.Contains(websiteLower, "canadian") {
 			canadianRefs = append(canadianRefs, "Canada/Canadian mentioned")
 		}
-		
+
 		if len(canadianRefs) > 0 {
 			sb.WriteString("🇨🇦 CANADIAN REFERENCES IN WEBSITE:\n")
 			for _, ref := range canadianRefs {
@@ -118,7 +118,7 @@ func (d *Detector) formatEvidenceForGeminiImproved(contextData map[string]interf
 		if mastodonProfile.Bio != "" {
 			sb.WriteString(fmt.Sprintf("- Bio: %s\n", mastodonProfile.Bio))
 		}
-		
+
 		// Check for .ca websites in Mastodon
 		for _, website := range mastodonProfile.Websites {
 			if strings.Contains(website, ".ca") {
@@ -145,7 +145,7 @@ func (d *Detector) formatEvidenceForGeminiImproved(contextData map[string]interf
 
 	// SECTION 2: ACTIVITY PATTERNS
 	sb.WriteString("=== ACTIVITY PATTERNS ===\n\n")
-	
+
 	// Activity date range
 	if dateRange, ok := contextData["activity_date_range"].(map[string]interface{}); ok {
 		if oldest, ok := dateRange["oldest"].(time.Time); ok {
@@ -174,14 +174,14 @@ func (d *Detector) formatEvidenceForGeminiImproved(contextData map[string]interf
 		sb.WriteString("- Eastern (ON/QC): UTC-5/UTC-4 ← Toronto is here\n")
 		sb.WriteString("- Atlantic (NS/NB): UTC-4/UTC-3\n")
 		sb.WriteString("- Newfoundland: UTC-3:30/UTC-2:30\n\n")
-		
+
 		sb.WriteString("Activity-based timezone candidates:\n")
 		for i, candidate := range candidates {
 			if i >= 5 {
 				break
 			}
 			// Use %.1f to handle fractional offsets like UTC+5.5 (India), UTC+3.5 (Iran)
-			sb.WriteString(fmt.Sprintf("%d. UTC%+.1f - %.1f%% confidence\n", 
+			sb.WriteString(fmt.Sprintf("%d. UTC%+.1f - %.1f%% confidence\n",
 				i+1, candidate.Offset, candidate.Confidence))
 		}
 		sb.WriteString("\n")
@@ -191,7 +191,7 @@ func (d *Detector) formatEvidenceForGeminiImproved(contextData map[string]interf
 	if quietHours, ok := contextData["quiet_hours"].([]int); ok && len(quietHours) > 0 {
 		sb.WriteString(fmt.Sprintf("Quiet Hours (UTC): %v\n", quietHours))
 	}
-	
+
 	if workHours, ok := contextData["work_hours_utc"].([]int); ok && len(workHours) == 2 {
 		sb.WriteString(fmt.Sprintf("Active Hours (UTC): %02d:00 - %02d:00\n", workHours[0], workHours[1]))
 	}
@@ -199,10 +199,10 @@ func (d *Detector) formatEvidenceForGeminiImproved(contextData map[string]interf
 
 	// SECTION 3: REPOSITORIES (show all, not just Canadian ones)
 	sb.WriteString("=== REPOSITORIES ===\n\n")
-	
+
 	if repos, ok := contextData["repositories"].([]github.Repository); ok && len(repos) > 0 {
 		sb.WriteString("User's Repositories:\n")
-		
+
 		// Show non-fork repos first
 		count := 0
 		for _, repo := range repos {

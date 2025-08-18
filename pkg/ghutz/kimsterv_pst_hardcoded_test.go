@@ -2,7 +2,7 @@ package ghutz
 
 import (
 	"testing"
-	
+
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
 )
 
@@ -35,20 +35,20 @@ func TestKimstervPacificHardcodedDetection(t *testing.T) {
 		16.0: 26, 16.5: 0,
 		17.0: 40, 17.5: 0,
 		// Peak morning and lunch dip area
-		18.0: 26, 18.5: 12,  // 10:00-10:30 PST
-		19.0: 7,  19.5: 16,  // 11:00-11:30 PST (lunch dip at 11am)
-		20.0: 13, 20.5: 10,  // 12:00-12:30 PST
-		21.0: 12, 21.5: 13,  // 13:00-13:30 PST
-		22.0: 7,  22.5: 8,   // 14:00-14:30 PST
-		23.0: 6,  23.5: 2,   // 15:00-15:30 PST
+		18.0: 26, 18.5: 12, // 10:00-10:30 PST
+		19.0: 7, 19.5: 16, // 11:00-11:30 PST (lunch dip at 11am)
+		20.0: 13, 20.5: 10, // 12:00-12:30 PST
+		21.0: 12, 21.5: 13, // 13:00-13:30 PST
+		22.0: 7, 22.5: 8, // 14:00-14:30 PST
+		23.0: 6, 23.5: 2, // 15:00-15:30 PST
 	}
-	
+
 	// Test lunch detection for UTC-8 (Pacific Standard Time)
 	lunchStart, lunchEnd, lunchConfidence := lunch.DetectLunchBreakNoonCentered(halfHourlyData, -8)
-	
-	t.Logf("Lunch detection for UTC-8: start=%.1f, end=%.1f, confidence=%.2f", 
+
+	t.Logf("Lunch detection for UTC-8: start=%.1f, end=%.1f, confidence=%.2f",
 		lunchStart, lunchEnd, lunchConfidence)
-	
+
 	// Convert lunch times to local (PST)
 	if lunchStart >= 0 {
 		lunchStartLocal := lunchStart - 8.0 // Convert UTC to PST (UTC-8)
@@ -59,17 +59,17 @@ func TestKimstervPacificHardcodedDetection(t *testing.T) {
 		if lunchEndLocal < 0 {
 			lunchEndLocal += 24
 		}
-		
-		t.Logf("Lunch in PST: %.1f - %.1f (confidence: %.2f)", 
+
+		t.Logf("Lunch in PST: %.1f - %.1f (confidence: %.2f)",
 			lunchStartLocal, lunchEndLocal, lunchConfidence)
-		
+
 		// The algorithm detects lunch at 10:30am PST due to the large drop
 		// from 26 events at 10:00 to 12 events at 10:30 (53.8% drop)
 		// For someone starting work at 5am, an early lunch is reasonable
 		if lunchStartLocal < 10.0 || lunchStartLocal > 12.5 {
 			t.Errorf("Expected lunch to start between 10am-12:30pm PST, got %.1f PST", lunchStartLocal)
 		}
-		
+
 		// The algorithm finds the 10:30am drop more significant than 11am
 		if lunchStart != 18.5 {
 			t.Logf("Note: Lunch detected at %.1f UTC, alternative dip at 19.0 UTC (11am PST)", lunchStart)
@@ -78,7 +78,7 @@ func TestKimstervPacificHardcodedDetection(t *testing.T) {
 		t.Errorf("Failed to detect lunch for kimsterv in PST timezone")
 		t.Logf("Activity shows clear dip at 19:00 UTC (11am PST): 26→12→7 events")
 	}
-	
+
 	// Test quiet hours detection (sleep time)
 	quietHours := []int{}
 	for hour := 0; hour < 24; hour++ {
@@ -88,9 +88,9 @@ func TestKimstervPacificHardcodedDetection(t *testing.T) {
 			quietHours = append(quietHours, hour)
 		}
 	}
-	
+
 	t.Logf("Quiet hours UTC: %v", quietHours)
-	
+
 	// Should have quiet hours from 5-10 UTC (9pm-2am PST)
 	expectedQuiet := []int{5, 6, 7, 8, 9, 10}
 	quietCount := 0
@@ -102,27 +102,27 @@ func TestKimstervPacificHardcodedDetection(t *testing.T) {
 			}
 		}
 	}
-	
+
 	if quietCount < 4 {
 		t.Errorf("Expected at least 4 quiet hours between 5-10 UTC (9pm-2am PST), found %d", quietCount)
 	}
-	
+
 	// Test work pattern - she starts very early (5am PST = 13:00 UTC)
 	earlyWorkStart := halfHourlyData[13.0]
 	if earlyWorkStart < 3 {
 		t.Errorf("Expected activity at 13:00 UTC (5am PST) showing early start, got %d", earlyWorkStart)
 	}
-	
+
 	t.Logf("Early work start confirmed: %d events at 13:00 UTC (5am PST)", earlyWorkStart)
-	
+
 	// Test peak morning activity (should be 9-10am PST = 17-18 UTC)
 	peakMorning := halfHourlyData[17.0]
 	if peakMorning < 30 {
 		t.Errorf("Expected high activity at 17:00 UTC (9am PST), got %d", peakMorning)
 	}
-	
+
 	t.Logf("Peak morning activity: %d events at 17:00 UTC (9am PST)", peakMorning)
-	
+
 	// Verify Pacific timezone indicators
 	t.Logf("kimsterv activity pattern summary:")
 	t.Logf("- Starts work at 5am PST (13:00 UTC)")

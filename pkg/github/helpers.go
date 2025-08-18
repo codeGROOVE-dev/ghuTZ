@@ -27,13 +27,13 @@ func ExtractSocialMediaFromHTML(html string) []string {
 		`https?://(?:www\.)?facebook\.com/[\w.]+`,
 		`https?://(?:www\.)?youtube\.com/[\w/-]+`,
 		`https?://(?:www\.)?twitch\.tv/[\w]+`,
-		`https?://[\w.-]+\.social/@[\w]+`,      // Generic Mastodon pattern
-		`https?://mastodon\.[\w.-]+/@[\w]+`,    // Mastodon instances
-		`https?://fosstodon\.org/@[\w]+`,       // Popular Mastodon instance
-		`https?://techhub\.social/@[\w]+`,      // Tech Mastodon instance
-		`https?://infosec\.exchange/@[\w]+`,    // InfoSec Mastodon instance
-		`https?://triangletoot\.party/@[\w]+`,  // Triangle area Mastodon instance
-		`https?://[\w.-]+\.party/@[\w]+`,       // .party Mastodon instances
+		`https?://[\w.-]+\.social/@[\w]+`,     // Generic Mastodon pattern
+		`https?://mastodon\.[\w.-]+/@[\w]+`,   // Mastodon instances
+		`https?://fosstodon\.org/@[\w]+`,      // Popular Mastodon instance
+		`https?://techhub\.social/@[\w]+`,     // Tech Mastodon instance
+		`https?://infosec\.exchange/@[\w]+`,   // InfoSec Mastodon instance
+		`https?://triangletoot\.party/@[\w]+`, // Triangle area Mastodon instance
+		`https?://[\w.-]+\.party/@[\w]+`,      // .party Mastodon instances
 	}
 
 	for _, pattern := range socialPatterns {

@@ -71,13 +71,9 @@ func cspPolicy() string {
 		"object-src 'none'",
 		"base-uri 'self'",
 		"form-action 'self'",
+		"child-src 'self'",
+		"media-src 'none'",
 	)
-
-	// Child sources (workers, embeds)
-	directives = append(directives, "child-src 'self'")
-
-	// Media sources
-	directives = append(directives, "media-src 'none'")
 
 	// Upgrade insecure requests if explicitly in production
 	if os.Getenv("PRODUCTION") == "true" {

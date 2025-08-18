@@ -42,7 +42,7 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 
 	// Pass verbose if DEBUG logging is enabled
 	isVerbose := d.logger.Enabled(ctx, slog.LevelDebug)
-	
+
 	// Create Gemini client and call API
 	client := gemini.NewClient(d.geminiAPIKey, d.geminiModel, d.gcpProject)
 	resp, err := client.CallWithSDK(ctx, prompt, isVerbose, d.cache, d.logger)
@@ -55,7 +55,7 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	if timezone == "" {
 		timezone = resp.Timezone // Fallback to old field
 	}
-	
+
 	location := resp.DetectedLocation
 	if location == "" {
 		location = resp.LocationSource // Fallback to old field
@@ -63,12 +63,12 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 			location = resp.Location // Another fallback
 		}
 	}
-	
+
 	reasoning := resp.DetectionReasoning
 	if reasoning == "" {
 		reasoning = resp.Reasoning // Fallback to old field
 	}
-	
+
 	// Parse confidence from string or number
 	confidence := 0.5
 	if resp.ConfidenceLevel != "" {
@@ -98,7 +98,7 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 			}
 		}
 	}
-	
+
 	// Verbose response display removed - now handled in main CLI
 
 	// Adjust confidence based on data availability
@@ -122,7 +122,6 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	}, nil
 }
 
-
 // tryUnifiedGeminiAnalysisWithContext attempts timezone detection using Gemini AI with UserContext
 func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, userCtx *UserContext, activityResult *Result) *Result {
 	// Skip if no Gemini API key
@@ -144,19 +143,19 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	// Add activity result if available
 	if activityResult != nil {
 		contextData["activity_result"] = activityResult
-		
+
 		if activityResult.SleepHoursUTC != nil {
 			contextData["sleep_hours"] = activityResult.SleepHoursUTC
 		}
-		
+
 		if activityResult.HourlyActivityUTC != nil {
 			contextData["hour_counts"] = activityResult.HourlyActivityUTC
 		}
-		
+
 		if len(activityResult.TimezoneCandidates) > 0 {
 			contextData["timezone_candidates"] = activityResult.TimezoneCandidates
 		}
-		
+
 		if activityResult.ActivityDateRange.TotalDays > 0 {
 			totalEvents := 0
 			if activityResult.HourlyActivityUTC != nil {
@@ -164,36 +163,36 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 					totalEvents += count
 				}
 			}
-			
+
 			contextData["activity_date_range"] = map[string]interface{}{
-				"oldest":      activityResult.ActivityDateRange.OldestActivity,
-				"newest":      activityResult.ActivityDateRange.NewestActivity,
-				"total_days":  activityResult.ActivityDateRange.TotalDays,
+				"oldest":       activityResult.ActivityDateRange.OldestActivity,
+				"newest":       activityResult.ActivityDateRange.NewestActivity,
+				"total_days":   activityResult.ActivityDateRange.TotalDays,
 				"total_events": totalEvents,
 			}
 		}
-		
+
 		if activityResult.ActivityTimezone != "" {
 			contextData["activity_timezone"] = activityResult.ActivityTimezone
-			
+
 			if strings.HasPrefix(activityResult.ActivityTimezone, "UTC") {
 				offsetStr := strings.TrimPrefix(activityResult.ActivityTimezone, "UTC")
 				if offset, err := strconv.Atoi(offsetStr); err == nil {
 					contextData["utc_offset"] = offset
-					
+
 					if activityResult.ActiveHoursLocal.Start > 0 || activityResult.ActiveHoursLocal.End > 0 {
 						startUTC := int(activityResult.ActiveHoursLocal.Start)
 						endUTC := int(activityResult.ActiveHoursLocal.End)
 						contextData["work_hours_utc"] = []int{startUTC, endUTC}
 					}
-					
+
 					if activityResult.LunchHoursUTC.Confidence > 0 {
 						lunchStartUTC := int(activityResult.LunchHoursUTC.Start)
 						lunchEndUTC := int(activityResult.LunchHoursUTC.End)
 						contextData["lunch_break_utc"] = []int{lunchStartUTC, lunchEndUTC}
 						contextData["lunch_confidence"] = activityResult.LunchHoursUTC.Confidence
 					}
-					
+
 					if activityResult.PeakProductivity.Count > 0 {
 						peakStartUTC := int(activityResult.PeakProductivity.Start)
 						peakEndUTC := int(activityResult.PeakProductivity.End)
@@ -214,7 +213,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	if len(userCtx.StarredRepos) > 0 {
 		contextData["starred_repositories"] = userCtx.StarredRepos
 	}
-	
+
 	// Filter recent PRs
 	var recentPRs []github.PullRequest
 	cutoff := time.Now().AddDate(0, -3, 0)
@@ -229,7 +228,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	if len(recentPRs) > 0 {
 		contextData["pull_requests"] = recentPRs
 	}
-	
+
 	// Filter recent issues
 	var recentIssues []github.Issue
 	for _, issue := range userCtx.Issues {
@@ -243,18 +242,18 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	if len(recentIssues) > 0 {
 		contextData["issues"] = recentIssues
 	}
-	
+
 	if len(userCtx.Comments) > 0 {
 		contextData["comments"] = userCtx.Comments
 	}
-	
+
 	// Collect commit message samples for Gemini to analyze
 	commitSamples := collectCommitMessageSamples(userCtx.Events, 15)
 	if len(commitSamples) > 0 {
 		contextData["commit_message_samples"] = commitSamples
 	}
-	
-	// Collect text samples from PRs/issues for Gemini to analyze  
+
+	// Collect text samples from PRs/issues for Gemini to analyze
 	textSamples := collectTextSamples(recentPRs, recentIssues, userCtx.Comments, 10)
 	if len(textSamples) > 0 {
 		contextData["text_samples"] = textSamples
@@ -280,14 +279,14 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 
 	// Extract social media URLs from GitHub profile
 	socialURLs := extractSocialMediaURLs(userCtx.User)
-	
+
 	// Also extract social media URLs from website content
 	if websiteContent, ok := contextData["website_content"].(string); ok && websiteContent != "" {
 		websiteSocialURLs := github.ExtractSocialMediaFromHTML(websiteContent)
-		d.logger.Debug("extracted social media URLs from website", 
-			"website", userCtx.User.Blog, 
+		d.logger.Debug("extracted social media URLs from website",
+			"website", userCtx.User.Blog,
 			"found_urls", len(websiteSocialURLs))
-		
+
 		// Merge with existing social URLs, avoiding duplicates
 		for _, url := range websiteSocialURLs {
 			found := false
@@ -311,17 +310,17 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		if len(tlds) > 0 {
 			contextData["country_tlds"] = tlds
 		}
-		
+
 		// Follow Mastodon links to get comprehensive profile data
 		for _, socialURL := range socialURLs {
 			isMastodon := false
-			
-			if strings.Contains(userCtx.User.Bio, "[MASTODON] " + socialURL) {
+
+			if strings.Contains(userCtx.User.Bio, "[MASTODON] "+socialURL) {
 				isMastodon = true
 			} else if strings.Contains(socialURL, "/@") {
 				isMastodon = true
 			}
-			
+
 			if isMastodon {
 				d.logger.Debug("following Mastodon link", "url", socialURL)
 				// Use the new social package to extract Mastodon data
@@ -340,25 +339,25 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 						JoinedDate:    extracted[0].Joined,
 						Websites:      []string{},
 					}
-					
+
 					// Extract websites from fields
 					for key, value := range extracted[0].Fields {
 						lowerKey := strings.ToLower(key)
-						if strings.Contains(lowerKey, "website") || strings.Contains(lowerKey, "blog") || 
-						   strings.Contains(lowerKey, "home") || strings.Contains(lowerKey, "url") {
+						if strings.Contains(lowerKey, "website") || strings.Contains(lowerKey, "blog") ||
+							strings.Contains(lowerKey, "home") || strings.Contains(lowerKey, "url") {
 							if strings.HasPrefix(value, "http") {
 								mastodonData.Websites = append(mastodonData.Websites, value)
 							}
 						}
 					}
-					
+
 					contextData["mastodon_profile"] = mastodonData
-					
+
 					for _, website := range mastodonData.Websites {
 						if userCtx.User.Blog == "" {
 							userCtx.User.Blog = website
 						}
-						
+
 						websiteContent := d.fetchWebsiteContent(ctx, website)
 						if websiteContent != "" {
 							if websiteContents, ok := contextData["mastodon_website_contents"].(map[string]string); ok {

@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-	
+
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 )
 
@@ -19,40 +19,40 @@ type CountryTLD struct {
 func extractCountryTLDs(urls ...string) []CountryTLD {
 	// Map of country TLDs to their countries
 	countryTLDs := map[string]string{
-		".uk":    "United Kingdom",
-		".ca":    "Canada",
-		".au":    "Australia",
-		".nz":    "New Zealand",
-		".de":    "Germany",
-		".fr":    "France",
-		".nl":    "Netherlands",
-		".se":    "Sweden",
-		".no":    "Norway",
-		".fi":    "Finland",
-		".dk":    "Denmark",
-		".pl":    "Poland",
-		".es":    "Spain",
-		".it":    "Italy",
-		".pt":    "Portugal",
-		".br":    "Brazil",
-		".mx":    "Mexico",
-		".ar":    "Argentina",
-		".jp":    "Japan",
-		".kr":    "South Korea",
-		".cn":    "China",
-		".in":    "India",
-		".sg":    "Singapore",
-		".hk":    "Hong Kong",
-		".tw":    "Taiwan",
-		".ru":    "Russia",
-		".za":    "South Africa",
-		".il":    "Israel",
-		".ae":    "UAE",
-		".ch":    "Switzerland",
-		".at":    "Austria",
-		".be":    "Belgium",
-		".cz":    "Czech Republic",
-		".ie":    "Ireland",
+		".uk": "United Kingdom",
+		".ca": "Canada",
+		".au": "Australia",
+		".nz": "New Zealand",
+		".de": "Germany",
+		".fr": "France",
+		".nl": "Netherlands",
+		".se": "Sweden",
+		".no": "Norway",
+		".fi": "Finland",
+		".dk": "Denmark",
+		".pl": "Poland",
+		".es": "Spain",
+		".it": "Italy",
+		".pt": "Portugal",
+		".br": "Brazil",
+		".mx": "Mexico",
+		".ar": "Argentina",
+		".jp": "Japan",
+		".kr": "South Korea",
+		".cn": "China",
+		".in": "India",
+		".sg": "Singapore",
+		".hk": "Hong Kong",
+		".tw": "Taiwan",
+		".ru": "Russia",
+		".za": "South Africa",
+		".il": "Israel",
+		".ae": "UAE",
+		".ch": "Switzerland",
+		".at": "Austria",
+		".be": "Belgium",
+		".cz": "Czech Republic",
+		".ie": "Ireland",
 	}
 
 	var tlds []CountryTLD
@@ -97,7 +97,6 @@ type MastodonProfileData struct {
 	JoinedDate    string
 }
 
-
 // extractSocialMediaURLs extracts social media profile URLs from GitHub user data.
 func extractSocialMediaURLs(user *github.GitHubUser) []string {
 	if user == nil {
@@ -115,13 +114,13 @@ func extractSocialMediaURLs(user *github.GitHubUser) []string {
 			`https?://(?:www\.)?linkedin\.com/in/[\w-]+`,
 			`https?://(?:www\.)?instagram\.com/[\w.]+`,
 			`https?://(?:www\.)?facebook\.com/[\w.]+`,
-			`https?://[\w.-]+\.social/@[\w]+`,      // Mastodon instances
-			`https?://mastodon\.[\w.-]+/@[\w]+`,    // Mastodon instances
-			`https?://fosstodon\.org/@[\w]+`,       // Popular Mastodon instance
-			`https?://techhub\.social/@[\w]+`,      // Tech Mastodon instance
-			`https?://infosec\.exchange/@[\w]+`,    // InfoSec Mastodon instance
-			`https?://triangletoot\.party/@[\w]+`,  // Triangle area Mastodon instance
-			`https?://[\w.-]+\.party/@[\w]+`,       // .party Mastodon instances
+			`https?://[\w.-]+\.social/@[\w]+`,     // Mastodon instances
+			`https?://mastodon\.[\w.-]+/@[\w]+`,   // Mastodon instances
+			`https?://fosstodon\.org/@[\w]+`,      // Popular Mastodon instance
+			`https?://techhub\.social/@[\w]+`,     // Tech Mastodon instance
+			`https?://infosec\.exchange/@[\w]+`,   // InfoSec Mastodon instance
+			`https?://triangletoot\.party/@[\w]+`, // Triangle area Mastodon instance
+			`https?://[\w.-]+\.party/@[\w]+`,      // .party Mastodon instances
 			`https?://(?:www\.)?youtube\.com/c/[\w-]+`,
 			`https?://(?:www\.)?twitch\.tv/[\w]+`,
 		}
@@ -145,7 +144,6 @@ func extractSocialMediaURLs(user *github.GitHubUser) []string {
 
 	return urls
 }
-
 
 // isPolishName checks if a name appears to be Polish based on common patterns.
 func isPolishName(name string) bool {
@@ -190,4 +188,3 @@ func isPolishName(name string) bool {
 
 	return false
 }
-

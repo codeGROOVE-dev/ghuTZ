@@ -98,7 +98,6 @@ func convertUTCToLocal(utcHour float64, timezone string) float64 {
 	return utcHour // No conversion possible
 }
 
-
 // GenerateHistogram creates a visual representation of user activity.
 func GenerateHistogram(result *Result, hourCounts map[int]int, timezone string) string {
 	var output strings.Builder
@@ -135,7 +134,7 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, timezone string) 
 	if len(halfHourCounts) == 0 {
 		return output.String() + "No half-hour activity data available\n"
 	}
-	
+
 	for _, count := range halfHourCounts {
 		if count > maxActivity {
 			maxActivity = count
@@ -152,7 +151,7 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, timezone string) 
 		for halfHour := 0; halfHour < 2; halfHour++ {
 			bucket := float64(utcHour) + float64(halfHour)*0.5
 			count := halfHourCounts[bucket]
-			
+
 			// Convert UTC time to local time for display
 			localTime := convertUTCToLocal(bucket, timezone)
 			localHour := int(localTime)
@@ -215,69 +214,69 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, timezone string) 
 			// Start building the line with 30-minute precision
 			line := fmt.Sprintf("%02d:%02d ", localHour, localMin)
 
-		// Add hour type indicator with fixed width (single character + space)
-		if hourType != "" {
-			line += hourColor.Sprint(hourType) + " " // Colored character + 1 space
-		} else {
-			line += "  " // 2 spaces to match character + space width
-		}
+			// Add hour type indicator with fixed width (single character + space)
+			if hourType != "" {
+				line += hourColor.Sprint(hourType) + " " // Colored character + 1 space
+			} else {
+				line += "  " // 2 spaces to match character + space width
+			}
 
-		// Add count with consistent width
-		if count > 0 {
-			line += fmt.Sprintf("(%2d) ", count)
-		} else {
-			line += "     " // 5 spaces to match "(nn) "
-		}
+			// Add count with consistent width
+			if count > 0 {
+				line += fmt.Sprintf("(%2d) ", count)
+			} else {
+				line += "     " // 5 spaces to match "(nn) "
+			}
 
-		// Create visual bar
-		if count > 0 {
-			// Use event count directly as bar length
-			barLength := count
+			// Create visual bar
+			if count > 0 {
+				// Use event count directly as bar length
+				barLength := count
 
-			if hasOrgData && result.HourlyOrganizationActivity[utcHour] != nil {
-				// Build color-coded bar based on organization activity
-				orgActivity := result.HourlyOrganizationActivity[utcHour]
+				if hasOrgData && result.HourlyOrganizationActivity[utcHour] != nil {
+					// Build color-coded bar based on organization activity
+					orgActivity := result.HourlyOrganizationActivity[utcHour]
 
-				bar := ""
-				remaining := barLength
+					bar := ""
+					remaining := barLength
 
-				// Add segments for each top organization
-				for _, topOrg := range result.TopOrganizations {
-					if orgCount, exists := orgActivity[topOrg.Name]; exists && remaining > 0 {
-						// Calculate this org's proportion
-						segmentLength := (orgCount * barLength) / count
-						if segmentLength == 0 && orgCount > 0 {
-							segmentLength = 1
+					// Add segments for each top organization
+					for _, topOrg := range result.TopOrganizations {
+						if orgCount, exists := orgActivity[topOrg.Name]; exists && remaining > 0 {
+							// Calculate this org's proportion
+							segmentLength := (orgCount * barLength) / count
+							if segmentLength == 0 && orgCount > 0 {
+								segmentLength = 1
+							}
+							if segmentLength > remaining {
+								segmentLength = remaining
+							}
+
+							colorFunc := getOrgColorFunc(topOrg.Name, result.TopOrganizations)
+							bar += colorFunc.Sprint(strings.Repeat("█", segmentLength))
+							remaining -= segmentLength
 						}
-						if segmentLength > remaining {
-							segmentLength = remaining
-						}
+					}
 
-						colorFunc := getOrgColorFunc(topOrg.Name, result.TopOrganizations)
-						bar += colorFunc.Sprint(strings.Repeat("█", segmentLength))
-						remaining -= segmentLength
+					// Add any remaining as "other" activity
+					if remaining > 0 {
+						greyColor := color.New(color.FgHiBlack)
+						bar += greyColor.Sprint(strings.Repeat("█", remaining))
+					}
+
+					line += bar
+				} else {
+					// No org data, use simple grey bar
+					greyColor := color.New(color.FgHiBlack)
+					if barLength == 1 {
+						line += greyColor.Sprint("·")
+					} else {
+						line += greyColor.Sprint(strings.Repeat("█", barLength))
 					}
 				}
-
-				// Add any remaining as "other" activity
-				if remaining > 0 {
-					greyColor := color.New(color.FgHiBlack)
-					bar += greyColor.Sprint(strings.Repeat("█", remaining))
-				}
-
-				line += bar
-			} else {
-				// No org data, use simple grey bar
-				greyColor := color.New(color.FgHiBlack)
-				if barLength == 1 {
-					line += greyColor.Sprint("·")
-				} else {
-					line += greyColor.Sprint(strings.Repeat("█", barLength))
-				}
 			}
-		}
 
-		output.WriteString(line + "\n")
+			output.WriteString(line + "\n")
 		}
 	}
 

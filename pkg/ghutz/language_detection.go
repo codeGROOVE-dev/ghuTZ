@@ -3,7 +3,7 @@ package ghutz
 import (
 	"encoding/json"
 	"strings"
-	
+
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 )
 
@@ -17,12 +17,12 @@ type CommitMessageSample struct {
 func collectCommitMessageSamples(events []github.PublicEvent, maxSamples int) []CommitMessageSample {
 	var samples []CommitMessageSample
 	seen := make(map[string]bool)
-	
+
 	for _, event := range events {
 		if event.Type != "PushEvent" {
 			continue
 		}
-		
+
 		// Parse the payload to get commit messages
 		var payload struct {
 			Commits []struct {
@@ -33,37 +33,37 @@ func collectCommitMessageSamples(events []github.PublicEvent, maxSamples int) []
 				} `json:"author"`
 			} `json:"commits"`
 		}
-		
+
 		if err := json.Unmarshal(event.Payload, &payload); err != nil {
 			continue
 		}
-		
+
 		for _, commit := range payload.Commits {
 			if commit.Message == "" || seen[commit.Message] {
 				continue
 			}
-			
+
 			// Skip automated commits
 			msgLower := strings.ToLower(commit.Message)
 			if strings.Contains(msgLower, "merge pull request") ||
-			   strings.Contains(msgLower, "merge branch") ||
-			   strings.Contains(msgLower, "auto-generated") ||
-			   strings.Contains(msgLower, "dependabot") {
+				strings.Contains(msgLower, "merge branch") ||
+				strings.Contains(msgLower, "auto-generated") ||
+				strings.Contains(msgLower, "dependabot") {
 				continue
 			}
-			
+
 			seen[commit.Message] = true
 			samples = append(samples, CommitMessageSample{
 				Message: commit.Message,
 				Author:  commit.Author.Name,
 			})
-			
+
 			if len(samples) >= maxSamples {
 				return samples
 			}
 		}
 	}
-	
+
 	return samples
 }
 
@@ -71,12 +71,12 @@ func collectCommitMessageSamples(events []github.PublicEvent, maxSamples int) []
 func collectTextSamples(prs []github.PullRequest, issues []github.Issue, comments []github.Comment, maxSamples int) []string {
 	var samples []string
 	seen := make(map[string]bool)
-	
+
 	// Collect from PR titles and bodies
 	for _, pr := range prs {
 		if pr.Title != "" && !seen[pr.Title] && len(samples) < maxSamples {
 			seen[pr.Title] = true
-			samples = append(samples, "PR Title: " + pr.Title)
+			samples = append(samples, "PR Title: "+pr.Title)
 		}
 		if pr.Body != "" && !seen[pr.Body] && len(samples) < maxSamples {
 			// Take first 200 chars of body if it's long
@@ -86,11 +86,11 @@ func collectTextSamples(prs []github.PullRequest, issues []github.Issue, comment
 			}
 			if !strings.Contains(body, "<!--") && !strings.Contains(body, "## Checklist") {
 				seen[pr.Body] = true
-				samples = append(samples, "PR Body: " + body)
+				samples = append(samples, "PR Body: "+body)
 			}
 		}
 	}
-	
+
 	// Collect from issue titles and bodies
 	for _, issue := range issues {
 		if len(samples) >= maxSamples {
@@ -98,7 +98,7 @@ func collectTextSamples(prs []github.PullRequest, issues []github.Issue, comment
 		}
 		if issue.Title != "" && !seen[issue.Title] {
 			seen[issue.Title] = true
-			samples = append(samples, "Issue Title: " + issue.Title)
+			samples = append(samples, "Issue Title: "+issue.Title)
 		}
 		if issue.Body != "" && !seen[issue.Body] && len(samples) < maxSamples {
 			// Take first 200 chars of body if it's long
@@ -108,11 +108,11 @@ func collectTextSamples(prs []github.PullRequest, issues []github.Issue, comment
 			}
 			if !strings.Contains(body, "<!--") && !strings.Contains(body, "## Checklist") {
 				seen[issue.Body] = true
-				samples = append(samples, "Issue Body: " + body)
+				samples = append(samples, "Issue Body: "+body)
 			}
 		}
 	}
-	
+
 	// Collect from comments
 	for _, comment := range comments {
 		if len(samples) >= maxSamples {
@@ -125,9 +125,9 @@ func collectTextSamples(prs []github.PullRequest, issues []github.Issue, comment
 				body = body[:200] + "..."
 			}
 			seen[comment.Body] = true
-			samples = append(samples, "Comment: " + body)
+			samples = append(samples, "Comment: "+body)
 		}
 	}
-	
+
 	return samples
 }

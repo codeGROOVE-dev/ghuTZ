@@ -10,28 +10,28 @@ func TestTstrombergFullHourLunch(t *testing.T) {
 	// Actual 30-minute bucket counts from tstromberg's activity data
 	// These show a clear lunch break from 11:30-12:30 EST (15:30-16:30 UTC)
 	halfHourCounts := map[float64]int{
-		13.0: 1,   // 09:00 EST
-		13.5: 2,   // 09:30 EST
-		14.0: 10,  // 10:00 EST
-		14.5: 9,   // 10:30 EST
-		15.0: 27,  // 11:00 EST - high activity before lunch
-		15.5: 4,   // 11:30 EST - LUNCH START (85% drop from 27 to 4)
-		16.0: 5,   // 12:00 EST - LUNCH CONTINUES (still very low)
-		16.5: 11,  // 12:30 EST - activity resumes
-		17.0: 15,  // 13:00 EST
-		17.5: 11,  // 13:30 EST
-		18.0: 3,   // 14:00 EST
-		18.5: 13,  // 14:30 EST
-		19.0: 38,  // 15:00 EST - peak activity
-		19.5: 19,  // 15:30 EST
-		20.0: 15,  // 16:00 EST
-		20.5: 9,   // 16:30 EST
-		21.0: 11,  // 17:00 EST
-		21.5: 8,   // 17:30 EST
-		22.0: 19,  // 18:00 EST
-		22.5: 0,   // 18:30 EST
-		23.0: 1,   // 19:00 EST
-		23.5: 9,   // 19:30 EST
+		13.0: 1,  // 09:00 EST
+		13.5: 2,  // 09:30 EST
+		14.0: 10, // 10:00 EST
+		14.5: 9,  // 10:30 EST
+		15.0: 27, // 11:00 EST - high activity before lunch
+		15.5: 4,  // 11:30 EST - LUNCH START (85% drop from 27 to 4)
+		16.0: 5,  // 12:00 EST - LUNCH CONTINUES (still very low)
+		16.5: 11, // 12:30 EST - activity resumes
+		17.0: 15, // 13:00 EST
+		17.5: 11, // 13:30 EST
+		18.0: 3,  // 14:00 EST
+		18.5: 13, // 14:30 EST
+		19.0: 38, // 15:00 EST - peak activity
+		19.5: 19, // 15:30 EST
+		20.0: 15, // 16:00 EST
+		20.5: 9,  // 16:30 EST
+		21.0: 11, // 17:00 EST
+		21.5: 8,  // 17:30 EST
+		22.0: 19, // 18:00 EST
+		22.5: 0,  // 18:30 EST
+		23.0: 1,  // 19:00 EST
+		23.5: 9,  // 19:30 EST
 	}
 
 	// Test for UTC-4 (Eastern Daylight Time)
@@ -67,7 +67,7 @@ func TestTstrombergFullHourLunch(t *testing.T) {
 	if lunchDuration < 0 {
 		lunchDuration += 24
 	}
-	
+
 	if lunchDuration < 0.9 || lunchDuration > 1.1 {
 		t.Errorf("Lunch duration incorrect: got %.1f hours, expected 1.0 hour", lunchDuration)
 	}
@@ -77,6 +77,6 @@ func TestTstrombergFullHourLunch(t *testing.T) {
 		t.Errorf("Lunch confidence too low: got %.2f, expected > 0.7 for clear lunch pattern", confidence)
 	}
 
-	t.Logf("Detected lunch: %.1f-%.1f EST (%.1f-%.1f UTC) duration %.1f hours with confidence %.2f", 
+	t.Logf("Detected lunch: %.1f-%.1f EST (%.1f-%.1f UTC) duration %.1f hours with confidence %.2f",
 		lunchStartLocal, lunchEndLocal, lunchStart, lunchEnd, lunchDuration, confidence)
 }

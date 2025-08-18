@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 	"time"
-	
+
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 )
 
@@ -288,7 +288,7 @@ func filterAndSortTimestamps(allTimestamps []timestampEntry, maxYears int) []tim
 func applyProgressiveTimeWindow(allTimestamps []timestampEntry, targetMin int) []timestampEntry {
 	const maxTimeWindowDays = 365 * 5 // Maximum 5 years
 	const initialWindowDays = 30      // Start with 1 month
-	const expansionFactor = 1.25       // Increase by 25% each iteration
+	const expansionFactor = 1.25      // Increase by 25% each iteration
 
 	// Progressive time window strategy
 	timeWindowDays := float64(initialWindowDays)

@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,23 +16,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/codeGROOVE-dev/retry"
 	md "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/httpcache"
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
+	"github.com/codeGROOVE-dev/retry"
 )
 
-// SECURITY: GitHub token patterns for validation.
+// SECURITY: Timezone extraction patterns for validation.
 var (
-	// GitHub Personal Access Token (classic) - ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.
-	githubPATRegex = regexp.MustCompile(`^ghp_[a-zA-Z0-9]{36}$`)
-	// GitHub App Installation Token - ghs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.
-	githubAppTokenRegex = regexp.MustCompile(`^ghs_[a-zA-Z0-9]{36}$`)
-	// GitHub Fine-grained PAT - github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.
-	githubFineGrainedRegex = regexp.MustCompile(`^github_pat_[a-zA-Z0-9_]{82}$`)
-	// GitHub username validation regex.
-	validUsernameRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$`)
 	// Timezone extraction patterns.
 	timezoneDataAttrRegex = regexp.MustCompile(`data-timezone="([^"]+)"`)
 	timezoneJSONRegex     = regexp.MustCompile(`"timezone":"([^"]+)"`)
@@ -42,19 +33,19 @@ var (
 
 // UserContext holds all fetched data for a user to avoid redundant API calls
 type UserContext struct {
-	Username          string
-	User              *github.GitHubUser
-	Events            []github.PublicEvent
-	Organizations     []github.Organization
-	Repositories      []github.Repository // User's own repos
-	StarredRepos      []github.Repository // Repos the user has starred
-	PullRequests      []github.PullRequest
-	Issues            []github.Issue
-	Comments          []github.Comment
-	Gists             []time.Time // Gist timestamps
-	Commits           []time.Time // Commit timestamps
-	ProfileHTML       string       // Cached profile HTML
-	FromCache         map[string]bool // Track which data was from cache
+	Username      string
+	User          *github.GitHubUser
+	Events        []github.PublicEvent
+	Organizations []github.Organization
+	Repositories  []github.Repository // User's own repos
+	StarredRepos  []github.Repository // Repos the user has starred
+	PullRequests  []github.PullRequest
+	Issues        []github.Issue
+	Comments      []github.Comment
+	Gists         []time.Time     // Gist timestamps
+	Commits       []time.Time     // Commit timestamps
+	ProfileHTML   string          // Cached profile HTML
+	FromCache     map[string]bool // Track which data was from cache
 }
 
 type Detector struct {
@@ -136,20 +127,30 @@ func (d *Detector) isValidGitHubToken(token string) bool {
 	token = strings.TrimSpace(token)
 
 	// Check against known GitHub token patterns
-	return githubPATRegex.MatchString(token) ||
-		githubAppTokenRegex.MatchString(token) ||
-		githubFineGrainedRegex.MatchString(token)
+	// GitHub Personal Access Token (classic) - ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.
+	if matched, err := regexp.MatchString(`^ghp_[a-zA-Z0-9]{36}$`, token); err == nil && matched {
+		return true
+	}
+	// GitHub App Installation Token - ghs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.
+	if matched, err := regexp.MatchString(`^ghs_[a-zA-Z0-9]{36}$`, token); err == nil && matched {
+		return true
+	}
+	// GitHub Fine-grained PAT - github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.
+	if matched, err := regexp.MatchString(`^github_pat_[a-zA-Z0-9_]{82}$`, token); err == nil && matched {
+		return true
+	}
+	return false
 }
 
 // isValidGitHubUsername validates GitHub username format for security.
 func isValidGitHubUsername(username string) bool {
 	// SECURITY: Validate username to prevent injection attacks
 	username = strings.TrimSpace(username)
-	
+
 	if username == "" {
 		return false
 	}
-	
+
 	// GitHub username rules:
 	// - Max 39 characters
 	// - May contain alphanumeric characters and hyphens
@@ -158,23 +159,23 @@ func isValidGitHubUsername(username string) bool {
 	if len(username) > 39 || username == "" {
 		return false
 	}
-	
+
 	if username[0] == '-' || username[len(username)-1] == '-' {
 		return false
 	}
-	
+
 	if strings.Contains(username, "--") {
 		return false
 	}
-	
+
 	// Only allow alphanumeric and hyphens
 	for _, ch := range username {
-		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || 
-			 (ch >= '0' && ch <= '9') || ch == '-') {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+			(ch >= '0' && ch <= '9') || ch == '-') {
 			return false
 		}
 	}
-	
+
 	return true
 }
 
@@ -223,14 +224,14 @@ func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *De
 		forceActivity: optHolder.forceActivity,
 		cache:         cache,
 	}
-	
+
 	// Create GitHub client with cached HTTP
 	if cache != nil {
 		detector.githubClient = github.NewClient(logger, detector.httpClient, optHolder.githubToken, detector.cachedHTTPDo)
 	} else {
 		detector.githubClient = github.NewClient(logger, detector.httpClient, optHolder.githubToken, detector.retryableHTTPDo)
 	}
-	
+
 	return detector
 }
 
@@ -247,7 +248,7 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 	if activityResult == nil || result == nil {
 		return
 	}
-	
+
 	// Log to see what's being merged
 	d.logger.Debug("mergeActivityData called",
 		"result.Timezone", result.Timezone,
@@ -264,7 +265,7 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 	result.HalfHourlyActivityUTC = activityResult.HalfHourlyActivityUTC
 	result.HourlyOrganizationActivity = activityResult.HourlyOrganizationActivity
 	result.TimezoneCandidates = activityResult.TimezoneCandidates
-	
+
 	// Always use the lunch times for the final chosen timezone
 	// First check if we already calculated lunch for this timezone in our candidates
 	// This is needed because Gemini might pick a named timezone like America/Los_Angeles
@@ -273,17 +274,17 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 		// Calculate timezone offset for the new timezone
 		newOffset := offsetFromNamedTimezone(result.Timezone)
 		oldOffset := offsetFromNamedTimezone(activityResult.Timezone)
-		
+
 		d.logger.Debug("mergeActivityData checking candidates",
 			"result.Timezone", result.Timezone,
 			"activityResult.Timezone", activityResult.Timezone,
 			"newOffset", newOffset,
 			"oldOffset", oldOffset,
 			"num_candidates", len(result.TimezoneCandidates))
-		
+
 		// Check if we have this timezone in our candidates (to reuse calculation)
 		lunchFound := false
-		
+
 		// For timezones with DST, check both possible offsets
 		// e.g., America/Los_Angeles could be -7 (PDT) or -8 (PST)
 		// We prefer the current offset (newOffset) first
@@ -301,7 +302,7 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 			// Currently August, so MDT (-6) is active
 			possibleOffsets = []int{-6, -7}
 		}
-		
+
 		// Look through all candidates for a matching offset
 		// We check offsets in order of preference (current DST offset first)
 		for _, offset := range possibleOffsets {
@@ -331,7 +332,7 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 				break
 			}
 		}
-		
+
 		// If we didn't find a pre-calculated lunch, calculate it now
 		if !lunchFound {
 			d.logger.Debug("no matching candidate lunch found, calculating new lunch",
@@ -418,10 +419,10 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking repositories", "username", username)
-		
+
 		var pinnedRepos, popularRepos []github.Repository
 		var repoWg sync.WaitGroup
-		
+
 		repoWg.Add(2)
 		go func() {
 			defer repoWg.Done()
@@ -440,7 +441,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 			}
 		}()
 		repoWg.Wait()
-		
+
 		// Combine and deduplicate repos
 		repoMap := make(map[string]github.Repository)
 		for _, repo := range pinnedRepos {
@@ -461,7 +462,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 		for _, name := range repoNames {
 			repos = append(repos, repoMap[name])
 		}
-		
+
 		mu.Lock()
 		userCtx.Repositories = repos
 		mu.Unlock()
@@ -619,181 +620,13 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	return nil, fmt.Errorf("could not determine timezone for %s", username)
 }
 
-// fetchProfileHTML fetches the GitHub profile HTML for a user.
-func (d *Detector) fetchProfileHTML(ctx context.Context, username string) string {
-	profileURL := fmt.Sprintf("https://github.com/%s", url.PathEscape(username))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, profileURL, http.NoBody)
-	if err != nil {
-		return ""
-	}
-
-	// SECURITY: Validate and sanitize GitHub token before use
-	if d.githubToken != "" && d.isValidGitHubToken(d.githubToken) {
-		req.Header.Set("Authorization", "token "+d.githubToken)
-	}
-
-	resp, err := d.cachedHTTPDo(ctx, req)
-	if err != nil {
-		return ""
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			d.logger.Debug("failed to close response body", "error", err)
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return ""
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return ""
-	}
-
-	return string(body)
-}
-
-func (d *Detector) tryProfileScraping(ctx context.Context, username string) *Result {
-	html := d.fetchProfileHTML(ctx, username)
-	if html == "" {
-		profileURL := fmt.Sprintf("https://github.com/%s", url.PathEscape(username))
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, profileURL, http.NoBody)
-		if err != nil {
-			return nil
-		}
-
-		// SECURITY: Validate and sanitize GitHub token before use
-		if d.githubToken != "" && d.isValidGitHubToken(d.githubToken) {
-			req.Header.Set("Authorization", "token "+d.githubToken)
-		}
-
-		resp, err := d.cachedHTTPDo(ctx, req)
-		if err != nil {
-			return nil
-		}
-		defer func() {
-			if err := resp.Body.Close(); err != nil {
-				d.logger.Debug("failed to close response body", "error", err)
-			}
-		}()
-
-		// Check if user exists - GitHub returns 404 for non-existent users
-		if resp.StatusCode == http.StatusNotFound {
-			d.logger.Info("GitHub user not found", "username", username)
-			// Return a special result indicating user doesn't exist
-			// This will be cached to avoid repeated lookups
-			return &Result{
-				Username:   username,
-				Timezone:   "UTC", // Default timezone for non-existent users
-				Confidence: 0,     // Zero confidence indicates non-existent user
-				Method:     "user_not_found",
-			}
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil
-		}
-
-		html = string(body)
-	}
-
-	// Try extracting timezone from HTML using pre-compiled regex patterns
-	patterns := []*regexp.Regexp{
-		timezoneDataAttrRegex,
-		timezoneFieldRegex,
-		timezoneJSONRegex,
-	}
-
-	for _, re := range patterns {
-		if matches := re.FindStringSubmatch(html); len(matches) > 1 {
-			tz := strings.TrimSpace(matches[1])
-			if tz != "" && tz != "UTC" {
-				return &Result{
-					Username:   username,
-					Timezone:   tz,
-					Confidence: 0.95,
-					Method:     "github_profile",
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-func (d *Detector) tryLocationField(ctx context.Context, username string) *Result {
-	user := d.githubClient.FetchUser(ctx, username)
-	if user == nil || user.Location == "" {
-		d.logger.Debug("no location field found", "username", username)
-		return nil
-	}
-
-	d.logger.Debug("analyzing location field", "username", username, "location", user.Location)
-
-	// Check if location is too vague for geocoding
-	location := strings.ToLower(strings.TrimSpace(user.Location))
-	vagueLocations := []string{
-		"united states", "usa", "us", "america",
-		"canada", "uk", "united kingdom", "britain",
-		"germany", "france", "italy", "spain",
-		"australia", "japan", "china", "india",
-		"brazil", "russia", "mexico",
-		"earth", "world", "planet earth",
-	}
-
-	for _, vague := range vagueLocations {
-		if location == vague {
-			d.logger.Debug("location too vague for geocoding", "username", username, "location", user.Location)
-			return nil
-		}
-	}
-
-	coords, err := d.geocodeLocation(ctx, user.Location)
-	if err != nil {
-		d.logger.Warn("geocoding failed - continuing without location data", "username", username, "location", user.Location, "error", err)
-		return nil
-	}
-
-	d.logger.Debug("geocoded location", "username", username, "location", user.Location,
-		"latitude", coords.Latitude, "longitude", coords.Longitude)
-
-	timezone, err := d.timezoneForCoordinates(ctx, coords.Latitude, coords.Longitude)
-	if err != nil {
-		d.logger.Warn("timezone lookup failed - continuing without timezone data", "username", username, "coordinates",
-			fmt.Sprintf("%.4f,%.4f", coords.Latitude, coords.Longitude), "error", err)
-		return nil
-	}
-
-	d.logger.Debug("determined timezone from coordinates", "username", username,
-		"location", user.Location, "timezone", timezone)
-
-	return &Result{
-		Username:     username,
-		Timezone:     timezone,
-		Location:     coords,
-		LocationName: user.Location,
-		Confidence:   0.8, // Higher confidence from API-based detection
-		Method:       "location_geocoding",
-	}
-}
-
 // tryUnifiedGeminiAnalysisWithEvents uses Gemini with provided events data.
-
-
 
 // calculateTypicalActiveHours determines typical work hours based on activity patterns
 // It uses percentiles to exclude outliers (e.g., occasional early starts or late nights).
 
 // findSleepHours looks for extended periods of zero or near-zero activity
 // This is more reliable than finding "quiet" hours which might just be evening time.
-
-
-
-
 
 func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) string {
 	if blogURL == "" {
@@ -846,7 +679,7 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 }
 
 // tryProfileScrapingWithContext tries to extract timezone from profile HTML using UserContext
-func (d *Detector) tryProfileScrapingWithContext(ctx context.Context, userCtx *UserContext) *Result {
+func (d *Detector) tryProfileScrapingWithContext(_ context.Context, userCtx *UserContext) *Result {
 	html := userCtx.ProfileHTML
 	if html == "" {
 		return nil

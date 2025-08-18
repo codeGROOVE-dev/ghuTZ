@@ -2,7 +2,7 @@ package ghutz
 
 import (
 	"testing"
-	
+
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
 )
 
@@ -61,35 +61,35 @@ func TestIdlePhysicistRealLunchDetection(t *testing.T) {
 		23.0: 15, // 23:00 UTC
 		23.5: 0,  // 23:30 UTC
 	}
-	
+
 	// From the debug output, we see the actual counts in the lunch window:
 	// For UTC-6:
 	//   13.0 local (19.0 UTC): 12 events
 	//   13.5 local (19.5 UTC): 5 events
 	// This is the actual drop we're looking for
-	
+
 	// Override with the actual values from debug output
-	halfHourCounts[16.0] = 6   // 10:00 MST
-	halfHourCounts[16.5] = 9   // 10:30 MST
-	halfHourCounts[17.0] = 8   // 11:00 MST
-	halfHourCounts[17.5] = 15  // 11:30 MST
-	halfHourCounts[18.0] = 10  // 12:00 MST
-	halfHourCounts[18.5] = 11  // 12:30 MST
-	halfHourCounts[19.0] = 12  // 13:00 MST - actual lunch time
-	halfHourCounts[19.5] = 5   // 13:30 MST - lunch drop!
-	halfHourCounts[20.0] = 11  // 14:00 MST
-	halfHourCounts[20.5] = 6   // 14:30 MST
+	halfHourCounts[16.0] = 6  // 10:00 MST
+	halfHourCounts[16.5] = 9  // 10:30 MST
+	halfHourCounts[17.0] = 8  // 11:00 MST
+	halfHourCounts[17.5] = 15 // 11:30 MST
+	halfHourCounts[18.0] = 10 // 12:00 MST
+	halfHourCounts[18.5] = 11 // 12:30 MST
+	halfHourCounts[19.0] = 12 // 13:00 MST - actual lunch time
+	halfHourCounts[19.5] = 5  // 13:30 MST - lunch drop!
+	halfHourCounts[20.0] = 11 // 14:00 MST
+	halfHourCounts[20.5] = 6  // 14:30 MST
 
 	// Test for UTC-6 (Mountain Standard Time)
 	offset := -6
-	
+
 	// Detect lunch for this timezone
 	lunchStart, lunchEnd, confidence := lunch.DetectLunchBreakNoonCentered(halfHourCounts, offset)
-	
+
 	// Convert UTC lunch times to local Mountain Time
 	lunchStartLocal := lunchStart + float64(offset)
 	lunchEndLocal := lunchEnd + float64(offset)
-	
+
 	// Normalize to 24-hour format
 	if lunchStartLocal < 0 {
 		lunchStartLocal += 24
@@ -97,33 +97,33 @@ func TestIdlePhysicistRealLunchDetection(t *testing.T) {
 	if lunchEndLocal < 0 {
 		lunchEndLocal += 24
 	}
-	
+
 	// From the debug output, we expect lunch at 13:30 local (19:30 UTC)
 	// with a 58.3% drop from 12 to 5 events
-	
+
 	if confidence <= 0 {
 		t.Errorf("Failed to detect lunch break for IdlePhysicist in Mountain Time")
 	}
-	
+
 	// The algorithm now prefers noon-centered lunches, so it detects 12:00
 	// This is actually reasonable - the 12:00 slot has a 33% drop
 	// While 13:30 has a stronger 58% drop, the noon preference wins
 	if lunchStartLocal < 11.5 || lunchStartLocal > 13.5 {
 		t.Errorf("Lunch start time incorrect: got %.1f MST, expected around 12:00-13:30 MST", lunchStartLocal)
 	}
-	
+
 	// The confidence should be high given the 58.3% drop
 	if confidence < 0.5 {
 		t.Errorf("Lunch confidence too low: got %.2f, expected > 0.5 for 58%% drop", confidence)
 	}
-	
-	t.Logf("Detected lunch: %.1f-%.1f MST (%.1f-%.1f UTC) with confidence %.2f", 
+
+	t.Logf("Detected lunch: %.1f-%.1f MST (%.1f-%.1f UTC) with confidence %.2f",
 		lunchStartLocal, lunchEndLocal, lunchStart, lunchEnd, confidence)
-	
+
 	// Verify this matches what the actual algorithm detected
 	expectedLunchStartLocal := 13.5 // From debug: "Result: LUNCH DETECTED at 13.5 local"
 	if lunchStartLocal != expectedLunchStartLocal {
-		t.Logf("Note: Algorithm detected lunch at %.1f, expected %.1f based on debug output", 
+		t.Logf("Note: Algorithm detected lunch at %.1f, expected %.1f based on debug output",
 			lunchStartLocal, expectedLunchStartLocal)
 	}
 }

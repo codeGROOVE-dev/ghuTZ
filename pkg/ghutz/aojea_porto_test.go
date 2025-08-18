@@ -2,7 +2,7 @@ package ghutz
 
 import (
 	"testing"
-	
+
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
 )
 
@@ -66,8 +66,8 @@ func TestAojeaPortoDetection(t *testing.T) {
 		10.0: 14,
 		10.5: 28, // peak
 		11.0: 14,
-		11.5: 2,  // lunch starts
-		12.0: 3,  // lunch continues (81% drop from 16 to 3)
+		11.5: 2, // lunch starts
+		12.0: 3, // lunch continues (81% drop from 16 to 3)
 		12.5: 4,
 		13.0: 10,
 		13.5: 10,
@@ -77,8 +77,8 @@ func TestAojeaPortoDetection(t *testing.T) {
 		15.5: 5,
 		16.0: 6,
 		16.5: 16,
-		17.0: 3,  // commute
-		17.5: 1,  // commute
+		17.0: 3, // commute
+		17.5: 1, // commute
 		18.0: 3,
 		18.5: 10,
 		19.0: 8,
@@ -105,11 +105,11 @@ func TestAojeaPortoDetection(t *testing.T) {
 
 	// Test lunch detection for UTC+0
 	lunchStart, lunchEnd, confidence := lunch.DetectLunchBreakNoonCentered(halfHourCounts, offset)
-	
+
 	// Convert to local time
 	lunchStartLocal := lunchStart + float64(offset)
 	lunchEndLocal := lunchEnd + float64(offset)
-	
+
 	// Normalize to 24-hour format
 	for lunchStartLocal < 0 {
 		lunchStartLocal += 24
@@ -117,15 +117,15 @@ func TestAojeaPortoDetection(t *testing.T) {
 	for lunchEndLocal < 0 {
 		lunchEndLocal += 24
 	}
-	
+
 	t.Logf("Detected lunch: %.1f-%.1f local (%.1f-%.1f UTC) with confidence %.2f",
 		lunchStartLocal, lunchEndLocal, lunchStart, lunchEnd, confidence)
-	
+
 	// Expect lunch around noon (11:30-13:00 is acceptable)
 	if lunchStartLocal < 11.0 || lunchStartLocal > 13.0 {
 		t.Errorf("Lunch start incorrect: got %.1f local, expected 11:30-13:00", lunchStartLocal)
 	}
-	
+
 	// Confidence should be high given the clear drop
 	if confidence < 0.6 {
 		t.Errorf("Lunch confidence too low: got %.2f, expected > 0.6", confidence)
@@ -133,7 +133,7 @@ func TestAojeaPortoDetection(t *testing.T) {
 
 	// Verify key patterns that identify Portugal
 	t.Logf("\nKey Portugal indicators:")
-	
+
 	// 1. Work starts at reasonable hour (7am)
 	firstSignificantActivity := -1
 	for hour := 0; hour < 24; hour++ {
@@ -146,7 +146,7 @@ func TestAojeaPortoDetection(t *testing.T) {
 		t.Errorf("First significant activity wrong: got %d UTC, expected 7 UTC", firstSignificantActivity)
 	}
 	t.Logf("✓ Work starts at %d:00 UTC = %d:00 local", firstSignificantActivity, firstSignificantActivity+offset)
-	
+
 	// 2. Peak productivity in morning (10am local)
 	peakHour := -1
 	peakCount := 0
@@ -160,13 +160,13 @@ func TestAojeaPortoDetection(t *testing.T) {
 		t.Errorf("Peak hour wrong: got %d UTC, expected 10 UTC", peakHour)
 	}
 	t.Logf("✓ Peak productivity at %d:00 UTC = %d:00 local (%d events)", peakHour, peakHour+offset, peakCount)
-	
+
 	// 3. Commute quiet hour at 17:00 UTC (5pm local)
 	if hourCounts[17] > 5 {
 		t.Errorf("Expected quiet commute hour at 17:00 UTC, got %d events", hourCounts[17])
 	}
 	t.Logf("✓ Commute quiet hour at 17:00 UTC = 17:00 local (%d events)", hourCounts[17])
-	
+
 	// 4. Evening activity after commute
 	eveningActivity := 0
 	for hour := 18; hour <= 23; hour++ {
@@ -176,17 +176,17 @@ func TestAojeaPortoDetection(t *testing.T) {
 		t.Errorf("Expected significant evening activity, got only %d events", eveningActivity)
 	}
 	t.Logf("✓ Evening activity 18-23 UTC = 18-23 local (%d events total)", eveningActivity)
-	
+
 	// 5. Verify that US timezones would be absurd
 	t.Logf("\nWhy US timezones fail:")
-	
+
 	// UTC-5 (US Eastern)
 	eastWorkStart := (7 - 5 + 24) % 24 // 2am
 	t.Logf("✗ UTC-5: Work would start at %dam (absurd!)", eastWorkStart)
-	
+
 	// UTC-7 (US Mountain/Pacific DST)
 	pacificWorkStart := (7 - 7 + 24) % 24 // midnight
 	t.Logf("✗ UTC-7: Work would start at %dam (even more absurd!)", pacificWorkStart)
-	
+
 	t.Logf("\n✅ Pattern clearly indicates Porto, Portugal (UTC+0)")
 }

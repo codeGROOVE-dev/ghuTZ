@@ -483,15 +483,15 @@ func handleAPIDetect(detector *ghutz.Detector, logger *slog.Logger) http.Handler
 			"confidence", result.TimezoneConfidence,
 			"activity_date_range", result.ActivityDateRange,
 			"hourly_activity_count", len(result.HourlyActivityUTC))
-		
+
 		// Log the top organizations if present
 		if len(result.TopOrganizations) > 0 {
 			var orgNames []string
 			for _, org := range result.TopOrganizations {
 				orgNames = append(orgNames, fmt.Sprintf("%s(%d)", org.Name, org.Count))
 			}
-			logger.Info("Top organizations detected", 
-				"username", req.Username, 
+			logger.Info("Top organizations detected",
+				"username", req.Username,
 				"organizations", strings.Join(orgNames, ", "))
 		}
 
