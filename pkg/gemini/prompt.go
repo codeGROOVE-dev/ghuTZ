@@ -67,6 +67,7 @@ DETECTION PRIORITIES (subject to above constraint):
    - Return the most appropriate and specific tz database entry for this user. For example, use Europe/Warsaw if we think they are in Poland, and Europe/Berlin if we think they are in Germany.
    - For US Mountain timezone, use America/Denver (or America/Phoenix for Arizona)
    - Look carefully at the activity period, as it may cross a daylight savings time boundary. Give the appropriate timezone for the current moment (now).
+   - If the timezone overlaps with the United States of America, and you don't see any clues that lean toward another country, default to the USA
 
 7. Location Generation
 	- Guess a specific city in the timezone that would be the most likely with all evidence given: maybe it's just the biggest tech hub, or maybe you saw clues in the repository names or indicated hobbies
@@ -74,7 +75,7 @@ DETECTION PRIORITIES (subject to above constraint):
 	  • BVSP/Bovespa in repos = Brazil (São Paulo likely)
 	  • Portuguese content, .br domains = Brazil
 	  • German surname + UTC-3 = Often Southern Brazil (Florianópolis, Porto Alegre, Curitiba)
-	  • If no evidence for Brazel or Argentina exists, assume UTC-3 users are actually in the United States
+	  • If no evidence for Brazil or Argentina exists, assume UTC-3 users are actually in the United States
 	- You must make a guess. It's OK if your guess is incorrect, close is good enough.
 
 Return JSON only:

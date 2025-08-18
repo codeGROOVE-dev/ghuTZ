@@ -11,7 +11,7 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, timezone string) 
 		HalfHourlyActivityUTC:      result.HalfHourlyActivityUTC,
 		HourlyOrganizationActivity: result.HourlyOrganizationActivity,
 		TopOrganizations:           convertOrgActivities(result.TopOrganizations),
-		QuietHoursUTC:              result.QuietHoursUTC,
+		QuietHoursUTC:              result.SleepHoursUTC,
 		SleepBucketsUTC:            result.SleepBucketsUTC,
 		PeakProductivity:           convertPeakProductivity(result.PeakProductivity),
 		LunchHoursUTC:              convertLunchBreak(result.LunchHoursUTC),

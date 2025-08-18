@@ -82,7 +82,7 @@ function displayResults(data) {
     document.getElementById('hoursRow').style.display = 'none';
     document.getElementById('lunchRow').style.display = 'none';
     document.getElementById('peakRow').style.display = 'none';
-    document.getElementById('quietRow').style.display = 'none';
+    document.getElementById('sleepRow').style.display = 'none';
     document.getElementById('orgsRow').style.display = 'none';
     document.getElementById('activitySummaryRow').style.display = 'none';
     document.getElementById('histogramRow').style.display = 'none';
@@ -147,12 +147,12 @@ function displayResults(data) {
         document.getElementById('peakRow').style.display = 'block';
     }
 
-    if (data.quiet_hours_utc && data.quiet_hours_utc.length > 0) {
-        // Convert UTC quiet hours to local based on timezone (utcOffset already calculated above)
-        const quietStart = (data.quiet_hours_utc[0] + utcOffset + 24) % 24;
-        const quietEnd = ((data.quiet_hours_utc[data.quiet_hours_utc.length - 1] + 1 + utcOffset) + 24) % 24;
-        document.getElementById('quietHours').textContent = formatHour(quietStart) + '-' + formatHour(quietEnd);
-        document.getElementById('quietRow').style.display = 'block';
+    if (data.sleep_hours_utc && data.sleep_hours_utc.length > 0) {
+        // Convert UTC sleep hours to local based on timezone (utcOffset already calculated above)
+        const sleepStart = (data.sleep_hours_utc[0] + utcOffset + 24) % 24;
+        const sleepEnd = ((data.sleep_hours_utc[data.sleep_hours_utc.length - 1] + 1 + utcOffset) + 24) % 24;
+        document.getElementById('sleepHours').textContent = formatHour(sleepStart) + '-' + formatHour(sleepEnd);
+        document.getElementById('sleepRow').style.display = 'block';
     }
 
     if (data.top_organizations && data.top_organizations.length > 0) {

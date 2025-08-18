@@ -174,7 +174,7 @@ func main() {
 				modifiedResult := *result
 				modifiedResult.LunchHoursUTC = ghutz.LunchBreak{} // Clear lunch markers
 				modifiedResult.PeakProductivity = ghutz.PeakTime{} // Clear peak markers
-				modifiedResult.QuietHoursUTC = nil // Clear quiet hour markers
+				modifiedResult.SleepHoursUTC = nil // Clear sleep hour markers
 				modifiedResult.SleepBucketsUTC = nil // Clear sleep markers
 				displayResult = &modifiedResult
 			}
@@ -275,27 +275,27 @@ func printWorkSchedule(result *ghutz.Result) {
 				result.Timezone)
 		}
 
-		// Add quiet hours (sleep/family time)
-		if len(result.QuietHoursUTC) > 0 {
-			// Convert UTC quiet hours to local hours
-			var localQuietHours []int
-			for _, utcHour := range result.QuietHoursUTC {
+		// Add sleep hours
+		if len(result.SleepHoursUTC) > 0 {
+			// Convert UTC sleep hours to local hours
+			var localSleepHours []int
+			for _, utcHour := range result.SleepHoursUTC {
 				localHour := int(convertUTCToLocal(float64(utcHour), result.Timezone))
-				localQuietHours = append(localQuietHours, localHour)
+				localSleepHours = append(localSleepHours, localHour)
 			}
 
-			// Group consecutive quiet hours into ranges
-			type quietRange struct {
+			// Group consecutive sleep hours into ranges
+			type sleepRange struct {
 				start, end int
 			}
 
-			var ranges []quietRange
-			if len(localQuietHours) > 0 {
-				currentStart := localQuietHours[0]
-				currentEnd := localQuietHours[0]
+			var ranges []sleepRange
+			if len(localSleepHours) > 0 {
+				currentStart := localSleepHours[0]
+				currentEnd := localSleepHours[0]
 
-				for i := 1; i < len(localQuietHours); i++ {
-					hour := localQuietHours[i]
+				for i := 1; i < len(localSleepHours); i++ {
+					hour := localSleepHours[i]
 
 					// Check if this hour is consecutive (handle day wraparound)
 					isConsecutive := false
@@ -311,14 +311,14 @@ func printWorkSchedule(result *ghutz.Result) {
 						currentEnd = hour
 					} else {
 						// End current range and start new one
-						ranges = append(ranges, quietRange{currentStart, (currentEnd + 1) % 24})
+						ranges = append(ranges, sleepRange{currentStart, (currentEnd + 1) % 24})
 						currentStart = hour
 						currentEnd = hour
 					}
 				}
 
 				// Add the final range
-				ranges = append(ranges, quietRange{currentStart, (currentEnd + 1) % 24})
+				ranges = append(ranges, sleepRange{currentStart, (currentEnd + 1) % 24})
 			}
 
 			// Format and display ranges with timezone
@@ -329,7 +329,7 @@ func printWorkSchedule(result *ghutz.Result) {
 						formatHour(float64(r.start)),
 						formatHour(float64(r.end))))
 				}
-				fmt.Printf("\n💤 Quiet Time:    %s (%s)", strings.Join(rangeStrings, ", "), result.Timezone)
+				fmt.Printf("\n💤 Sleep Time:    %s (%s)", strings.Join(rangeStrings, ", "), result.Timezone)
 			}
 		}
 

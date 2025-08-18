@@ -127,7 +127,7 @@ type Result struct {
 	GeminiPrompt               string                 `json:"gemini_prompt,omitempty"`
 	ActivityDateRange          DateRange              `json:"activity_date_range,omitempty"`
 	TopOrganizations           []OrgActivity          `json:"top_organizations"`
-	QuietHoursUTC              []int                  `json:"quiet_hours_utc,omitempty"`
+	SleepHoursUTC              []int                  `json:"sleep_hours_utc,omitempty"`
 	SleepBucketsUTC            []float64              `json:"sleep_buckets_utc,omitempty"`
 	LunchHoursUTC              LunchBreak             `json:"lunch_hours_utc,omitempty"`
 	PeakProductivity           PeakTime               `json:"peak_productivity"`

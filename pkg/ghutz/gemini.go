@@ -145,8 +145,8 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	if activityResult != nil {
 		contextData["activity_result"] = activityResult
 		
-		if activityResult.QuietHoursUTC != nil {
-			contextData["quiet_hours"] = activityResult.QuietHoursUTC
+		if activityResult.SleepHoursUTC != nil {
+			contextData["sleep_hours"] = activityResult.SleepHoursUTC
 		}
 		
 		if activityResult.HourlyActivityUTC != nil {
@@ -411,7 +411,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 
 	if activityResult != nil {
 		result.ActiveHoursLocal = activityResult.ActiveHoursLocal
-		result.QuietHoursUTC = activityResult.QuietHoursUTC
+		result.SleepHoursUTC = activityResult.SleepHoursUTC
 		result.SleepBucketsUTC = activityResult.SleepBucketsUTC
 		result.HourlyActivityUTC = activityResult.HourlyActivityUTC
 		result.HalfHourlyActivityUTC = activityResult.HalfHourlyActivityUTC

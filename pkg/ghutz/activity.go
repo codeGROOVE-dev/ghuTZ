@@ -1582,7 +1582,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		Username:         username,
 		Timezone:         timezone,
 		ActivityTimezone: timezone, // Pure activity-based result
-		QuietHoursUTC:    quietHours,
+		SleepHoursUTC:    quietHours,
 		SleepBucketsUTC:  sleepBuckets, // 30-minute resolution sleep periods
 		ActiveHoursLocal: struct {
 			Start float64 `json:"start"`

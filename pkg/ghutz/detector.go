@@ -253,7 +253,7 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 		"activityResult.Timezone", activityResult.Timezone,
 		"has_candidates", activityResult.TimezoneCandidates != nil)
 	result.ActivityTimezone = activityResult.ActivityTimezone
-	result.QuietHoursUTC = activityResult.QuietHoursUTC
+	result.SleepHoursUTC = activityResult.SleepHoursUTC
 	result.SleepBucketsUTC = activityResult.SleepBucketsUTC
 	result.ActiveHoursLocal = activityResult.ActiveHoursLocal
 	result.LunchHoursUTC = activityResult.LunchHoursUTC
