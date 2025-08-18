@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/social"
 )
 
 func TestMastodonAPIExtraction(t *testing.T) {
@@ -27,25 +29,38 @@ func TestMastodonAPIExtraction(t *testing.T) {
 	
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Test the API function
-			profileData := fetchMastodonProfileViaAPI(ctx, tt.mastodonURL, logger)
+			// Test using the social package
+			socialData := map[string]string{
+				"mastodon": tt.mastodonURL,
+			}
+			extracted := social.Extract(ctx, socialData, logger)
 			
-			if profileData == nil {
+			if len(extracted) == 0 || extracted[0].Kind != "mastodon" {
 				t.Skip("Could not fetch Mastodon profile - API may be down or account may not exist")
 			}
 			
+			profileData := extracted[0]
 			t.Logf("Mastodon Profile for %s:", tt.mastodonURL)
 			t.Logf("  Bio: %s", profileData.Bio)
-			t.Logf("  Joined: %s", profileData.JoinedDate)
-			t.Logf("  Fields: %v", profileData.ProfileFields)
-			t.Logf("  Websites: %v", profileData.Websites)
-			t.Logf("  Hashtags: %v", profileData.Hashtags)
+			t.Logf("  Joined: %s", profileData.Joined)
+			t.Logf("  Fields: %v", profileData.Fields)
+			t.Logf("  Tags: %v", profileData.Tags)
 			
 			if tt.expectBio && profileData.Bio == "" {
 				t.Error("Expected bio to be present")
 			}
 			
-			if tt.expectWebsites && len(profileData.Websites) == 0 {
+			// Check for websites in fields
+			websiteCount := 0
+			for key := range profileData.Fields {
+				lowerKey := strings.ToLower(key)
+				if strings.Contains(lowerKey, "website") || strings.Contains(lowerKey, "blog") ||
+				   strings.Contains(lowerKey, "home") || strings.Contains(lowerKey, "url") {
+					websiteCount++
+				}
+			}
+			
+			if tt.expectWebsites && websiteCount == 0 {
 				t.Error("Expected websites to be found")
 			}
 		})
