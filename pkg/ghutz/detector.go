@@ -20,6 +20,7 @@ import (
 	"github.com/codeGROOVE-dev/retry"
 	md "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/httpcache"
 )
 
 // SECURITY: GitHub token patterns for validation.
@@ -64,7 +65,7 @@ type Detector struct {
 	logger        *slog.Logger
 	httpClient    *http.Client
 	forceActivity bool
-	cache         *OtterCache
+	cache         *httpcache.OtterCache
 	githubClient  *github.Client
 }
 
@@ -187,7 +188,7 @@ func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *De
 	}
 
 	// Initialize cache
-	var cache *OtterCache
+	var cache *httpcache.OtterCache
 	var cacheDir string
 
 	if optHolder.cacheDir != "" {
@@ -202,7 +203,7 @@ func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *De
 
 	if cacheDir != "" {
 		var err error
-		cache, err = NewOtterCache(ctx, cacheDir, 20*24*time.Hour, logger)
+		cache, err = httpcache.NewOtterCache(ctx, cacheDir, 20*24*time.Hour, logger)
 		if err != nil {
 			logger.Warn("cache initialization failed", "error", err, "cache_dir", cacheDir)
 			// Cache is optional, continue without it
