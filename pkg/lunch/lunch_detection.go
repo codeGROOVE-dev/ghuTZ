@@ -1,8 +1,16 @@
-package ghutz
+package lunch
 
 import (
 	"math"
 )
+
+// GlobalLunchPattern represents a detected lunch pattern in UTC time
+type GlobalLunchPattern struct {
+	StartUTC    float64
+	EndUTC      float64
+	Confidence  float64
+	DropPercent float64
+}
 
 // DetectLunchBreakNoonCentered looks for lunch breaks in the 10am-2:30pm window
 // SIMPLIFIED VERSION - just find ANY drop in activity  
@@ -343,4 +351,125 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 	confidence = math.Min(1.0, confidence)
 	
 	return startUTC, endUTC, confidence
+}
+
+// FindBestGlobalLunchPattern finds the best lunch pattern globally in UTC time
+// This is timezone-independent and looks for the strongest activity drop + recovery pattern
+func FindBestGlobalLunchPattern(halfHourCounts map[float64]int) GlobalLunchPattern {
+	// Calculate average activity to establish baseline
+	totalActivity := 0
+	totalBuckets := 0
+	for _, count := range halfHourCounts {
+		totalActivity += count
+		totalBuckets++
+	}
+	
+	if totalBuckets == 0 {
+		return GlobalLunchPattern{StartUTC: -1, Confidence: 0}
+	}
+	
+	avgActivity := float64(totalActivity) / float64(totalBuckets)
+	if avgActivity < 1 {
+		return GlobalLunchPattern{StartUTC: -1, Confidence: 0}
+	}
+	
+	bestPattern := GlobalLunchPattern{StartUTC: -1, Confidence: 0}
+	bestScore := 0.0
+	
+	// Look for lunch breaks of 30, 60, or 90 minutes (1, 2, or 3 buckets)
+	durations := []int{1, 2, 3}
+	
+	for _, duration := range durations {
+		// Restrict search to reasonable global lunch window (15:00-21:00 UTC)
+		// This covers 11am-2pm across US timezones (-4 to -8), Europe (+1 to +3), and Asia (+8 to +9)
+		for startBucket := 15.0; startBucket < 21.0; startBucket += 0.5 {
+			endBucket := startBucket + float64(duration)*0.5
+			
+			// Get surrounding buckets for comparison
+			prevBucket := startBucket - 0.5
+			if prevBucket < 0 {
+				prevBucket += 24
+			}
+			nextBucket := endBucket
+			if nextBucket >= 24 {
+				nextBucket -= 24
+			}
+			
+			prevCount := halfHourCounts[prevBucket]
+			startCount := halfHourCounts[startBucket]
+			afterCount := halfHourCounts[nextBucket]
+			
+			// Skip if no data for comparison
+			if prevCount == 0 {
+				continue
+			}
+			dropPercent := (float64(prevCount) - float64(startCount)) / float64(prevCount)
+			
+			// Calculate recovery factor
+			recoveryFactor := 1.0
+			if startCount > 0 && afterCount > startCount {
+				recoveryFactor = float64(afterCount) / float64(startCount)
+			}
+			
+			// Calculate average lunch activity
+			lunchTotal := 0
+			lunchBuckets := 0
+			for b := startBucket; b < endBucket; b += 0.5 {
+				bucket := b
+				if bucket >= 24 {
+					bucket -= 24
+				}
+				lunchTotal += halfHourCounts[bucket]
+				lunchBuckets++
+			}
+			
+			if lunchBuckets == 0 {
+				continue
+			}
+			avgLunchActivity := float64(lunchTotal) / float64(lunchBuckets)
+			
+			// Check if this qualifies as a lunch pattern
+			minDropThreshold := 0.25 // 25% minimum drop
+			if recoveryFactor >= 2.0 {
+				minDropThreshold = 0.15 // Allow smaller drops with strong recovery
+			}
+			
+			
+			if dropPercent > minDropThreshold && avgLunchActivity <= avgActivity*0.8 {
+				// Score this pattern
+				score := 0.0
+				
+				// Prefer stronger drops
+				score += dropPercent * 100
+				
+				// Prefer lower lunch activity
+				quietness := 1.0 - (avgLunchActivity / avgActivity)
+				score += quietness * 50
+				
+				// Boost for strong recovery
+				if recoveryFactor >= 1.5 {
+					score += (recoveryFactor - 1.0) * 30
+				}
+				
+				// Prefer 60-minute lunches
+				if duration == 2 {
+					score += 20
+				}
+				
+				// Track the best pattern
+				if score > bestScore {
+					bestScore = score
+					bestPattern = GlobalLunchPattern{
+						StartUTC:    startBucket,
+						EndUTC:      endBucket,
+						Confidence:  math.Min(1.0, score/100.0), // Normalize to 0-1
+						DropPercent: dropPercent,
+					}
+				}
+				
+			}
+		}
+	}
+	
+	return bestPattern
 }
