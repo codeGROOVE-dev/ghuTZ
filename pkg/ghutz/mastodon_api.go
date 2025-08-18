@@ -130,12 +130,19 @@ func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger 
 	// Extract bio (strip HTML)
 	profileData.Bio = stripHTML(account.Note)
 	
+	// Log the bio content
+	logger.Debug("extracted Mastodon bio",
+		"username", account.Username,
+		"bio", profileData.Bio,
+		"bio_length", len(profileData.Bio))
+	
 	// Extract hashtags from bio
 	hashtagPattern := regexp.MustCompile(`#(\w+)`)
 	hashtagMatches := hashtagPattern.FindAllStringSubmatch(profileData.Bio, -1)
 	for _, match := range hashtagMatches {
 		if len(match) > 1 {
 			profileData.Hashtags = append(profileData.Hashtags, match[1])
+			logger.Debug("found hashtag in Mastodon bio", "hashtag", match[1])
 		}
 	}
 	
@@ -198,7 +205,9 @@ func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger 
 		"display_name", account.DisplayName,
 		"bio_length", len(profileData.Bio),
 		"fields_count", len(account.Fields),
-		"websites_found", len(profileData.Websites))
+		"websites_found", len(profileData.Websites),
+		"hashtags_found", len(profileData.Hashtags),
+		"hashtags", profileData.Hashtags)
 	
 	return profileData
 }

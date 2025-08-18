@@ -1,7 +1,7 @@
-package ghutz
+package gemini
 
-// unifiedGeminiPrompt returns the streamlined prompt for timezone detection
-func unifiedGeminiPrompt() string {
+// UnifiedPrompt returns the streamlined prompt for timezone detection
+func UnifiedPrompt() string {
 	return `Analyze this GitHub user's location based on digital evidence. ALWAYS provide a specific location guess.
 
 EVIDENCE:
@@ -21,7 +21,6 @@ DETECTION PRIORITIES (subject to above constraint):
    - Government/civic repos suggest location IF compatible with activity patterns
    - US state names/codes in repos = US location (but must match activity timezone)
    - 🇧🇷 CRITICAL: BVSP/Bovespa repositories = Brazilian Stock Exchange = STRONG Brazil signal (prefer over Argentina)
-   - "bov-stream: Realtime BVSP stock price analysis" = Working with Brazilian financial data = Brazil location
    - If someone with a Russian name isn't contributing to Russian projects, chances are they are in another country in the same timezone, like Australia.
 
 2. NAME CLUES (ONLY to disambiguate between viable candidates):
@@ -48,16 +47,15 @@ DETECTION PRIORITIES (subject to above constraint):
    - Work before 5am local = wrong timezone (5-6am acceptable for some)
    - Lunch outside 11am-2:30pm = wrong timezone likely
    - Sleep period should be 6+ hours of low activity
-   - Evening activity (7-11pm) is common for developers
+   - Evening activity (7-11pm) is common for open-source developers, but not universal
    - If activity shows clear sleep/work/lunch patterns, trust them over geographic hints
 
 4. HOBBY & INTEREST SIGNALS (STRONG REGIONAL INDICATORS):
    - 🏔️ Caving/spelunking interests + US timezone = HIGH chance of Mountain timezone (Colorado, Utah, New Mexico)
    - 🧗 Rock climbing/mountaineering + US = Mountain or Pacific timezone likely
    - Skiing/snowboarding repositories + US = Mountain states (Colorado, Utah) or Northeast
-   - Cave surveying software (Therion, Survex) = caving community, often Mountain states
    - Desert/canyon references + US = Southwest (Arizona, Utah, New Mexico)
-   - If user has "Caver" in bio and shows US timezone, strongly consider Mountain Time
+   - Location hints from social media or personal websites should weigh heavily on your recommendation
 
 5. LINGUISTIC HINTS:
    - British vs American spelling
@@ -76,9 +74,7 @@ DETECTION PRIORITIES (subject to above constraint):
 	  • BVSP/Bovespa in repos = Brazil (São Paulo likely)
 	  • Portuguese content, .br domains = Brazil
 	  • German surname + UTC-3 = Often Southern Brazil (Florianópolis, Porto Alegre, Curitiba)
-	- Brazilian tech hubs in UTC-3: São Paulo, Rio de Janeiro, Porto Alegre, Florianópolis, Curitiba
-	- Argentine tech hubs in UTC-3: Buenos Aires, Córdoba, Rosario
-	- Default to Brazil over Argentina when you see financial/stock market repos with BVSP
+	  • If no evidence for Brazel or Argentina exists, assume UTC-3 users are actually in the United States
 	- You must make a guess. It's OK if your guess is incorrect, close is good enough.
 
 Return JSON only:

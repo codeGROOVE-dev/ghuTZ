@@ -125,18 +125,7 @@ func main() {
 		return
 	}
 
-	// When verbose, show Gemini prompt and reasoning before results
-	if *verbose && result.GeminiPrompt != "" {
-		fmt.Printf("\n🤖 Gemini Prompt:\n")
-		fmt.Println(strings.Repeat("─", 50))
-		fmt.Printf("%s\n\n", result.GeminiPrompt)
-
-		if result.GeminiReasoning != "" {
-			fmt.Printf("🧠 Gemini Reasoning:\n")
-			fmt.Println(strings.Repeat("─", 50))
-			fmt.Printf("%s\n\n", result.GeminiReasoning)
-		}
-	}
+	// Removed - Gemini info now shown after activity pattern
 
 	// Print results in CLI format
 	printResult(result)
@@ -193,6 +182,11 @@ func main() {
 		
 		histogramOutput := ghutz.GenerateHistogram(displayResult, displayResult.HourlyActivityUTC, displayTimezone)
 		fmt.Print(histogramOutput)
+	}
+
+	// Show Gemini information after activity pattern when verbose
+	if *verbose {
+		printGeminiInfo(result)
 	}
 }
 
@@ -459,6 +453,27 @@ func formatMethodName(method string) string {
 		return name
 	}
 	return method
+}
+
+func printGeminiInfo(result *ghutz.Result) {
+	if result.GeminiPrompt == "" && result.GeminiReasoning == "" {
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("🤖 Gemini Analysis")
+	fmt.Println(strings.Repeat("─", 50))
+
+	if result.GeminiPrompt != "" {
+		fmt.Println("\n📝 Prompt:")
+		fmt.Println(result.GeminiPrompt)
+	}
+
+	if result.GeminiReasoning != "" {
+		fmt.Println("\n💭 Response:")
+		fmt.Println(result.GeminiReasoning)
+	}
+	fmt.Println()
 }
 
 // convertUTCToLocal converts a UTC hour (float) to local time using Go's timezone database

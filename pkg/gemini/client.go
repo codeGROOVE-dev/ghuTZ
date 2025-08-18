@@ -1,4 +1,4 @@
-package ghutz
+package gemini
 
 import (
 	"context"
@@ -12,28 +12,59 @@ import (
 	"google.golang.org/genai"
 )
 
-// callGeminiWithSDK calls the Gemini API using the official SDK.
-func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose bool) (*geminiResponse, error) {
+// Response represents the Gemini API response structure
+type Response struct {
+	DetectedTimezone   string `json:"detected_timezone"`
+	DetectedLocation   string `json:"detected_location"`
+	ConfidenceLevel    string `json:"confidence_level"` // "high", "medium", or "low"
+	DetectionReasoning string `json:"detection_reasoning"`
+	
+	// Fallback fields for old format (deprecated)
+	Timezone       string      `json:"timezone,omitempty"`
+	Location       string      `json:"location,omitempty"`
+	LocationSource string      `json:"location_source,omitempty"`
+	Confidence     interface{} `json:"confidence,omitempty"`
+	Reasoning      string      `json:"reasoning,omitempty"`
+}
+
+// Client represents a Gemini API client
+type Client struct {
+	apiKey     string
+	model      string
+	gcpProject string
+}
+
+// NewClient creates a new Gemini API client
+func NewClient(apiKey, model, gcpProject string) *Client {
+	return &Client{
+		apiKey:     apiKey,
+		model:      model,
+		gcpProject: gcpProject,
+	}
+}
+
+// CallWithSDK calls the Gemini API using the official SDK.
+func (c *Client) CallWithSDK(ctx context.Context, prompt string, verbose bool, cache CacheInterface, logger Logger) (*Response, error) {
 	// Check cache first if available
-	cacheKey := fmt.Sprintf("genai:%s:%s", d.geminiModel, prompt)
-	if d.cache != nil {
-		if cachedData, found := d.cache.APICall(cacheKey, []byte(prompt)); found {
-			d.logger.Debug("Gemini SDK cache hit", "cache_data_length", len(cachedData))
-			var result geminiResponse
+	cacheKey := fmt.Sprintf("genai:%s:%s", c.model, prompt)
+	if cache != nil {
+		if cachedData, found := cache.APICall(cacheKey, []byte(prompt)); found {
+			logger.Debug("Gemini SDK cache hit", "cache_data_length", len(cachedData))
+			var result Response
 			if err := json.Unmarshal(cachedData, &result); err != nil {
-				d.logger.Debug("Failed to unmarshal cached Gemini response", "error", err)
+				logger.Debug("Failed to unmarshal cached Gemini response", "error", err)
 			} else if result.DetectedTimezone != "" || result.Timezone != "" {
 				// Validate the cached result has actual data (check both new and old format)
 				tz := result.DetectedTimezone
 				if tz == "" {
 					tz = result.Timezone
 				}
-				d.logger.Debug("Using cached Gemini response",
+				logger.Debug("Using cached Gemini response",
 					"timezone", tz,
 					"confidence", result.ConfidenceLevel)
 				return &result, nil
 			} else {
-				d.logger.Warn("Cached Gemini response is invalid/empty, fetching fresh")
+				logger.Warn("Cached Gemini response is invalid/empty, fetching fresh")
 				// Continue to make a fresh API call
 			}
 		}
@@ -44,17 +75,17 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 	var err error
 	var config *genai.ClientConfig
 
-	if d.geminiAPIKey != "" {
+	if c.apiKey != "" {
 		// When using API key, use Gemini API backend (not Vertex AI)
 		// API keys work with Gemini API, not Vertex AI
 		config = &genai.ClientConfig{
 			Backend: genai.BackendGeminiAPI,
-			APIKey:  d.geminiAPIKey,
+			APIKey:  c.apiKey,
 		}
-		d.logger.Info("Using Gemini API with API key")
+		logger.Info("Using Gemini API with API key")
 	} else {
 		// When using ADC, use Vertex AI backend
-		projectID := d.gcpProject
+		projectID := c.gcpProject
 		if projectID == "" {
 			// Try to get from environment
 			projectID = os.Getenv("GCP_PROJECT")
@@ -72,7 +103,7 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 			Project:  projectID,
 			Location: "us-central1",
 		}
-		d.logger.Info("Using Vertex AI with Application Default Credentials", "project", projectID, "location", "us-central1")
+		logger.Info("Using Vertex AI with Application Default Credentials", "project", projectID, "location", "us-central1")
 	}
 
 	client, err = genai.NewClient(ctx, config)
@@ -81,7 +112,7 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 	}
 
 	// Select model
-	modelName := d.geminiModel
+	modelName := c.model
 	if modelName == "" {
 		modelName = "gemini-2.5-flash-lite"
 	}
@@ -89,7 +120,7 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 	// Vertex AI expects the model name without "models/" prefix
 	modelName = strings.TrimPrefix(modelName, "models/")
 
-	d.logger.Debug("Using model", "model", modelName)
+	logger.Debug("Using model", "model", modelName)
 
 	// Prepare content with user role
 	contents := []*genai.Content{
@@ -164,11 +195,11 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 					strings.Contains(genErr.Error(), "503") ||
 					strings.Contains(genErr.Error(), "502") ||
 					strings.Contains(genErr.Error(), "500") {
-					d.logger.Warn("Gemini API transient error, retrying", "error", genErr)
+					logger.Warn("Gemini API transient error, retrying", "error", genErr)
 					return genErr // Retry
 				}
 				// For non-transient errors, don't retry
-				d.logger.Error("Gemini API non-transient error", "error", genErr)
+				logger.Error("Gemini API non-transient error", "error", genErr)
 				return retry.Unrecoverable(genErr)
 			}
 			return nil
@@ -178,7 +209,7 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 		retry.MaxDelay(time.Second*10),
 		retry.DelayType(retry.BackOffDelay),
 		retry.OnRetry(func(n uint, err error) {
-			d.logger.Debug("Retrying Gemini API call", "attempt", n+1, "error", err)
+			logger.Debug("Retrying Gemini API call", "attempt", n+1, "error", err)
 		}),
 	)
 
@@ -188,12 +219,12 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 
 	// Extract text from response
 	if resp == nil {
-		d.logger.Error("Gemini API returned nil response")
+		logger.Error("Gemini API returned nil response")
 		return nil, fmt.Errorf("nil response from Gemini API")
 	}
 	
 	if len(resp.Candidates) == 0 {
-		d.logger.Error("Gemini API returned no candidates", 
+		logger.Error("Gemini API returned no candidates", 
 			"usage", resp.UsageMetadata,
 			"model", modelName)
 		return nil, fmt.Errorf("no candidates in Gemini API response")
@@ -202,18 +233,18 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 	candidate := resp.Candidates[0]
 	
 	// Log candidate details
-	d.logger.Debug("Gemini candidate details",
+	logger.Debug("Gemini candidate details",
 		"finish_reason", candidate.FinishReason,
 		"safety_ratings", candidate.SafetyRatings,
 		"content_parts_count", len(candidate.Content.Parts))
 	
 	if candidate.Content == nil {
-		d.logger.Error("Gemini candidate has nil content")
+		logger.Error("Gemini candidate has nil content")
 		return nil, fmt.Errorf("nil content in Gemini response")
 	}
 	
 	if len(candidate.Content.Parts) == 0 {
-		d.logger.Error("Gemini candidate has no content parts",
+		logger.Error("Gemini candidate has no content parts",
 			"finish_reason", candidate.FinishReason)
 		return nil, fmt.Errorf("empty response from Gemini API")
 	}
@@ -221,10 +252,10 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 	// Get the JSON response
 	jsonText := ""
 	for i, part := range candidate.Content.Parts {
-		d.logger.Debug("Examining part", "index", i, "has_text", part.Text != "")
+		logger.Debug("Examining part", "index", i, "has_text", part.Text != "")
 		if part.Text != "" {
 			jsonText = part.Text
-			d.logger.Debug("Found text in part", "index", i, "text_length", len(part.Text))
+			logger.Debug("Found text in part", "index", i, "text_length", len(part.Text))
 			break
 		}
 	}
@@ -238,17 +269,17 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 	if len(responsePreview) > 500 {
 		responsePreview = responsePreview[:500] + "..."
 	}
-	d.logger.Debug("Gemini raw response", "response_preview", responsePreview, "full_length", len(jsonText))
+	logger.Debug("Gemini raw response", "response_preview", responsePreview, "full_length", len(jsonText))
 
 	// Parse the JSON response
-	var geminiResp geminiResponse
+	var geminiResp Response
 	if err := json.Unmarshal([]byte(jsonText), &geminiResp); err != nil {
-		d.logger.Warn("failed to parse Gemini JSON response", "error", err, "raw", jsonText)
+		logger.Warn("failed to parse Gemini JSON response", "error", err, "raw", jsonText)
 		return nil, fmt.Errorf("failed to parse Gemini response: %w", err)
 	}
 	
 	// Always log the parsed response for debugging
-	d.logger.Debug("Parsed Gemini response", 
+	logger.Debug("Parsed Gemini response", 
 		"timezone", geminiResp.DetectedTimezone,
 		"location", geminiResp.DetectedLocation,
 		"confidence", geminiResp.ConfidenceLevel,
@@ -263,13 +294,13 @@ func (d *Detector) callGeminiWithSDK(ctx context.Context, prompt string, verbose
 	if tz == "" {
 		tz = geminiResp.Timezone // Fallback for old format
 	}
-	if d.cache != nil && tz != "" {
+	if cache != nil && tz != "" {
 		responseJSON, err := json.Marshal(geminiResp)
 		if err == nil {
-			if err := d.cache.SetAPICall(cacheKey, []byte(prompt), responseJSON); err != nil {
-				d.logger.Debug("Failed to cache Gemini response", "error", err)
+			if err := cache.SetAPICall(cacheKey, []byte(prompt), responseJSON); err != nil {
+				logger.Debug("Failed to cache Gemini response", "error", err)
 			} else {
-				d.logger.Debug("Cached Gemini response", "timezone", tz)
+				logger.Debug("Cached Gemini response", "timezone", tz)
 			}
 		}
 	}

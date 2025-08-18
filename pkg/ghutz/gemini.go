@@ -9,25 +9,21 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/codeGROOVE-dev/ghuTZ/pkg/gemini"
 )
 
-type geminiResponse struct {
-	DetectedTimezone   string `json:"detected_timezone"`
-	DetectedLocation   string `json:"detected_location"`
-	ConfidenceLevel    string `json:"confidence_level"` // "high", "medium", or "low"
-	DetectionReasoning string `json:"detection_reasoning"`
-	
-	// Fallback fields for old format (deprecated)
-	Timezone       string      `json:"timezone,omitempty"`
-	Location       string      `json:"location,omitempty"`
-	LocationSource string      `json:"location_source,omitempty"`
-	Confidence     interface{} `json:"confidence,omitempty"`
-	Reasoning      string      `json:"reasoning,omitempty"`
+// geminiQueryResult holds the result from a Gemini API query
+type geminiQueryResult struct {
+	Timezone   string
+	Reasoning  string
+	Confidence float64
+	Location   string
+	Prompt     string
 }
 
 // queryUnifiedGeminiForTimezone queries Gemini AI for timezone detection.
-// Returns: timezone, reasoning, confidence, location, unused, error
-func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]interface{}, verbose bool) (string, string, float64, string, string, error) {
+func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]interface{}, verbose bool) (*geminiQueryResult, error) {
 	// Check if we have activity data for confidence scoring later
 	hasActivityData := false
 	if hourCounts, ok := contextData["hour_counts"].(map[int]int); ok && len(hourCounts) > 0 {
@@ -38,18 +34,19 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	evidence := d.formatEvidenceForGemini(contextData)
 
 	// Use the unified prompt template and inject evidence
-	promptTemplate := unifiedGeminiPrompt()
+	promptTemplate := gemini.UnifiedPrompt()
 	prompt := fmt.Sprintf(promptTemplate, evidence)
 
-	// Store prompt for potential later display (after histogram)
-	// TODO: Add mechanism to display this after the main output
-	// For now, suppress inline display to reduce clutter
+	// Verbose prompt display removed - now handled in main CLI
 
 	// Pass verbose if DEBUG logging is enabled
 	isVerbose := d.logger.Enabled(ctx, slog.LevelDebug)
-	resp, err := d.callGeminiWithSDK(ctx, prompt, isVerbose)
+	
+	// Create Gemini client and call API
+	client := gemini.NewClient(d.geminiAPIKey, d.geminiModel, d.gcpProject)
+	resp, err := client.CallWithSDK(ctx, prompt, isVerbose, d.cache, d.logger)
 	if err != nil {
-		return "", "", 0, "", "", fmt.Errorf("Gemini API call failed: %w", err)
+		return nil, fmt.Errorf("Gemini API call failed: %w", err)
 	}
 
 	// Handle both new and old response formats
@@ -101,9 +98,7 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 		}
 	}
 	
-	// Store response for potential later display (after histogram)
-	// TODO: Add mechanism to display this after the main output
-	// For now, suppress inline display to reduce clutter
+	// Verbose response display removed - now handled in main CLI
 
 	// Adjust confidence based on data availability
 	if !hasActivityData && confidence > 0.7 {
@@ -116,8 +111,14 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 		confidence = math.Min(0.9, confidence*1.1)
 	}
 
-	// Return timezone, reasoning, confidence, location, empty DST
-	return timezone, reasoning, confidence, location, "", nil
+	// Return the result
+	return &geminiQueryResult{
+		Timezone:   timezone,
+		Reasoning:  reasoning,
+		Confidence: confidence,
+		Location:   location,
+		Prompt:     prompt,
+	}, nil
 }
 
 
@@ -276,8 +277,31 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		}
 	}
 
-	// Extract social media URLs
+	// Extract social media URLs from GitHub profile
 	socialURLs := extractSocialMediaURLs(userCtx.User)
+	
+	// Also extract social media URLs from website content
+	if websiteContent, ok := contextData["website_content"].(string); ok && websiteContent != "" {
+		websiteSocialURLs := extractSocialMediaFromHTML(websiteContent)
+		d.logger.Debug("extracted social media URLs from website", 
+			"website", userCtx.User.Blog, 
+			"found_urls", len(websiteSocialURLs))
+		
+		// Merge with existing social URLs, avoiding duplicates
+		for _, url := range websiteSocialURLs {
+			found := false
+			for _, existing := range socialURLs {
+				if existing == url {
+					found = true
+					break
+				}
+			}
+			if !found {
+				socialURLs = append(socialURLs, url)
+				d.logger.Debug("added social URL from website", "url", url)
+			}
+		}
+	}
 	if len(socialURLs) > 0 {
 		contextData["social_media_urls"] = socialURLs
 
@@ -325,33 +349,36 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	}
 
 	// Query Gemini with all context
-	timezone, reasoning, confidence, location, _, err := d.queryUnifiedGeminiForTimezone(ctx, contextData, false)
+	// Check if verbose mode is enabled
+	isVerbose := d.logger.Enabled(ctx, slog.LevelDebug)
+	geminiResult, err := d.queryUnifiedGeminiForTimezone(ctx, contextData, isVerbose)
 	if err != nil {
 		d.logger.Debug("Gemini analysis failed", "error", err)
 		return nil
 	}
 
-	if confidence < 0.3 {
-		d.logger.Debug("Gemini confidence too low", "confidence", confidence)
+	if geminiResult.Confidence < 0.3 {
+		d.logger.Debug("Gemini confidence too low", "confidence", geminiResult.Confidence)
 		return nil
 	}
 
 	result := &Result{
 		Username:                userCtx.Username,
-		Timezone:                timezone,
-		TimezoneConfidence:      confidence,
-		Confidence:              confidence,
+		Timezone:                geminiResult.Timezone,
+		TimezoneConfidence:      geminiResult.Confidence,
+		Confidence:              geminiResult.Confidence,
 		Method:                  "gemini_analysis",
-		GeminiSuggestedLocation: location,
-		GeminiReasoning:         reasoning,
+		GeminiSuggestedLocation: geminiResult.Location,
+		GeminiReasoning:         geminiResult.Reasoning,
+		GeminiPrompt:            geminiResult.Prompt,
 	}
 
 	if detectedLocation != nil {
 		result.Location = detectedLocation
-	} else if location != "" && location != "unknown" {
-		if coords, err := d.geocodeLocation(ctx, location); err == nil {
+	} else if geminiResult.Location != "" && geminiResult.Location != "unknown" {
+		if coords, err := d.geocodeLocation(ctx, geminiResult.Location); err == nil {
 			result.Location = coords
-			result.LocationName = location
+			result.LocationName = geminiResult.Location
 		}
 	}
 
@@ -625,8 +652,31 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 		}
 	}
 
-	// Extract social media URLs
+	// Extract social media URLs from GitHub profile
 	socialURLs := extractSocialMediaURLs(user)
+	
+	// Also extract social media URLs from website content
+	if websiteContent, ok := contextData["website_content"].(string); ok && websiteContent != "" {
+		websiteSocialURLs := extractSocialMediaFromHTML(websiteContent)
+		d.logger.Debug("extracted social media URLs from website", 
+			"website", user.Blog, 
+			"found_urls", len(websiteSocialURLs))
+		
+		// Merge with existing social URLs, avoiding duplicates
+		for _, url := range websiteSocialURLs {
+			found := false
+			for _, existing := range socialURLs {
+				if existing == url {
+					found = true
+					break
+				}
+			}
+			if !found {
+				socialURLs = append(socialURLs, url)
+				d.logger.Debug("added social URL from website", "url", url)
+			}
+		}
+	}
 	if len(socialURLs) > 0 {
 		contextData["social_media_urls"] = socialURLs
 
@@ -695,42 +745,45 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 	// Let Gemini figure out name patterns on its own from the provided name
 
 	// Query Gemini with all context
-	timezone, reasoning, confidence, location, _, err := d.queryUnifiedGeminiForTimezone(ctx, contextData, false)
+	// Check if verbose mode is enabled
+	isVerbose := d.logger.Enabled(ctx, slog.LevelDebug)
+	geminiResult, err := d.queryUnifiedGeminiForTimezone(ctx, contextData, isVerbose)
 	if err != nil {
 		d.logger.Debug("Gemini analysis failed", "error", err)
 		return nil
 	}
 
 	// If Gemini returns low confidence, don't use it
-	if confidence < 0.3 {
-		d.logger.Debug("Gemini confidence too low", "confidence", confidence)
+	if geminiResult.Confidence < 0.3 {
+		d.logger.Debug("Gemini confidence too low", "confidence", geminiResult.Confidence)
 		return nil
 	}
 
 
 	result := &Result{
 		Username:                username,
-		Timezone:                timezone,
-		TimezoneConfidence:      confidence,
-		Confidence:              confidence,  // Set both fields for compatibility
+		Timezone:                geminiResult.Timezone,
+		TimezoneConfidence:      geminiResult.Confidence,
+		Confidence:              geminiResult.Confidence,  // Set both fields for compatibility
 		Method:                  "gemini_analysis",
-		GeminiSuggestedLocation: location,
-		GeminiReasoning:         reasoning,
+		GeminiSuggestedLocation: geminiResult.Location,
+		GeminiReasoning:         geminiResult.Reasoning,
+		GeminiPrompt:            geminiResult.Prompt,
 	}
 
 	// If we have coordinates from user's profile location, add them
 	if detectedLocation != nil {
 		result.Location = detectedLocation
-	} else if location != "" && location != "unknown" {
+	} else if geminiResult.Location != "" && geminiResult.Location != "unknown" {
 		// Try to geocode the Gemini-suggested location
-		if coords, err := d.geocodeLocation(ctx, location); err == nil {
+		if coords, err := d.geocodeLocation(ctx, geminiResult.Location); err == nil {
 			result.Location = coords
-			result.LocationName = location
+			result.LocationName = geminiResult.Location
 			d.logger.Debug("successfully geocoded Gemini location", "username", username, 
-				"location", location, "lat", coords.Latitude, "lng", coords.Longitude)
+				"location", geminiResult.Location, "lat", coords.Latitude, "lng", coords.Longitude)
 		} else {
 			d.logger.Debug("failed to geocode Gemini location", "username", username, 
-				"location", location, "error", err)
+				"location", geminiResult.Location, "error", err)
 		}
 	}
 
@@ -753,4 +806,3 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithEvents(ctx context.Context, usern
 
 // extractUTCOffset extracts the UTC offset from a timezone string
 // Handles formats like "UTC+10", "Europe/Moscow", "America/New_York"
-
