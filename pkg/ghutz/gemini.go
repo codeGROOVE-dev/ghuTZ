@@ -153,7 +153,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 			contextData["hour_counts"] = activityResult.HourlyActivityUTC
 		}
 		
-		if activityResult.TimezoneCandidates != nil && len(activityResult.TimezoneCandidates) > 0 {
+		if len(activityResult.TimezoneCandidates) > 0 {
 			contextData["timezone_candidates"] = activityResult.TimezoneCandidates
 		}
 		

@@ -337,8 +337,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			// 5am UTC = 11pm MDT (UTC-6) - early sleep
 			// 5am UTC = 10pm PDT (UTC-7) - very early sleep
 			
-			// Make a simple initial guess
-			offsetFromUTC = -5.0 // Start with a middle ground
+			// Make a simple initial guess based on midQuiet hour
 			if midQuiet <= 5 {
 				offsetFromUTC = -4.0 // Likely Eastern (EDT)
 			} else if midQuiet <= 7 {

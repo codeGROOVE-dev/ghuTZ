@@ -56,7 +56,7 @@ func (c *Client) GeocodeLocation(ctx context.Context, location string) (*Locatio
 	apiURL := fmt.Sprintf("https://maps.googleapis.com/maps/api/geocode/json?address=%s&key=%s",
 		encodedLocation, c.apiKey)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +151,7 @@ func (c *Client) TimezoneForCoordinates(ctx context.Context, lat, lng float64) (
 	apiURL := fmt.Sprintf("https://maps.googleapis.com/maps/api/timezone/json?location=%f,%f&timestamp=%s&key=%s",
 		lat, lng, timestamp, c.apiKey)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
 		return "", err
 	}

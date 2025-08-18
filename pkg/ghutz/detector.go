@@ -155,7 +155,7 @@ func isValidGitHubUsername(username string) bool {
 	// - May contain alphanumeric characters and hyphens
 	// - Cannot start or end with hyphen
 	// - Cannot have consecutive hyphens
-	if len(username) > 39 || len(username) == 0 {
+	if len(username) > 39 || username == "" {
 		return false
 	}
 	

@@ -75,13 +75,13 @@ func (c *OtterCache) Get(url string) ([]byte, string, bool) {
 
 	entry, found := c.cache.GetIfPresent(key)
 	if !found {
-		c.logger.Info("🤦🤦🤦 CACHE MISS 🤦🤦🤦", "url", url, "reason", "not_found")
+		c.logger.Debug("cache miss", "url", url, "reason", "not_found")
 		return nil, "", false
 	}
 
 	// Check if expired (otter should handle this, but double-check for safety)
 	if time.Now().After(entry.ExpiresAt) {
-		c.logger.Info("🤦🤦🤦 CACHE MISS 🤦🤦🤦", "url", url, "reason", "expired", "expired_at", entry.ExpiresAt)
+		c.logger.Debug("cache miss", "url", url, "reason", "expired", "expired_at", entry.ExpiresAt)
 		c.cache.Invalidate(key)
 		return nil, "", false
 	}
@@ -133,13 +133,13 @@ func (c *OtterCache) APICall(url string, requestBody []byte) ([]byte, bool) {
 
 	entry, found := c.cache.GetIfPresent(key)
 	if !found {
-		c.logger.Info("🤦🤦🤦 API CACHE MISS 🤦🤦🤦", "url", url, "reason", "not_found")
+		c.logger.Debug("API cache miss", "url", url, "reason", "not_found")
 		return nil, false
 	}
 
 	// Check if expired (otter should handle this, but double-check for safety)
 	if time.Now().After(entry.ExpiresAt) {
-		c.logger.Info("🤦🤦🤦 API CACHE MISS 🤦🤦🤦", "url", url, "reason", "expired", "expired_at", entry.ExpiresAt)
+		c.logger.Debug("API cache miss", "url", url, "reason", "expired", "expired_at", entry.ExpiresAt)
 		c.cache.Invalidate(key)
 		return nil, false
 	}

@@ -104,7 +104,7 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, timezone string) 
 	var output strings.Builder
 
 	// Check if we have organization data
-	hasOrgData := result.HourlyOrganizationActivity != nil && len(result.HourlyOrganizationActivity) > 0
+	hasOrgData := len(result.HourlyOrganizationActivity) > 0
 
 	// Modern, clean header
 	output.WriteString("📊 Activity Pattern (30-minute resolution)\n")
@@ -132,7 +132,7 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, timezone string) 
 	}
 	// Use the half-hour data (always available)
 	halfHourCounts := result.HalfHourlyActivityUTC
-	if halfHourCounts == nil || len(halfHourCounts) == 0 {
+	if len(halfHourCounts) == 0 {
 		return output.String() + "No half-hour activity data available\n"
 	}
 	

@@ -125,7 +125,7 @@ func sanitizeUsername(username string) string {
 	username = strings.TrimSpace(username)
 
 	// Length check
-	if len(username) == 0 || len(username) > 39 {
+	if username == "" || len(username) > 39 {
 		return ""
 	}
 
@@ -386,7 +386,7 @@ func handleHomeOrUser(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/")
 
 	// Check for username in path first, then fall back to query parameter
-	username := ""
+	var username string
 	if path != "" {
 		// SECURITY: Sanitize username from path to prevent attacks
 		username = sanitizeUsername(path)

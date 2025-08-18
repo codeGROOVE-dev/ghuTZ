@@ -135,10 +135,10 @@ func (d *Detector) fetchAdditionalPages(ctx context.Context, username string, al
 	// Add new PRs (beyond first 100)
 	if len(extraData.PullRequests) > prCount {
 		newPRs := extraData.PullRequests[prCount:]
-		for _, pr := range newPRs {
-			org := extractOrganization(pr.RepoName)
+		for i := range newPRs {
+			org := extractOrganization(newPRs[i].RepoName)
 			allTimestamps = append(allTimestamps, timestampEntry{
-				time:   pr.CreatedAt,
+				time:   newPRs[i].CreatedAt,
 				source: "pr",
 				org:    org,
 			})
@@ -149,10 +149,10 @@ func (d *Detector) fetchAdditionalPages(ctx context.Context, username string, al
 	// Add new issues (beyond first 100)
 	if len(extraData.Issues) > issueCount {
 		newIssues := extraData.Issues[issueCount:]
-		for _, issue := range newIssues {
-			org := extractOrganization(issue.RepoName)
+		for i := range newIssues {
+			org := extractOrganization(newIssues[i].RepoName)
 			allTimestamps = append(allTimestamps, timestampEntry{
-				time:   issue.CreatedAt,
+				time:   newIssues[i].CreatedAt,
 				source: "issue",
 				org:    org,
 			})
@@ -181,7 +181,8 @@ func extractOrganization(repository string) string {
 func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additionalData *ActivityData, username string) []timestampEntry {
 	prOldest := time.Now()
 	prNewest := time.Time{}
-	for _, pr := range additionalData.PullRequests {
+	for i := range additionalData.PullRequests {
+		pr := &additionalData.PullRequests[i]
 		org := extractOrganization(pr.RepoName)
 		allTimestamps = append(allTimestamps, timestampEntry{
 			time:   pr.CreatedAt,
@@ -206,7 +207,8 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 
 	issueOldest := time.Now()
 	issueNewest := time.Time{}
-	for _, issue := range additionalData.Issues {
+	for i := range additionalData.Issues {
+		issue := &additionalData.Issues[i]
 		org := extractOrganization(issue.RepoName)
 		allTimestamps = append(allTimestamps, timestampEntry{
 			time:   issue.CreatedAt,

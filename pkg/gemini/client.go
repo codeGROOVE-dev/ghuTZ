@@ -204,10 +204,10 @@ func (c *Client) CallWithSDK(ctx context.Context, prompt string, verbose bool, c
 			}
 			return nil
 		},
-		retry.Attempts(3),
-		retry.Delay(time.Second*2),
-		retry.MaxDelay(time.Second*10),
-		retry.DelayType(retry.BackOffDelay),
+		retry.Attempts(5),
+		retry.Delay(time.Second),
+		retry.MaxDelay(2*time.Minute),
+		retry.DelayType(retry.FullJitterBackoffDelay),
 		retry.OnRetry(func(n uint, err error) {
 			logger.Debug("Retrying Gemini API call", "attempt", n+1, "error", err)
 		}),
