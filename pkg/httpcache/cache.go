@@ -1,3 +1,4 @@
+// Package httpcache provides HTTP response caching with persistent storage.
 package httpcache
 
 import (

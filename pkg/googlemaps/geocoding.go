@@ -1,3 +1,4 @@
+// Package googlemaps provides geocoding and timezone services using Google Maps APIs.
 package googlemaps
 
 import (

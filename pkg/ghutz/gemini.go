@@ -124,12 +124,6 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 
 // tryUnifiedGeminiAnalysisWithContext attempts timezone detection using Gemini AI with UserContext
 func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, userCtx *UserContext, activityResult *Result) *Result {
-	// Skip if no Gemini API key
-	if d.geminiAPIKey == "" {
-		d.logger.Debug("skipping Gemini analysis - no API key configured")
-		return nil
-	}
-
 	if userCtx.User == nil {
 		d.logger.Debug("could not fetch user for Gemini analysis", "username", userCtx.Username)
 		return nil

@@ -451,7 +451,7 @@ func (c *Client) FetchUserWithGraphQL(ctx context.Context, username string) *Git
 func (c *Client) FetchUserComments(ctx context.Context, username string) ([]Comment, error) {
 	if c.githubToken == "" {
 		c.logger.Debug("GitHub token required for GraphQL API", "username", username)
-		return nil, errors.New("GitHub token required for GraphQL API")
+		return nil, errors.New("github token required for GraphQL API")
 	}
 
 	query := fmt.Sprintf(`{
@@ -743,7 +743,7 @@ func (c *Client) FetchUserRepositories(ctx context.Context, username string) ([]
 func (c *Client) FetchPinnedRepositories(ctx context.Context, username string) ([]Repository, error) {
 	if c.githubToken == "" {
 		c.logger.Debug("GitHub token required for GraphQL API", "username", username)
-		return nil, errors.New("GitHub token required for GraphQL API")
+		return nil, errors.New("github token required for GraphQL API")
 	}
 
 	query := fmt.Sprintf(`{

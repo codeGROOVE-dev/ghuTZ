@@ -1,3 +1,4 @@
+// Package timezone provides timezone candidate evaluation and analysis.
 package timezone
 
 import (

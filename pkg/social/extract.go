@@ -1,3 +1,4 @@
+// Package social provides extraction of social media information.
 package social
 
 import (

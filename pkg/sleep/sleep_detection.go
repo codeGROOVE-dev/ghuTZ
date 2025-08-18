@@ -1,3 +1,4 @@
+// Package sleep provides detection of sleep patterns in activity data.
 package sleep
 
 import (

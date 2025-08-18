@@ -1,3 +1,4 @@
+// Package gemini provides a client for Google's Gemini AI API.
 package gemini
 
 import (

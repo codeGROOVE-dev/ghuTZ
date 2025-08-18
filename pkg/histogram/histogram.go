@@ -1,3 +1,4 @@
+// Package histogram provides visualization of activity patterns.
 package histogram
 
 import (

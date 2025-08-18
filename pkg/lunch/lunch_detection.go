@@ -1,3 +1,4 @@
+// Package lunch provides detection of lunch break patterns in activity data.
 package lunch
 
 import (
