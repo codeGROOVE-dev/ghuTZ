@@ -129,7 +129,7 @@ func fetchBlueSkyProfile(ctx context.Context, handle string, logger *slog.Logger
 	}
 
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "ghuTZ/1.0")
+	req.Header.Set("User-Agent", "guTZ/1.0")
 
 	client := &http.Client{
 		Timeout: 10 * time.Second,

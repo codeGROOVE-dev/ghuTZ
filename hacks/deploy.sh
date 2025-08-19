@@ -10,7 +10,7 @@ set -eux -o pipefail
 export KO_DOCKER_REPO="gcr.io/${GCP_PROJECT}/${APP_ID}"
 
 # Publish the code at . to $KO_DOCKER_REPO
-IMAGE="$(ko publish ./cmd/ghutz-server/...)"
+IMAGE="$(ko publish ./cmd/gutz-server/...)"
 
 # Deploy the newly built binary to Google Cloud Run with environment variables for ADC
 gcloud run deploy "${APP_ID}" \

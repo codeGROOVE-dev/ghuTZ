@@ -1,13 +1,13 @@
 <div align="center">
-  <img src="media/octocat-small.png" alt="ghuTZ Detective" width="120">
-  
-  # ghuTZ 🕵️
-  
-  [![Experimental](https://img.shields.io/badge/status-experimental-orange.svg)](https://github.com/codeGROOVE-dev/ghuTZ)
-  [![Go Report Card](https://goreportcard.com/badge/github.com/codeGROOVE-dev/ghuTZ)](https://goreportcard.com/report/github.com/codeGROOVE-dev/ghuTZ)
+  <img src="media/octocat-small.png" alt="guTZ Detective" width="120">
+
+  # guTZ 🕵️
+
+  [![Experimental](https://img.shields.io/badge/status-experimental-orange.svg)](https://github.com/codeGROOVE-dev/guTZ)
+  [![Go Report Card](https://goreportcard.com/badge/github.com/codeGROOVE-dev/guTZ)](https://goreportcard.com/report/github.com/codeGROOVE-dev/guTZ)
   [![Go Code](https://img.shields.io/badge/go%20code-pretty%20good-brightgreen.svg)](go.mod)
-  
-  **Stalks GitHub users to figure out where they live** 🌍  
+
+  **Stalks GitHub users to figure out where they live** 🌍
   *(for perfectly legitimate timezone coordination purposes)*
 </div>
 
@@ -15,7 +15,7 @@
 
 ## What Is This Madness?
 
-Ever wondered when your favorite open source maintainer is actually awake? Tired of pinging someone at 3am their time? **ghuTZ** is here to help by being *slightly creepy* in the name of better collaboration.
+Ever wondered when your favorite open source maintainer is actually awake? Tired of pinging someone at 3am their time? **guTZ** is here to help by being *slightly creepy* in the name of better collaboration.
 
 We analyze GitHub activity patterns with the determination of a caffeinated detective to figure out where on Earth someone codes from. It's like GeoGuessr, but for developers!
 
@@ -28,13 +28,13 @@ We analyze GitHub activity patterns with the determination of a caffeinated dete
 
 ```bash
 # Install it
-go install github.com/codeGROOVE-dev/ghuTZ/cmd/ghutz@latest
+go install github.com/codeGROOVE-dev/guTZ/cmd/gutz@latest
 
 # Stalk someone (respectfully)
-ghutz torvalds
+gutz torvalds
 
 # Start the web detective agency
-ghutz-server
+gutz-server
 # Visit http://localhost:8080 for the full experience
 ```
 
@@ -43,7 +43,7 @@ ghutz-server
 Our digital detective employs **8+ methods** to triangulate a user's timezone:
 
 🔍 **The Sherlock Suite:**
-- Scrapes GitHub profiles for local time (elementary!)  
+- Scrapes GitHub profiles for local time (elementary!)
 - Geocodes location fields ("San Francisco" → UTC-8)
 - Analyzes commit patterns (night owls vs early birds)
 - Detects lunch breaks (everyone eats, right?)
@@ -67,12 +67,12 @@ Don't have them? No worries, we'll still try our best with public data.
 ## Library Usage
 
 ```go
-import "github.com/codeGROOVE-dev/ghuTZ/pkg/ghutz"
+import "github.com/codeGROOVE-dev/guTZ/pkg/gutz"
 
-detector := ghutz.New(ctx)
+detector := gutz.New(ctx)
 result, _ := detector.Detect(ctx, "octocat")
 
-fmt.Printf("%s probably lives in %s (confidence: %.0f%%)\n", 
+fmt.Printf("%s probably lives in %s (confidence: %.0f%%)\n",
     result.Username, result.Timezone, result.Confidence*100)
 // Output: octocat probably lives in America/Los_Angeles (confidence: 85%)
 ```

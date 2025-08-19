@@ -144,7 +144,7 @@ func (c *Client) getProjectID() string {
 	if projectID := os.Getenv("GOOGLE_CLOUD_PROJECT"); projectID != "" {
 		return projectID
 	}
-	return "ghutz-468911" // Default project for ghuTZ
+	return "gutz-468911" // Default project for guTZ
 }
 
 // configureRequest prepares the model, content, and generation configuration.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
+	"github.com/codeGROOVE-dev/guTZ/pkg/lunch"
 )
 
 // GlobalLunchPattern represents the best lunch pattern found globally in UTC.

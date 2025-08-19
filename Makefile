@@ -3,7 +3,7 @@
 all: lint test build
 
 build:
-	go build -o out/ghutz ./cmd/ghutz
+	go build -o out/gutz ./cmd/gutz
 
 test:
 	go test -v -race ./...
@@ -12,17 +12,17 @@ clean:
 	rm -rf out/
 
 run: build
-	./out/ghutz $(ARGS)
+	./out/gutz $(ARGS)
 
 serve: build
-	./out/ghutz --serve
+	./out/gutz --serve
 
 deps:
 	go mod tidy
 	go mod download
 
 install:
-	go install ./cmd/ghutz
+	go install ./cmd/gutz
 
 # Cloud Run deployment with ko
 KO_DOCKER_REPO ?= gcr.io/$(shell gcloud config get-value project)
@@ -32,14 +32,14 @@ docker-build:
 		echo "Installing ko..."; \
 		go install github.com/google/ko@latest; \
 	fi
-	KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko build ./cmd/ghutz
+	KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko build ./cmd/gutz
 
 docker-push: docker-build
 	@echo "Image built and pushed to $(KO_DOCKER_REPO)"
 
 deploy: docker-push
-	gcloud run deploy ghutz \
-		--image=$(shell KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko build ./cmd/ghutz) \
+	gcloud run deploy gutz \
+		--image=$(shell KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko build ./cmd/gutz) \
 		--platform=managed \
 		--region=us-central1 \
 		--allow-unauthenticated \
