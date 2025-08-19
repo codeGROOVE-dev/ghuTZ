@@ -120,6 +120,39 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		sb.WriteString("\n")
 	}
 
+	// Twitter profile details if available.
+	if twitterProfile, ok := contextData["twitter_profile"].(map[string]string); ok && twitterProfile != nil {
+		sb.WriteString("Twitter/X profile details:\n")
+		if username := twitterProfile["username"]; username != "" {
+			fmt.Fprintf(&sb, "- Username: @%s\n", username)
+		}
+		if name := twitterProfile["name"]; name != "" {
+			fmt.Fprintf(&sb, "- Name: %s\n", name)
+		}
+		if location := twitterProfile["location"]; location != "" {
+			fmt.Fprintf(&sb, "- Location: %s\n", location)
+		}
+		if bio := twitterProfile["bio"]; bio != "" {
+			fmt.Fprintf(&sb, "- Bio: %s\n", bio)
+		}
+		sb.WriteString("\n")
+	}
+
+	// BlueSky profile details if available.
+	if blueSkyProfile, ok := contextData["bluesky_profile"].(map[string]string); ok && blueSkyProfile != nil {
+		sb.WriteString("BlueSky profile details:\n")
+		if handle := blueSkyProfile["handle"]; handle != "" {
+			fmt.Fprintf(&sb, "- Handle: @%s\n", handle)
+		}
+		if name := blueSkyProfile["name"]; name != "" {
+			fmt.Fprintf(&sb, "- Name: %s\n", name)
+		}
+		if bio := blueSkyProfile["bio"]; bio != "" {
+			fmt.Fprintf(&sb, "- Bio: %s\n", bio)
+		}
+		sb.WriteString("\n")
+	}
+
 	// Mastodon profile details if available.
 	if mastodonProfile, ok := contextData["mastodon_profile"].(*MastodonProfileData); ok && mastodonProfile != nil {
 		sb.WriteString("Mastodon profile details:\n")

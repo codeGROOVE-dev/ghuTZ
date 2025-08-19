@@ -104,6 +104,34 @@ func extractSocialMediaURLs(user *github.User) []string {
 	}
 
 	var urls []string
+	seen := make(map[string]bool)
+
+	// normalizeTwitterURL normalizes Twitter/X URLs to avoid duplicates
+	normalizeTwitterURL := func(urlStr string) string {
+		// Convert x.com to twitter.com for consistency
+		urlStr = strings.Replace(urlStr, "x.com/", "twitter.com/", 1)
+		// Remove trailing slashes and query params for comparison
+		if idx := strings.Index(urlStr, "?"); idx != -1 {
+			urlStr = urlStr[:idx]
+		}
+		urlStr = strings.TrimRight(urlStr, "/")
+		return urlStr
+	}
+
+	// addURL adds a URL to the list if not already seen
+	addURL := func(urlStr string) {
+		if urlStr == "" {
+			return
+		}
+		// Normalize Twitter/X URLs
+		if strings.Contains(urlStr, "twitter.com") || strings.Contains(urlStr, "x.com") {
+			urlStr = normalizeTwitterURL(urlStr)
+		}
+		if !seen[urlStr] {
+			seen[urlStr] = true
+			urls = append(urls, urlStr)
+		}
+	}
 
 	// Check bio for social media links
 	if user.Bio != "" {
@@ -114,13 +142,14 @@ func extractSocialMediaURLs(user *github.User) []string {
 			`https?://(?:www\.)?linkedin\.com/in/[\w-]+`,
 			`https?://(?:www\.)?instagram\.com/[\w.]+`,
 			`https?://(?:www\.)?facebook\.com/[\w.]+`,
-			`https?://[\w.-]+\.social/@[\w]+`,     // Mastodon instances
-			`https?://mastodon\.[\w.-]+/@[\w]+`,   // Mastodon instances
-			`https?://fosstodon\.org/@[\w]+`,      // Popular Mastodon instance
-			`https?://techhub\.social/@[\w]+`,     // Tech Mastodon instance
-			`https?://infosec\.exchange/@[\w]+`,   // InfoSec Mastodon instance
-			`https?://triangletoot\.party/@[\w]+`, // Triangle area Mastodon instance
-			`https?://[\w.-]+\.party/@[\w]+`,      // .party Mastodon instances
+			`https?://(?:www\.)?bsky\.app/profile/[\w.-]+`, // BlueSky
+			`https?://[\w.-]+\.social/@[\w]+`,              // Mastodon instances
+			`https?://mastodon\.[\w.-]+/@[\w]+`,            // Mastodon instances
+			`https?://fosstodon\.org/@[\w]+`,               // Popular Mastodon instance
+			`https?://techhub\.social/@[\w]+`,              // Tech Mastodon instance
+			`https?://infosec\.exchange/@[\w]+`,            // InfoSec Mastodon instance
+			`https?://triangletoot\.party/@[\w]+`,          // Triangle area Mastodon instance
+			`https?://[\w.-]+\.party/@[\w]+`,               // .party Mastodon instances
 			`https?://(?:www\.)?youtube\.com/c/[\w-]+`,
 			`https?://(?:www\.)?twitch\.tv/[\w]+`,
 		}
@@ -128,25 +157,27 @@ func extractSocialMediaURLs(user *github.User) []string {
 		for _, pattern := range patterns {
 			re := regexp.MustCompile(pattern)
 			matches := re.FindAllString(user.Bio, -1)
-			urls = append(urls, matches...)
+			for _, match := range matches {
+				addURL(match)
+			}
 		}
 	}
 
-	// Check blog field
-	if user.Blog != "" {
-		urls = append(urls, user.Blog)
-	}
-
-	// Check Twitter username field
+	// Check Twitter username field (normalize to avoid duplicates)
 	if user.TwitterHandle != "" {
-		urls = append(urls, fmt.Sprintf("https://twitter.com/%s", user.TwitterHandle))
+		addURL(fmt.Sprintf("https://twitter.com/%s", user.TwitterHandle))
 	}
 
 	// Add URLs from GraphQL social accounts (critical for puerco.mx detection)
 	for _, account := range user.SocialAccounts {
 		if account.URL != "" {
-			urls = append(urls, account.URL)
+			addURL(account.URL)
 		}
+	}
+
+	// Check blog field (add last since it might not be a social media URL)
+	if user.Blog != "" {
+		addURL(user.Blog)
 	}
 
 	return urls

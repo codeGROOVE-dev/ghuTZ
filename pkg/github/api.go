@@ -124,9 +124,96 @@ func (c *Client) FetchUserGists(ctx context.Context, username string) ([]time.Ti
 	return timestamps, nil
 }
 
+// pageResult contains the result of fetching a single page.
+type pageResult struct {
+	totalCount int
+	hasMore    bool
+}
+
 // FetchPullRequests fetches pull requests for a user with default page limit.
 func (c *Client) FetchPullRequests(ctx context.Context, username string) ([]PullRequest, error) {
 	return c.FetchPullRequestsWithLimit(ctx, username, 2)
+}
+
+// fetchPRPage fetches a single page of pull requests.
+func (c *Client) fetchPRPage(ctx context.Context, username string, page, perPage int) ([]PullRequest, pageResult, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:pr&sort=created&order=desc&per_page=%d&page=%d",
+		url.QueryEscape(username), perPage, page)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
+	if err != nil {
+		return nil, pageResult{}, fmt.Errorf("creating request: %w", err)
+	}
+
+	// SECURITY: Validate and sanitize GitHub token before use
+	if c.githubToken != "" {
+		token := c.githubToken
+		// Validate token format to prevent injection attacks
+		if c.isValidGitHubToken(token) {
+			req.Header.Set("Authorization", "token "+token)
+		}
+	}
+
+	resp, err := c.cachedHTTPDo(ctx, req)
+	if err != nil {
+		c.logger.Debug("failed to fetch PR page", "page", page, "error", err)
+		return nil, pageResult{}, nil // Return what we have so far
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page)
+			return nil, pageResult{}, nil
+		}
+		c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
+		return nil, pageResult{}, nil
+	}
+
+	var result struct {
+		Items []struct {
+			Title         string    `json:"title"`
+			Body          string    `json:"body"`
+			CreatedAt     time.Time `json:"created_at"`
+			HTMLURL       string    `json:"html_url"`
+			RepositoryURL string    `json:"repository_url"`
+		} `json:"items"`
+		TotalCount int `json:"total_count"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		c.logger.Debug("failed to decode PR response", "page", page, "error", err)
+		return nil, pageResult{}, nil
+	}
+
+	var prs []PullRequest
+	for _, item := range result.Items {
+		// Extract repository from HTML URL (format: https://github.com/owner/repo/pull/123)
+		repo := ""
+		if item.HTMLURL != "" {
+			if strings.HasPrefix(item.HTMLURL, "https://github.com/") {
+				parts := strings.Split(strings.TrimPrefix(item.HTMLURL, "https://github.com/"), "/")
+				if len(parts) >= 2 {
+					repo = parts[0] + "/" + parts[1]
+				}
+			}
+		}
+		prs = append(prs, PullRequest{
+			Title:     item.Title,
+			Body:      item.Body,
+			CreatedAt: item.CreatedAt,
+			HTMLURL:   item.HTMLURL,
+			RepoName:  repo,
+		})
+	}
+
+	hasMore := len(result.Items) == perPage
+	return prs, pageResult{totalCount: result.TotalCount, hasMore: hasMore}, nil
 }
 
 // FetchPullRequestsWithLimit fetches pull requests for a user with custom page limit.
@@ -135,93 +222,104 @@ func (c *Client) FetchPullRequestsWithLimit(ctx context.Context, username string
 	const perPage = 100
 
 	for page := 1; page <= maxPages; page++ {
-		apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:pr&sort=created&order=desc&per_page=%d&page=%d",
-			url.QueryEscape(username), perPage, page)
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
+		prs, result, err := c.fetchPRPage(ctx, username, page, perPage)
 		if err != nil {
-			return allPRs, fmt.Errorf("creating request: %w", err)
+			return allPRs, err
 		}
 
-		// SECURITY: Validate and sanitize GitHub token before use
-		if c.githubToken != "" {
-			token := c.githubToken
-			// Validate token format to prevent injection attacks
-			if c.isValidGitHubToken(token) {
-				req.Header.Set("Authorization", "token "+token)
-			}
+		if page == 1 && result.totalCount > 0 {
+			c.logger.Debug("GitHub PR search results", "username", username, "total_count", result.totalCount)
 		}
 
-		resp, err := c.cachedHTTPDo(ctx, req)
-		if err != nil {
-			c.logger.Debug("failed to fetch PR page", "page", page, "error", err)
-			break // Return what we have so far
-		}
-		//nolint:revive,gocritic // defer in loop is acceptable for proper resource cleanup
-		defer func() {
-			if err := resp.Body.Close(); err != nil {
-				c.logger.Debug("failed to close response body", "error", err)
-			}
-		}()
+		allPRs = append(allPRs, prs...)
 
-		if resp.StatusCode != http.StatusOK {
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page)
-				break
-			}
-			c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
-			break
-		}
-
-		var result struct {
-			Items []struct {
-				Title         string    `json:"title"`
-				Body          string    `json:"body"`
-				CreatedAt     time.Time `json:"created_at"`
-				HTMLURL       string    `json:"html_url"`
-				RepositoryURL string    `json:"repository_url"`
-			} `json:"items"`
-			TotalCount int `json:"total_count"`
-		}
-
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			c.logger.Debug("failed to decode PR response", "page", page, "error", err)
-			break
-		}
-
-		if page == 1 {
-			c.logger.Debug("GitHub PR search results", "username", username, "total_count", result.TotalCount)
-		}
-
-		for _, item := range result.Items {
-			// Extract repository from HTML URL (format: https://github.com/owner/repo/pull/123)
-			repo := ""
-			if item.HTMLURL != "" {
-				if strings.HasPrefix(item.HTMLURL, "https://github.com/") {
-					parts := strings.Split(strings.TrimPrefix(item.HTMLURL, "https://github.com/"), "/")
-					if len(parts) >= 2 {
-						repo = parts[0] + "/" + parts[1]
-					}
-				}
-			}
-			allPRs = append(allPRs, PullRequest{
-				Title:     item.Title,
-				Body:      item.Body,
-				CreatedAt: item.CreatedAt,
-				HTMLURL:   item.HTMLURL,
-				RepoName:  repo,
-			})
-		}
-
-		// If we got fewer items than requested, we've reached the end
-		if len(result.Items) < perPage {
+		if !result.hasMore {
 			break
 		}
 	}
 
 	c.logger.Debug("fetched pull requests", "username", username, "count", len(allPRs))
 	return allPRs, nil
+}
+
+// fetchIssuePage fetches a single page of issues.
+func (c *Client) fetchIssuePage(ctx context.Context, username string, page, perPage int) ([]Issue, pageResult, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:issue&sort=created&order=desc&per_page=%d&page=%d",
+		url.QueryEscape(username), perPage, page)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
+	if err != nil {
+		return nil, pageResult{}, fmt.Errorf("creating request: %w", err)
+	}
+
+	// SECURITY: Validate and sanitize GitHub token before use
+	if c.githubToken != "" {
+		token := c.githubToken
+		// Validate token format to prevent injection attacks
+		if c.isValidGitHubToken(token) {
+			req.Header.Set("Authorization", "token "+token)
+		}
+	}
+
+	resp, err := c.cachedHTTPDo(ctx, req)
+	if err != nil {
+		c.logger.Debug("failed to fetch issue page", "page", page, "error", err)
+		return nil, pageResult{}, nil // Return what we have so far
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page)
+			return nil, pageResult{}, nil
+		}
+		c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
+		return nil, pageResult{}, nil
+	}
+
+	var result struct {
+		Items []struct {
+			Title     string    `json:"title"`
+			Body      string    `json:"body"`
+			CreatedAt time.Time `json:"created_at"`
+			HTMLURL   string    `json:"html_url"`
+		} `json:"items"`
+		TotalCount int `json:"total_count"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		c.logger.Debug("failed to decode issue response", "page", page, "error", err)
+		return nil, pageResult{}, nil
+	}
+
+	var issues []Issue
+	for _, item := range result.Items {
+		// Extract repository from HTML URL (format: https://github.com/owner/repo/issues/123)
+		repo := ""
+		if item.HTMLURL != "" {
+			if strings.HasPrefix(item.HTMLURL, "https://github.com/") {
+				parts := strings.Split(strings.TrimPrefix(item.HTMLURL, "https://github.com/"), "/")
+				if len(parts) >= 2 {
+					repo = parts[0] + "/" + parts[1]
+				}
+			}
+		}
+		issues = append(issues, Issue{
+			Title:     item.Title,
+			Body:      item.Body,
+			CreatedAt: item.CreatedAt,
+			HTMLURL:   item.HTMLURL,
+			RepoName:  repo,
+		})
+	}
+
+	hasMore := len(result.Items) == perPage
+	return issues, pageResult{totalCount: result.TotalCount, hasMore: hasMore}, nil
 }
 
 // FetchIssues fetches issues for a user with default page limit.
@@ -235,86 +333,18 @@ func (c *Client) FetchIssuesWithLimit(ctx context.Context, username string, maxP
 	const perPage = 100
 
 	for page := 1; page <= maxPages; page++ {
-		apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=author:%s+type:issue&sort=created&order=desc&per_page=%d&page=%d",
-			url.QueryEscape(username), perPage, page)
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
+		issues, result, err := c.fetchIssuePage(ctx, username, page, perPage)
 		if err != nil {
-			return allIssues, fmt.Errorf("creating request: %w", err)
+			return allIssues, err
 		}
 
-		// SECURITY: Validate and sanitize GitHub token before use
-		if c.githubToken != "" {
-			token := c.githubToken
-			// Validate token format to prevent injection attacks
-			if c.isValidGitHubToken(token) {
-				req.Header.Set("Authorization", "token "+token)
-			}
+		if page == 1 && result.totalCount > 0 {
+			c.logger.Debug("GitHub issue search results", "username", username, "total_count", result.totalCount)
 		}
 
-		resp, err := c.cachedHTTPDo(ctx, req)
-		if err != nil {
-			c.logger.Debug("failed to fetch issue page", "page", page, "error", err)
-			break // Return what we have so far
-		}
-		//nolint:revive,gocritic // defer in loop is acceptable for proper resource cleanup
-		defer func() {
-			if err := resp.Body.Close(); err != nil {
-				c.logger.Debug("failed to close response body", "error", err)
-			}
-		}()
+		allIssues = append(allIssues, issues...)
 
-		if resp.StatusCode != http.StatusOK {
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page)
-				break
-			}
-			c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
-			break
-		}
-
-		var result struct {
-			Items []struct {
-				Title     string    `json:"title"`
-				Body      string    `json:"body"`
-				CreatedAt time.Time `json:"created_at"`
-				HTMLURL   string    `json:"html_url"`
-			} `json:"items"`
-			TotalCount int `json:"total_count"`
-		}
-
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			c.logger.Debug("failed to decode issue response", "page", page, "error", err)
-			break
-		}
-
-		if page == 1 {
-			c.logger.Debug("GitHub issue search results", "username", username, "total_count", result.TotalCount)
-		}
-
-		for _, item := range result.Items {
-			// Extract repository from HTML URL (format: https://github.com/owner/repo/issues/123)
-			repo := ""
-			if item.HTMLURL != "" {
-				if strings.HasPrefix(item.HTMLURL, "https://github.com/") {
-					parts := strings.Split(strings.TrimPrefix(item.HTMLURL, "https://github.com/"), "/")
-					if len(parts) >= 2 {
-						repo = parts[0] + "/" + parts[1]
-					}
-				}
-			}
-			allIssues = append(allIssues, Issue{
-				Title:     item.Title,
-				Body:      item.Body,
-				CreatedAt: item.CreatedAt,
-				HTMLURL:   item.HTMLURL,
-				RepoName:  repo,
-			})
-		}
-
-		// If we got fewer items than requested, we've reached the end
-		if len(result.Items) < perPage {
+		if !result.hasMore {
 			break
 		}
 	}

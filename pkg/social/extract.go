@@ -44,6 +44,8 @@ func Extract(ctx context.Context, data map[string]string, logger *slog.Logger) [
 				content = extractMastodon(ctx, u, logger)
 			case "twitter", "x":
 				content = extractTwitter(ctx, u, logger)
+			case "bluesky", "bsky":
+				content = extractBlueSky(ctx, u, logger)
 			case "website", "blog", "homepage":
 				content = extractWebsite(ctx, u, logger)
 			case "linkedin":
@@ -132,9 +134,8 @@ func extractMastodon(ctx context.Context, mastodonURL string, logger *slog.Logge
 	return content
 }
 
-// extractTwitter extracts content from a Twitter/X profile
-// This is a dummy implementation for now to demonstrate the API.
-func extractTwitter(ctx context.Context, twitterURL string, logger *slog.Logger) *Content {
+// extractTwitterBasic extracts basic content from a Twitter/X profile without scraping.
+func extractTwitterBasic(ctx context.Context, twitterURL string, logger *slog.Logger) *Content {
 	_ = ctx // Context not used in current implementation
 	// Extract username from URL
 	username := ""

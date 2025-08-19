@@ -254,91 +254,92 @@ func printTimezone(result *ghutz.Result) {
 // Removed - no longer needed since we use UTC throughout.
 
 func printWorkSchedule(result *ghutz.Result) {
-	//nolint:nestif // Complex output formatting requires conditional logic
-	if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
-		fmt.Printf("🏃 Active Time:   %s → %s (%s)",
-			formatHour(convertUTCToLocal(result.ActiveHoursLocal.Start, result.Timezone)),
-			formatHour(convertUTCToLocal(result.ActiveHoursLocal.End, result.Timezone)),
-			result.Timezone)
-
-		if result.LunchHoursUTC.Confidence > 0 {
-			fmt.Printf("\n🍽️  Lunch Break:   %s → %s (%s)",
-				formatHour(convertUTCToLocal(result.LunchHoursUTC.Start, result.Timezone)),
-				formatHour(convertUTCToLocal(result.LunchHoursUTC.End, result.Timezone)),
-				result.Timezone)
-			if result.LunchHoursUTC.Confidence < 0.7 {
-				fmt.Print(" (uncertain)")
-			}
-		}
-
-		// Add peak productivity time
-		if result.PeakProductivity.Count > 0 {
-			fmt.Printf("\n🔥 Activity Peak: %s → %s (%s)",
-				formatHour(convertUTCToLocal(result.PeakProductivity.Start, result.Timezone)),
-				formatHour(convertUTCToLocal(result.PeakProductivity.End, result.Timezone)),
-				result.Timezone)
-		}
-
-		// Add sleep hours
-		if len(result.SleepHoursUTC) > 0 {
-			// Convert UTC sleep hours to local hours
-			var localSleepHours []int
-			for _, utcHour := range result.SleepHoursUTC {
-				localHour := int(convertUTCToLocal(float64(utcHour), result.Timezone))
-				localSleepHours = append(localSleepHours, localHour)
-			}
-
-			// Group consecutive sleep hours into ranges
-			type sleepRange struct {
-				start, end int
-			}
-
-			var ranges []sleepRange
-			if len(localSleepHours) > 0 {
-				currentStart := localSleepHours[0]
-				currentEnd := localSleepHours[0]
-
-				for i := 1; i < len(localSleepHours); i++ {
-					hour := localSleepHours[i]
-
-					// Check if this hour is consecutive (handle day wraparound)
-					isConsecutive := false
-					if hour == (currentEnd+1)%24 {
-						isConsecutive = true
-					}
-					// Special case: if current end is 23 and next hour is 0
-					if currentEnd == 23 && hour == 0 {
-						isConsecutive = true
-					}
-
-					if isConsecutive {
-						currentEnd = hour
-					} else {
-						// End current range and start new one
-						ranges = append(ranges, sleepRange{currentStart, (currentEnd + 1) % 24})
-						currentStart = hour
-						currentEnd = hour
-					}
-				}
-
-				// Add the final range
-				ranges = append(ranges, sleepRange{currentStart, (currentEnd + 1) % 24})
-			}
-
-			// Format and display ranges with timezone
-			if len(ranges) > 0 {
-				var rangeStrings []string
-				for _, r := range ranges {
-					rangeStrings = append(rangeStrings, fmt.Sprintf("%s - %s",
-						formatHour(float64(r.start)),
-						formatHour(float64(r.end))))
-				}
-				fmt.Printf("\n💤 Sleep Time:    %s (%s)", strings.Join(rangeStrings, ", "), result.Timezone)
-			}
-		}
-
-		fmt.Println()
+	if result.ActiveHoursLocal.Start == 0 && result.ActiveHoursLocal.End == 0 {
+		return
 	}
+
+	fmt.Printf("🏃 Active Time:   %s → %s (%s)",
+		formatHour(convertUTCToLocal(result.ActiveHoursLocal.Start, result.Timezone)),
+		formatHour(convertUTCToLocal(result.ActiveHoursLocal.End, result.Timezone)),
+		result.Timezone)
+
+	if result.LunchHoursUTC.Confidence > 0 {
+		fmt.Printf("\n🍽️  Lunch Break:   %s → %s (%s)",
+			formatHour(convertUTCToLocal(result.LunchHoursUTC.Start, result.Timezone)),
+			formatHour(convertUTCToLocal(result.LunchHoursUTC.End, result.Timezone)),
+			result.Timezone)
+		if result.LunchHoursUTC.Confidence < 0.7 {
+			fmt.Print(" (uncertain)")
+		}
+	}
+
+	// Add peak productivity time
+	if result.PeakProductivity.Count > 0 {
+		fmt.Printf("\n🔥 Activity Peak: %s → %s (%s)",
+			formatHour(convertUTCToLocal(result.PeakProductivity.Start, result.Timezone)),
+			formatHour(convertUTCToLocal(result.PeakProductivity.End, result.Timezone)),
+			result.Timezone)
+	}
+
+	// Add sleep hours
+	if len(result.SleepHoursUTC) > 0 {
+		// Convert UTC sleep hours to local hours
+		var localSleepHours []int
+		for _, utcHour := range result.SleepHoursUTC {
+			localHour := int(convertUTCToLocal(float64(utcHour), result.Timezone))
+			localSleepHours = append(localSleepHours, localHour)
+		}
+
+		// Group consecutive sleep hours into ranges
+		type sleepRange struct {
+			start, end int
+		}
+
+		var ranges []sleepRange
+		if len(localSleepHours) > 0 {
+			currentStart := localSleepHours[0]
+			currentEnd := localSleepHours[0]
+
+			for i := 1; i < len(localSleepHours); i++ {
+				hour := localSleepHours[i]
+
+				// Check if this hour is consecutive (handle day wraparound)
+				isConsecutive := false
+				if hour == (currentEnd+1)%24 {
+					isConsecutive = true
+				}
+				// Special case: if current end is 23 and next hour is 0
+				if currentEnd == 23 && hour == 0 {
+					isConsecutive = true
+				}
+
+				if isConsecutive {
+					currentEnd = hour
+				} else {
+					// End current range and start new one
+					ranges = append(ranges, sleepRange{currentStart, (currentEnd + 1) % 24})
+					currentStart = hour
+					currentEnd = hour
+				}
+			}
+
+			// Add the final range
+			ranges = append(ranges, sleepRange{currentStart, (currentEnd + 1) % 24})
+		}
+
+		// Format and display ranges with timezone
+		if len(ranges) > 0 {
+			var rangeStrings []string
+			for _, r := range ranges {
+				rangeStrings = append(rangeStrings, fmt.Sprintf("%s - %s",
+					formatHour(float64(r.start)),
+					formatHour(float64(r.end))))
+			}
+			fmt.Printf("\n💤 Sleep Time:    %s (%s)", strings.Join(rangeStrings, ", "), result.Timezone)
+		}
+	}
+
+	fmt.Println()
 }
 
 func printOrganizations(result *ghutz.Result) {

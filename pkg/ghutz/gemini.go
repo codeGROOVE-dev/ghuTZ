@@ -205,6 +205,34 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	}
 	if len(userCtx.Repositories) > 0 {
 		contextData["repositories"] = userCtx.Repositories
+
+		// Check for github.io repositories (personal websites)
+		for i := range userCtx.Repositories {
+			// Check if this is a GitHub Pages site
+			if !strings.HasSuffix(userCtx.Repositories[i].Name, ".github.io") &&
+				!strings.EqualFold(userCtx.Repositories[i].Name, userCtx.Username+".github.io") {
+				continue
+			}
+			// This is a personal GitHub Pages site
+			githubPagesURL := fmt.Sprintf("https://%s.github.io", userCtx.Username)
+
+			// Add to website if not already set
+			if userCtx.User.Blog == "" {
+				userCtx.User.Blog = githubPagesURL
+				d.logger.Debug("found GitHub Pages site", "url", githubPagesURL, "repo", userCtx.Repositories[i].Name)
+			}
+
+			// Fetch content from the GitHub Pages site
+			websiteContent := d.fetchWebsiteContent(ctx, githubPagesURL)
+			if websiteContent != "" {
+				if existingContent, ok := contextData["website_content"].(string); !ok || existingContent == "" {
+					contextData["website_content"] = websiteContent
+					contextData["github_pages_url"] = githubPagesURL
+					d.logger.Debug("fetched GitHub Pages content", "url", githubPagesURL, "content_length", len(websiteContent))
+				}
+			}
+			break // Found the main github.io site
+		}
 	}
 	if len(userCtx.StarredRepos) > 0 {
 		contextData["starred_repositories"] = userCtx.StarredRepos
@@ -351,61 +379,93 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 			contextData["country_tlds"] = tlds
 		}
 
-		// Follow Mastodon links to get comprehensive profile data
+		// Extract data from social media profiles
+		socialProfiles := make(map[string]string)
 		for _, socialURL := range socialURLs {
-			isMastodon := false
-
-			if strings.Contains(userCtx.User.Bio, "[MASTODON] "+socialURL) {
-				isMastodon = true
-			} else if strings.Contains(socialURL, "/@") {
-				isMastodon = true
+			// Determine the type of social media
+			switch {
+			case strings.Contains(socialURL, "twitter.com") || strings.Contains(socialURL, "x.com"):
+				socialProfiles["twitter"] = socialURL
+			case strings.Contains(socialURL, "bsky.app"):
+				socialProfiles["bluesky"] = socialURL
+			case strings.Contains(socialURL, "/@") || strings.Contains(userCtx.User.Bio, "[MASTODON] "+socialURL):
+				socialProfiles["mastodon"] = socialURL
 			}
+		}
 
-			if isMastodon {
-				d.logger.Debug("following Mastodon link", "url", socialURL)
-				// Use the new social package to extract Mastodon data
-				socialData := map[string]string{
-					"mastodon": socialURL,
+		// Extract social media data using the social package
+		extractedProfiles := social.Extract(ctx, socialProfiles, d.logger)
+
+		// Process extracted profiles
+		for idx := range extractedProfiles {
+			switch extractedProfiles[idx].Kind {
+			case "twitter":
+				// Add Twitter profile data to context
+				if extractedProfiles[idx].Location != "" || extractedProfiles[idx].Bio != "" {
+					twitterData := map[string]string{
+						"username": extractedProfiles[idx].Username,
+						"name":     extractedProfiles[idx].Name,
+						"bio":      extractedProfiles[idx].Bio,
+						"location": extractedProfiles[idx].Location,
+					}
+					contextData["twitter_profile"] = twitterData
+					d.logger.Debug("extracted Twitter profile",
+						"username", extractedProfiles[idx].Username,
+						"location", extractedProfiles[idx].Location,
+						"bio_length", len(extractedProfiles[idx].Bio))
 				}
-				extracted := social.Extract(ctx, socialData, d.logger)
-				if len(extracted) > 0 && extracted[0].Kind == "mastodon" {
-					// Convert to old format for compatibility
-					mastodonData := &MastodonProfileData{
-						Username:      extracted[0].Username,
-						DisplayName:   extracted[0].Name,
-						Bio:           extracted[0].Bio,
-						ProfileFields: extracted[0].Fields,
-						Hashtags:      extracted[0].Tags,
-						JoinedDate:    extracted[0].Joined,
-						Websites:      []string{},
-					}
 
-					// Extract websites from fields
-					for key, value := range extracted[0].Fields {
-						lowerKey := strings.ToLower(key)
-						if strings.Contains(lowerKey, "website") || strings.Contains(lowerKey, "blog") ||
-							strings.Contains(lowerKey, "home") || strings.Contains(lowerKey, "url") {
-							if strings.HasPrefix(value, "http") {
-								mastodonData.Websites = append(mastodonData.Websites, value)
-							}
+			case "bluesky":
+				// Add BlueSky profile data to context
+				if extractedProfiles[idx].Bio != "" {
+					blueSkyData := map[string]string{
+						"handle": extractedProfiles[idx].Username,
+						"name":   extractedProfiles[idx].Name,
+						"bio":    extractedProfiles[idx].Bio,
+					}
+					contextData["bluesky_profile"] = blueSkyData
+					d.logger.Debug("extracted BlueSky profile",
+						"handle", extractedProfiles[idx].Username,
+						"bio_length", len(extractedProfiles[idx].Bio))
+				}
+
+			case "mastodon":
+				// Convert to old format for compatibility
+				mastodonData := &MastodonProfileData{
+					Username:      extractedProfiles[idx].Username,
+					DisplayName:   extractedProfiles[idx].Name,
+					Bio:           extractedProfiles[idx].Bio,
+					ProfileFields: extractedProfiles[idx].Fields,
+					Hashtags:      extractedProfiles[idx].Tags,
+					JoinedDate:    extractedProfiles[idx].Joined,
+					Websites:      []string{},
+				}
+
+				// Extract websites from fields
+				for key, value := range extractedProfiles[idx].Fields {
+					lowerKey := strings.ToLower(key)
+					if strings.Contains(lowerKey, "website") || strings.Contains(lowerKey, "blog") ||
+						strings.Contains(lowerKey, "home") || strings.Contains(lowerKey, "url") {
+						if strings.HasPrefix(value, "http") {
+							mastodonData.Websites = append(mastodonData.Websites, value)
 						}
 					}
+				}
 
-					contextData["mastodon_profile"] = mastodonData
+				contextData["mastodon_profile"] = mastodonData
 
-					for _, website := range mastodonData.Websites {
-						if userCtx.User.Blog == "" {
-							userCtx.User.Blog = website
-						}
+				for _, website := range mastodonData.Websites {
+					if userCtx.User.Blog == "" {
+						userCtx.User.Blog = website
+					}
 
-						websiteContent := d.fetchWebsiteContent(ctx, website)
-						if websiteContent != "" {
-							if websiteContents, ok := contextData["mastodon_website_contents"].(map[string]string); ok {
-								websiteContents[website] = websiteContent
-							} else {
-								contextData["mastodon_website_contents"] = map[string]string{
-									website: websiteContent,
-								}
+					websiteContent := d.fetchWebsiteContent(ctx, website)
+					if websiteContent != "" {
+						if websiteContents, ok := contextData["mastodon_website_contents"].(map[string]string); ok {
+							websiteContents[website] = websiteContent
+						} else {
+							contextData["mastodon_website_contents"] = map[string]string{
+								website: websiteContent,
 							}
 						}
 					}
