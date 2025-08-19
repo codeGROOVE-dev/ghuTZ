@@ -1,7 +1,7 @@
 package timezone
 
 // DetectPeakProductivityWithHalfHours identifies the single 30-minute bucket with highest activity.
-func DetectPeakProductivityWithHalfHours(halfHourCounts map[float64]int, utcOffset int) (start, end float64, count int) {
+func DetectPeakProductivityWithHalfHours(halfHourCounts map[float64]int, _ int) (start, end float64, count int) {
 	if len(halfHourCounts) == 0 {
 		return -1, -1, 0
 	}

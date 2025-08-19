@@ -243,20 +243,22 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, timezone string) 
 
 					// Add segments for each top organization
 					for _, topOrg := range result.TopOrganizations {
-						if orgCount, exists := orgActivity[topOrg.Name]; exists && remaining > 0 {
-							// Calculate this org's proportion
-							segmentLength := (orgCount * barLength) / count
-							if segmentLength == 0 && orgCount > 0 {
-								segmentLength = 1
-							}
-							if segmentLength > remaining {
-								segmentLength = remaining
-							}
-
-							colorFunc := getOrgColorFunc(topOrg.Name, result.TopOrganizations)
-							bar += colorFunc.Sprint(strings.Repeat("█", segmentLength))
-							remaining -= segmentLength
+						orgCount, exists := orgActivity[topOrg.Name]
+						if !exists || remaining <= 0 {
+							continue
 						}
+						// Calculate this org's proportion
+						segmentLength := (orgCount * barLength) / count
+						if segmentLength == 0 && orgCount > 0 {
+							segmentLength = 1
+						}
+						if segmentLength > remaining {
+							segmentLength = remaining
+						}
+
+						colorFunc := getOrgColorFunc(topOrg.Name, result.TopOrganizations)
+						bar += colorFunc.Sprint(strings.Repeat("█", segmentLength))
+						remaining -= segmentLength
 					}
 
 					// Add any remaining as "other" activity

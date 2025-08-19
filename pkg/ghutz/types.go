@@ -42,13 +42,13 @@ func WithGCPProject(projectID string) Option {
 }
 
 func WithHTTPClient(client interface{}) Option {
-	return func(o *OptionHolder) {
+	return func(_ *OptionHolder) {
 		// Not implemented, keeping for compatibility
 	}
 }
 
 func WithLogger(logger interface{}) Option {
-	return func(o *OptionHolder) {
+	return func(_ *OptionHolder) {
 		// Logger is handled differently
 	}
 }

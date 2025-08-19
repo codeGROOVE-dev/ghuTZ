@@ -135,6 +135,7 @@ func extractMastodon(ctx context.Context, mastodonURL string, logger *slog.Logge
 // extractTwitter extracts content from a Twitter/X profile
 // This is a dummy implementation for now to demonstrate the API.
 func extractTwitter(ctx context.Context, twitterURL string, logger *slog.Logger) *Content {
+	_ = ctx // Context not used in current implementation
 	// Extract username from URL
 	username := ""
 	if strings.Contains(twitterURL, "twitter.com/") {
@@ -184,6 +185,7 @@ func extractTwitter(ctx context.Context, twitterURL string, logger *slog.Logger)
 // extractLinkedIn extracts content from a LinkedIn profile
 // This is a dummy implementation for now.
 func extractLinkedIn(ctx context.Context, linkedinURL string, logger *slog.Logger) *Content {
+	_ = ctx // Context not used in current implementation
 	// Extract username/profile ID from URL
 	profileID := ""
 	if strings.Contains(linkedinURL, "linkedin.com/in/") {

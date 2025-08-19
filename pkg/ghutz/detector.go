@@ -69,6 +69,59 @@ type Detector struct {
 	forceActivity bool
 }
 
+// NewWithLogger creates a new Detector with a custom logger.
+func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *Detector {
+	optHolder := &OptionHolder{}
+	for _, opt := range opts {
+		opt(optHolder)
+	}
+
+	// Initialize cache
+	var cache *httpcache.OtterCache
+	var cacheDir string
+
+	if optHolder.cacheDir != "" {
+		// Use custom cache directory
+		cacheDir = optHolder.cacheDir
+	} else if userCacheDir, err := os.UserCacheDir(); err == nil {
+		// Use default user cache directory
+		cacheDir = filepath.Join(userCacheDir, "ghutz")
+	} else {
+		logger.Debug("could not determine user cache directory", "error", err)
+	}
+
+	if cacheDir != "" {
+		var err error
+		cache, err = httpcache.NewOtterCache(ctx, cacheDir, 20*24*time.Hour, logger)
+		if err != nil {
+			logger.Warn("cache initialization failed", "error", err, "cache_dir", cacheDir)
+			// Cache is optional, continue without it
+			cache = nil
+		}
+	}
+
+	detector := &Detector{
+		githubToken:   optHolder.githubToken,
+		mapsAPIKey:    optHolder.mapsAPIKey,
+		geminiAPIKey:  optHolder.geminiAPIKey,
+		geminiModel:   optHolder.geminiModel,
+		gcpProject:    optHolder.gcpProject,
+		logger:        logger,
+		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		forceActivity: optHolder.forceActivity,
+		cache:         cache,
+	}
+
+	// Create GitHub client with cached HTTP
+	if cache != nil {
+		detector.githubClient = github.NewClient(logger, detector.httpClient, optHolder.githubToken, detector.cachedHTTPDo)
+	} else {
+		detector.githubClient = github.NewClient(logger, detector.httpClient, optHolder.githubToken, detector.retryableHTTPDo)
+	}
+
+	return detector
+}
+
 // retryableHTTPDo performs an HTTP request with exponential backoff and jitter.
 // The returned response body must be closed by the caller.
 func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*http.Response, error) {
@@ -130,7 +183,7 @@ func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*htt
 }
 
 // isValidGitHubToken validates GitHub token format for security.
-func (d *Detector) isValidGitHubToken(token string) bool {
+func (_ *Detector) isValidGitHubToken(token string) bool {
 	// SECURITY: Validate token format to prevent injection attacks
 	token = strings.TrimSpace(token)
 
@@ -168,8 +221,8 @@ func isValidGitHubUsername(username string) bool {
 
 	// Only allow alphanumeric and hyphens
 	for _, ch := range username {
-		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
-			(ch >= '0' && ch <= '9') || ch == '-') {
+		if (ch < 'a' || ch > 'z') && (ch < 'A' || ch > 'Z') &&
+			(ch < '0' || ch > '9') && ch != '-' {
 			return false
 		}
 	}
@@ -180,59 +233,6 @@ func isValidGitHubUsername(username string) bool {
 // New creates a new Detector with default logger.
 func New(ctx context.Context, opts ...Option) *Detector {
 	return NewWithLogger(ctx, slog.Default(), opts...)
-}
-
-// NewWithLogger creates a new Detector with a custom logger.
-func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *Detector {
-	optHolder := &OptionHolder{}
-	for _, opt := range opts {
-		opt(optHolder)
-	}
-
-	// Initialize cache
-	var cache *httpcache.OtterCache
-	var cacheDir string
-
-	if optHolder.cacheDir != "" {
-		// Use custom cache directory
-		cacheDir = optHolder.cacheDir
-	} else if userCacheDir, err := os.UserCacheDir(); err == nil {
-		// Use default user cache directory
-		cacheDir = filepath.Join(userCacheDir, "ghutz")
-	} else {
-		logger.Debug("could not determine user cache directory", "error", err)
-	}
-
-	if cacheDir != "" {
-		var err error
-		cache, err = httpcache.NewOtterCache(ctx, cacheDir, 20*24*time.Hour, logger)
-		if err != nil {
-			logger.Warn("cache initialization failed", "error", err, "cache_dir", cacheDir)
-			// Cache is optional, continue without it
-			cache = nil
-		}
-	}
-
-	detector := &Detector{
-		githubToken:   optHolder.githubToken,
-		mapsAPIKey:    optHolder.mapsAPIKey,
-		geminiAPIKey:  optHolder.geminiAPIKey,
-		geminiModel:   optHolder.geminiModel,
-		gcpProject:    optHolder.gcpProject,
-		logger:        logger,
-		httpClient:    &http.Client{Timeout: 30 * time.Second},
-		forceActivity: optHolder.forceActivity,
-		cache:         cache,
-	}
-
-	// Create GitHub client with cached HTTP
-	if cache != nil {
-		detector.githubClient = github.NewClient(logger, detector.httpClient, optHolder.githubToken, detector.cachedHTTPDo)
-	} else {
-		detector.githubClient = github.NewClient(logger, detector.httpClient, optHolder.githubToken, detector.retryableHTTPDo)
-	}
-
-	return detector
 }
 
 // Close properly shuts down the detector, including saving the cache to disk.

@@ -282,42 +282,43 @@ func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.
 	fieldMatches := fieldPattern.FindAllStringSubmatch(content, -1)
 
 	for _, match := range fieldMatches {
-		if len(match) > 2 {
-			fieldName := strings.TrimSpace(html.UnescapeString(match[1]))
-			fieldValue := match[2]
+		if len(match) <= 2 {
+			continue
+		}
+		fieldName := strings.TrimSpace(html.UnescapeString(match[1]))
+		fieldValue := match[2]
 
-			// Extract text and links from field value
-			// Remove HTML tags but preserve link URLs
-			linkPattern := regexp.MustCompile(`<a[^>]+href=["']([^"']+)["'][^>]*>([^<]*)</a>`)
-			links := linkPattern.FindAllStringSubmatch(fieldValue, -1)
+		// Extract text and links from field value
+		// Remove HTML tags but preserve link URLs
+		linkPattern := regexp.MustCompile(`<a[^>]+href=["']([^"']+)["'][^>]*>([^<]*)</a>`)
+		links := linkPattern.FindAllStringSubmatch(fieldValue, -1)
 
-			cleanValue := fieldValue
-			for _, link := range links {
-				if len(link) > 2 {
-					url := link[1]
-					linkText := link[2]
-					if linkText != "" {
-						cleanValue = strings.Replace(cleanValue, link[0], linkText, 1)
-					} else {
-						cleanValue = strings.Replace(cleanValue, link[0], url, 1)
-					}
+		cleanValue := fieldValue
+		for _, link := range links {
+			if len(link) > 2 {
+				url := link[1]
+				linkText := link[2]
+				if linkText != "" {
+					cleanValue = strings.Replace(cleanValue, link[0], linkText, 1)
+				} else {
+					cleanValue = strings.Replace(cleanValue, link[0], url, 1)
+				}
 
-					// Add to websites list if it's a website
-					if strings.HasPrefix(url, "http") && !strings.Contains(url, "mastodon") &&
-						!strings.Contains(url, ".social") && !strings.Contains(url, "infosec.exchange") {
-						profileData.Websites = append(profileData.Websites, url)
-					}
+				// Add to websites list if it's a website
+				if strings.HasPrefix(url, "http") && !strings.Contains(url, "mastodon") &&
+					!strings.Contains(url, ".social") && !strings.Contains(url, "infosec.exchange") {
+					profileData.Websites = append(profileData.Websites, url)
 				}
 			}
+		}
 
-			// Remove remaining HTML tags
-			tagPattern := regexp.MustCompile(`<[^>]+>`)
-			cleanValue = tagPattern.ReplaceAllString(cleanValue, "")
-			cleanValue = strings.TrimSpace(html.UnescapeString(cleanValue))
+		// Remove remaining HTML tags
+		tagPattern := regexp.MustCompile(`<[^>]+>`)
+		cleanValue = tagPattern.ReplaceAllString(cleanValue, "")
+		cleanValue = strings.TrimSpace(html.UnescapeString(cleanValue))
 
-			if fieldName != "" && cleanValue != "" {
-				profileData.ProfileFields[fieldName] = cleanValue
-			}
+		if fieldName != "" && cleanValue != "" {
+			profileData.ProfileFields[fieldName] = cleanValue
 		}
 	}
 

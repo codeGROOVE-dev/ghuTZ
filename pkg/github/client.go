@@ -27,7 +27,7 @@ func NewClient(logger *slog.Logger, httpClient *http.Client, githubToken string,
 }
 
 // isValidGitHubToken checks if a token looks valid (basic check).
-func (c *Client) isValidGitHubToken(token string) bool {
+func (_ *Client) isValidGitHubToken(token string) bool {
 	// GitHub tokens have specific prefixes
 	// Classic: 40 chars hex
 	// Fine-grained: github_pat_ prefix
@@ -47,7 +47,7 @@ func (c *Client) isValidGitHubToken(token string) bool {
 	// Classic tokens are 40 hex chars
 	if len(token) == 40 {
 		for _, c := range token {
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
 				return false
 			}
 		}

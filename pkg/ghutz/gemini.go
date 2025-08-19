@@ -25,7 +25,7 @@ type geminiQueryResult struct {
 }
 
 // queryUnifiedGeminiForTimezone queries Gemini AI for timezone detection.
-func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]any, verbose bool) (*geminiQueryResult, error) {
+func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]any, _ bool) (*geminiQueryResult, error) {
 	// Check if we have activity data for confidence scoring later
 	hasActivityData := false
 	if hourCounts, ok := contextData["hour_counts"].(map[int]int); ok && len(hourCounts) > 0 {
