@@ -145,14 +145,25 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 			// CRITICAL: Treat missing buckets as 0 events (perfect lunch signal!)
 			lunchTotal := 0
 			lunchBuckets := 0
+			bucketDrops := []float64{} // Track individual bucket drops for steepness analysis
+			
 			for t := 0.0; t < duration; t += 0.5 {
 				bucket := math.Mod(startUTC+t+24, 24)
 				// Always count the bucket, even if it doesn't exist (0 events)
 				lunchBuckets++
+				bucketCount := 0
 				if count, exists := halfHourCounts[bucket]; exists {
+					bucketCount = count
 					lunchTotal += count
 				}
 				// If bucket doesn't exist, it's 0 events (no activity = lunch!)
+				
+				// Calculate drop ratio for this individual bucket
+				bucketDrop := 0.0
+				if beforeCount > 0 {
+					bucketDrop = (float64(beforeCount) - float64(bucketCount)) / float64(beforeCount)
+				}
+				bucketDrops = append(bucketDrops, bucketDrop)
 			}
 
 			if lunchBuckets == 0 || beforeCount == 0 {
@@ -161,8 +172,42 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 
 			avgLunchActivity := float64(lunchTotal) / float64(lunchBuckets)
 
-			// Calculate drop percentage
+			// Calculate overall drop percentage
 			dropRatio := (float64(beforeCount) - avgLunchActivity) / float64(beforeCount)
+			
+			// NEW: Check steepness uniformity for multi-bucket lunch periods
+			// If lunch has multiple buckets, ensure drops are relatively uniform
+			if len(bucketDrops) > 1 {
+				maxDrop := 0.0
+				minDrop := 1.0
+				for _, drop := range bucketDrops {
+					if drop > maxDrop {
+						maxDrop = drop
+					}
+					if drop < minDrop {
+						minDrop = drop
+					}
+				}
+				
+				// If the difference between max and min drop is > 20% of the max drop,
+				// the steepness is not uniform - prefer the steeper single block
+				if maxDrop > 0 && (maxDrop-minDrop)/maxDrop > 0.20 {
+					// Find which bucket has the steepest drop and prefer shorter lunch there
+					steepestDrop := 0.0
+					for _, drop := range bucketDrops {
+						if drop > steepestDrop {
+							steepestDrop = drop
+						}
+					}
+					
+					// Skip this duration if we're not looking at the steepest bucket
+					// The algorithm will try shorter durations that focus on the steeper drop
+					if duration > 0.5 && steepestDrop > minDrop*1.5 {
+						// Significantly non-uniform - skip longer durations
+						continue
+					}
+				}
+			}
 
 			// Check for "quick lunch" pattern: brief dip followed by strong rebound
 			// This is common for people who grab a quick lunch then have meetings

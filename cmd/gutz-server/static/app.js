@@ -215,6 +215,25 @@ function displayResults(data) {
         if (data.activity_date_range.total_days > 0) {
             summaryText += ` (${data.activity_date_range.total_days} days)`;
         }
+        
+        // Add warnings for insufficient data or new accounts
+        let warnings = [];
+        if (totalEvents < 100) {
+            warnings.push('⚠️ INSUFFICIENT DATA: Less than 100 events may reduce accuracy');
+        }
+        
+        // Check if account is less than 120 days old
+        if (data.created_at) {
+            const createdDate = new Date(data.created_at);
+            const daysSinceCreation = Math.floor((Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+            if (daysSinceCreation < 120) {
+                warnings.push('⚠️ NEW ACCOUNT: Account less than 120 days old may have limited data');
+            }
+        }
+        
+        if (warnings.length > 0) {
+            summaryText += '\n' + warnings.join('\n');
+        }
 
         document.getElementById('activitySummary').textContent = summaryText;
         document.getElementById('activitySummaryRow').style.display = 'block';

@@ -214,6 +214,14 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	}
 
 	quietHours := sleep.FindSleepHours(hourCounts)
+	// Create a string representation to see the actual order
+	var sleepHoursStr []string
+	for _, h := range quietHours {
+		sleepHoursStr = append(sleepHoursStr, fmt.Sprintf("%d", h))
+	}
+	d.logger.Info("DEBUG: raw sleep hours", "username", username, 
+		"quiet_hours_order", strings.Join(sleepHoursStr, ","),
+		"count", len(quietHours))
 	// With limited data, we might not find clear sleep patterns
 	// If we don't have enough quiet hours, make educated guesses based on what we have
 	if len(quietHours) < 4 {
@@ -246,23 +254,29 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	}
 	d.logger.Debug("hourly activity distribution", "username", username, "hours_utc", hourlyActivity)
 
-	// Find the middle of sleep hours, handling wrap-around
-	start := quietHours[0]
-	end := quietHours[len(quietHours)-1]
+	// Find the middle of sleep hours
+	// FindSleepHours returns a continuous window of hours, potentially wrapping around midnight
+	// e.g., [22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] for 13 hours starting at 22:00
 	var midQuiet float64
-
-	// Check if quiet hours wrap around midnight
-	if end < start || (start == 0 && end == 23) {
-		// Wraps around (e.g., 22-3)
-		totalHours := (24 - start) + end + 1
-		midQuiet = float64(start) + float64(totalHours)/2.0
+	
+	if len(quietHours) == 0 {
+		// No quiet hours found - shouldn't happen but handle gracefully
+		midQuiet = 2.5 // Default to 2:30 AM UTC
+	} else {
+		// The sleep hours form a continuous window, so the midpoint is simply
+		// the start hour plus half the window size
+		startHour := quietHours[0]
+		windowSize := len(quietHours)
+		
+		// Calculate midpoint accounting for wrap-around
+		midQuiet = float64(startHour) + float64(windowSize)/2.0
 		if midQuiet >= 24 {
 			midQuiet -= 24
 		}
-	} else {
-		// Normal case (e.g., 3-8)
-		// For a 6-hour window from start to end, the middle is (start + end) / 2
-		midQuiet = (float64(start) + float64(end)) / 2.0
+		
+		d.logger.Debug("sleep midpoint calculation", "username", username,
+			"quiet_hours", quietHours, "start_hour", startHour, 
+			"window_size", windowSize, "midQuiet", midQuiet)
 	}
 
 	// Analyze the activity pattern to determine likely region
@@ -521,7 +535,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				"confidence", c.Confidence,
 				"evening_activity", c.EveningActivity,
 				"lunch_reasonable", c.LunchReasonable,
-				"work_hours_normal", c.WorkHoursNormal)
+				"work_hours_reasonable", c.WorkHoursReasonable)
 		}
 
 		// Use the top candidate's offset instead of the initial detection
@@ -784,7 +798,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// UNLESS we have strong evidence for Europe (e.g., Polish name)
 	if suspiciousWorkHours && alternativeTimezone == "UTC+8" && offsetInt <= 3 {
 		// Get user's full name to check for regional indicators
-		user := d.githubClient.FetchUser(ctx, username)
+		user, _ := d.githubClient.FetchUserEnhancedGraphQL(ctx, username)
 		isLikelyEuropean := false
 
 		if user != nil && user.Name != "" {
@@ -931,29 +945,30 @@ func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, usern
 		var wg sync.WaitGroup
 		// For initial fetch (maxPages==1), fetch first page of everything
 		// For deep fetch (maxPages>1), skip comments/stars to save API calls
-		numGoroutines := 5
+		// With GraphQL, PRs and Issues are fetched together, so we need fewer goroutines
+		numGoroutines := 4 // PRs+Issues (1), commits (1), comments (1), stars (1)
 		if maxPages > 1 {
-			numGoroutines = 3 // Only PRs, issues, commits for deep fetch
+			numGoroutines = 2 // Only PRs+Issues (1), commits (1) for deep fetch
 		}
 		wg.Add(numGoroutines)
 
-		// Fetch PRs
+		// Fetch PRs and Issues together using GraphQL (much more efficient!)
 		go func() {
 			defer wg.Done()
-			if prs, err := d.githubClient.FetchPullRequestsWithLimit(ctx, username, maxPages); err == nil {
+			prs, issues, err := d.githubClient.FetchActivityWithGraphQL(ctx, username)
+			if err != nil {
+				d.logger.Warn("🚩 GraphQL Activity Fetch Failed, using REST fallback", "username", username, "error", err)
+				// Fallback to REST if GraphQL fails
+				if prList, err := d.githubClient.FetchPullRequestsWithLimit(ctx, username, maxPages); err == nil {
+					res.prs = prList
+				}
+				if issueList, err := d.githubClient.FetchIssuesWithLimit(ctx, username, maxPages); err == nil {
+					res.issues = issueList
+				}
+			} else {
 				res.prs = prs
-			} else {
-				d.logger.Debug("failed to fetch PRs", "username", username, "error", err)
-			}
-		}()
-
-		// Fetch Issues
-		go func() {
-			defer wg.Done()
-			if issues, err := d.githubClient.FetchIssuesWithLimit(ctx, username, maxPages); err == nil {
 				res.issues = issues
-			} else {
-				d.logger.Debug("failed to fetch issues", "username", username, "error", err)
+				d.logger.Debug("fetched activity via GraphQL", "username", username, "prs", len(prs), "issues", len(issues))
 			}
 		}()
 

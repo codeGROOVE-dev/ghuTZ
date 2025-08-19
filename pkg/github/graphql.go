@@ -1,0 +1,448 @@
+package github
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"time"
+)
+
+// GraphQLClient handles GitHub GraphQL API requests.
+type GraphQLClient struct {
+	token        string
+	cachedHTTPDo func(context.Context, *http.Request) (*http.Response, error)
+	logger       *slog.Logger
+}
+
+// NewGraphQLClient creates a new GraphQL client.
+func NewGraphQLClient(token string, cachedHTTPDo func(context.Context, *http.Request) (*http.Response, error), logger *slog.Logger) *GraphQLClient {
+	return &GraphQLClient{
+		token:        token,
+		cachedHTTPDo: cachedHTTPDo,
+		logger:       logger,
+	}
+}
+
+// GraphQL response structures.
+type GraphQLResponse struct {
+	Data   json.RawMessage `json:"data"`
+	Errors []GraphQLError  `json:"errors,omitempty"`
+}
+
+type GraphQLError struct {
+	Message string `json:"message"`
+	Type    string `json:"type"`
+}
+
+// NOTE: CommitActivityResponse was removed because GitHub's GraphQL search API
+// doesn't support COMMIT type. Use REST API for commit search instead.
+
+// UserProfileResponse for non-paginated user data.
+type UserProfileResponse struct {
+	User struct {
+		Name            string    `json:"name"`
+		Login           string    `json:"login"`
+		Email           string    `json:"email"`
+		Location        string    `json:"location"`
+		Bio             string    `json:"bio"`
+		Company         string    `json:"company"`
+		Blog            string    `json:"websiteUrl"`
+		TwitterUsername string    `json:"twitterUsername"`
+		CreatedAt       time.Time `json:"createdAt"`
+		UpdatedAt       time.Time `json:"updatedAt"`
+
+		// Social accounts
+		SocialAccounts struct {
+			Nodes []struct {
+				Provider    string `json:"provider"`
+				URL         string `json:"url"`
+				DisplayName string `json:"displayName"`
+			} `json:"nodes"`
+		} `json:"socialAccounts"`
+
+		// Organizations
+		Organizations struct {
+			Nodes []struct {
+				Name        string `json:"name"`
+				Login       string `json:"login"`
+				Location    string `json:"location"`
+				Description string `json:"description"`
+			} `json:"nodes"`
+		} `json:"organizations"`
+
+		// Statistics
+		Followers struct {
+			TotalCount int `json:"totalCount"`
+		} `json:"followers"`
+		Following struct {
+			TotalCount int `json:"totalCount"`
+		} `json:"following"`
+		Repositories struct {
+			TotalCount int `json:"totalCount"`
+		} `json:"repositories"`
+		ContributionsCollection struct {
+			StartedAt                     time.Time `json:"startedAt"`
+			EndedAt                       time.Time `json:"endedAt"`
+			TotalCommitContributions      int       `json:"totalCommitContributions"`
+			TotalPullRequestContributions int       `json:"totalPullRequestContributions"`
+			TotalIssueContributions       int       `json:"totalIssueContributions"`
+		} `json:"contributionsCollection"`
+
+		// Starred repositories
+		StarredRepositories struct {
+			Nodes []struct {
+				Name            string `json:"name"`
+				NameWithOwner   string `json:"nameWithOwner"`
+				Description     string `json:"description"`
+				PrimaryLanguage struct {
+					Name string `json:"name"`
+				} `json:"primaryLanguage"`
+				StargazerCount int    `json:"stargazerCount"`
+				URL            string `json:"url"`
+			} `json:"nodes"`
+			TotalCount int `json:"totalCount"`
+		} `json:"starredRepositories"`
+
+		// Gists
+		Gists struct {
+			Nodes []struct {
+				CreatedAt   time.Time `json:"createdAt"`
+				UpdatedAt   time.Time `json:"updatedAt"`
+				Description string    `json:"description"`
+				URL         string    `json:"url"`
+				IsPublic    bool      `json:"isPublic"`
+			} `json:"nodes"`
+			TotalCount int `json:"totalCount"`
+		} `json:"gists"`
+	} `json:"user"`
+}
+
+// ActivityDataResponse for paginated activity data.
+type ActivityDataResponse struct {
+	User struct {
+		PullRequests struct {
+			Nodes []struct {
+				Title      string    `json:"title"`
+				Number     int       `json:"number"`
+				CreatedAt  time.Time `json:"createdAt"`
+				UpdatedAt  time.Time `json:"updatedAt"`
+				URL        string    `json:"url"`
+				State      string    `json:"state"`
+				Repository struct {
+					Name  string `json:"name"`
+					Owner struct {
+						Login string `json:"login"`
+					} `json:"owner"`
+				} `json:"repository"`
+			} `json:"nodes"`
+			PageInfo struct {
+				HasNextPage bool   `json:"hasNextPage"`
+				EndCursor   string `json:"endCursor"`
+			} `json:"pageInfo"`
+			TotalCount int `json:"totalCount"`
+		} `json:"pullRequests"`
+
+		Issues struct {
+			Nodes []struct {
+				Title      string    `json:"title"`
+				Number     int       `json:"number"`
+				CreatedAt  time.Time `json:"createdAt"`
+				UpdatedAt  time.Time `json:"updatedAt"`
+				URL        string    `json:"url"`
+				State      string    `json:"state"`
+				Repository struct {
+					Name  string `json:"name"`
+					Owner struct {
+						Login string `json:"login"`
+					} `json:"owner"`
+				} `json:"repository"`
+			} `json:"nodes"`
+			PageInfo struct {
+				HasNextPage bool   `json:"hasNextPage"`
+				EndCursor   string `json:"endCursor"`
+			} `json:"pageInfo"`
+			TotalCount int `json:"totalCount"`
+		} `json:"issues"`
+	} `json:"user"`
+}
+
+// CommentDataResponse for paginated comments.
+type CommentDataResponse struct {
+	User struct {
+		IssueComments struct {
+			Nodes []struct {
+				Body      string    `json:"body"`
+				CreatedAt time.Time `json:"createdAt"`
+				URL       string    `json:"url"`
+			} `json:"nodes"`
+			PageInfo struct {
+				HasNextPage bool   `json:"hasNextPage"`
+				EndCursor   string `json:"endCursor"`
+			} `json:"pageInfo"`
+		} `json:"issueComments"`
+	} `json:"user"`
+}
+
+// FetchUserProfile fetches all non-paginated user data in a single query.
+func (c *GraphQLClient) FetchUserProfile(ctx context.Context, username string) (*UserProfileResponse, error) {
+	query := `
+	query($login: String!) {
+		user(login: $login) {
+			name
+			login
+			email
+			location
+			bio
+			company
+			websiteUrl
+			twitterUsername
+			createdAt
+			updatedAt
+			
+			socialAccounts(first: 10) {
+				nodes {
+					provider
+					url
+					displayName
+				}
+			}
+			
+			organizations(first: 20) {
+				nodes {
+					name
+					login
+					location
+					description
+				}
+			}
+			
+			followers {
+				totalCount
+			}
+			following {
+				totalCount
+			}
+			repositories {
+				totalCount
+			}
+			
+			contributionsCollection {
+				startedAt
+				endedAt
+				totalCommitContributions
+				totalPullRequestContributions
+				totalIssueContributions
+			}
+			
+			starredRepositories(first: 50, orderBy: {field: STARRED_AT, direction: DESC}) {
+				nodes {
+					name
+					nameWithOwner
+					description
+					primaryLanguage {
+						name
+					}
+					stargazerCount
+					url
+				}
+				totalCount
+			}
+			
+			gists(first: 50, orderBy: {field: CREATED_AT, direction: DESC}) {
+				nodes {
+					createdAt
+					updatedAt
+					description
+					url
+					isPublic
+				}
+				totalCount
+			}
+		}
+	}`
+
+	variables := map[string]interface{}{
+		"login": username,
+	}
+
+	resp, err := c.executeQuery(ctx, query, variables)
+	if err != nil {
+		c.logger.Error("🚩 GraphQL User Profile Query Failed", "query_type", "user_profile_with_starred_repos_and_gists", "username", username, "error", err)
+		return nil, err
+	}
+
+	var result UserProfileResponse
+	if err := json.Unmarshal(resp.Data, &result); err != nil {
+		return nil, fmt.Errorf("unmarshaling user profile: %w", err)
+	}
+
+	return &result, nil
+}
+
+// FetchActivityData fetches PRs and Issues in a single paginated query.
+func (c *GraphQLClient) FetchActivityData(ctx context.Context, username string, prCursor, issueCursor string) (*ActivityDataResponse, error) {
+	query := `
+	query($login: String!, $prCursor: String, $issueCursor: String) {
+		user(login: $login) {
+			pullRequests(first: 100, orderBy: {field: CREATED_AT, direction: DESC}, after: $prCursor) {
+				nodes {
+					title
+					number
+					createdAt
+					updatedAt
+					url
+					state
+					repository {
+						name
+						owner {
+							login
+						}
+					}
+				}
+				pageInfo {
+					hasNextPage
+					endCursor
+				}
+				totalCount
+			}
+			
+			issues(first: 100, orderBy: {field: CREATED_AT, direction: DESC}, after: $issueCursor) {
+				nodes {
+					title
+					number
+					createdAt
+					updatedAt
+					url
+					state
+					repository {
+						name
+						owner {
+							login
+						}
+					}
+				}
+				pageInfo {
+					hasNextPage
+					endCursor
+				}
+				totalCount
+			}
+		}
+	}`
+
+	variables := map[string]interface{}{
+		"login": username,
+	}
+
+	if prCursor != "" {
+		variables["prCursor"] = prCursor
+	}
+	if issueCursor != "" {
+		variables["issueCursor"] = issueCursor
+	}
+
+	resp, err := c.executeQuery(ctx, query, variables)
+	if err != nil {
+		c.logger.Error("🚩 GraphQL Activity Data Query Failed", "query_type", "user_activity_prs_and_issues", "username", username, "error", err)
+		return nil, err
+	}
+
+	var result ActivityDataResponse
+	if err := json.Unmarshal(resp.Data, &result); err != nil {
+		return nil, fmt.Errorf("unmarshaling activity data: %w", err)
+	}
+
+	return &result, nil
+}
+
+// FetchComments fetches issue comments (can be expanded to include PR comments).
+func (c *GraphQLClient) FetchComments(ctx context.Context, username string, cursor string) (*CommentDataResponse, error) {
+	query := `
+	query($login: String!, $cursor: String) {
+		user(login: $login) {
+			issueComments(first: 100, orderBy: {field: CREATED_AT, direction: DESC}, after: $cursor) {
+				nodes {
+					body
+					createdAt
+					url
+				}
+				pageInfo {
+					hasNextPage
+					endCursor
+				}
+			}
+		}
+	}`
+
+	variables := map[string]interface{}{
+		"login": username,
+	}
+
+	if cursor != "" {
+		variables["cursor"] = cursor
+	}
+
+	resp, err := c.executeQuery(ctx, query, variables)
+	if err != nil {
+		c.logger.Error("🚩 GraphQL Comments Query Failed", "query_type", "user_issue_comments", "username", username, "error", err)
+		return nil, err
+	}
+
+	var result CommentDataResponse
+	if err := json.Unmarshal(resp.Data, &result); err != nil {
+		return nil, fmt.Errorf("unmarshaling comment data: %w", err)
+	}
+
+	return &result, nil
+}
+
+// FetchCommitActivities fetches commit activities using GraphQL search
+// This is more efficient than the REST search API (5000 points/hour vs 30 requests/minute)
+// NOTE: FetchCommitActivities was removed because GitHub's GraphQL search API
+// doesn't support COMMIT type. Use REST API for commit search instead.
+
+// executeQuery executes a GraphQL query.
+func (c *GraphQLClient) executeQuery(ctx context.Context, query string, variables map[string]interface{}) (*GraphQLResponse, error) {
+	payload := map[string]interface{}{
+		"query":     query,
+		"variables": variables,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling query: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.github.com/graphql", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.cachedHTTPDo(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("executing request: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error if logger is available, otherwise ignore
+			_ = err
+		}
+	}()
+
+	var graphqlResp GraphQLResponse
+	if err := json.NewDecoder(resp.Body).Decode(&graphqlResp); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+
+	if len(graphqlResp.Errors) > 0 {
+		return nil, fmt.Errorf("GraphQL error: %s", graphqlResp.Errors[0].Message)
+	}
+
+	return &graphqlResp, nil
+}

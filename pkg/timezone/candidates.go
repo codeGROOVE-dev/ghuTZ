@@ -8,6 +8,14 @@ import (
 	"github.com/codeGROOVE-dev/guTZ/pkg/lunch"
 )
 
+// max returns the maximum of two integers.
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 // GlobalLunchPattern represents the best lunch pattern found globally in UTC.
 type GlobalLunchPattern struct {
 	StartUTC    float64
@@ -100,7 +108,8 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		// Check if work hours are reasonable based on ACTUAL first activity, not initial guess
 		workReasonable := firstActivityLocal >= 6 && firstActivityLocal <= 10 // Allow 6am starts for early risers
 
-		// 4. Evening activity (7-11pm local)
+		// 4. Evening activity (7-11pm local) 
+		// STRICT: Only count 7pm-11pm as evening, NOT 5-6pm which is dinner/transition
 		// To convert local hour to UTC: UTC = local - offset
 		// For UTC-5: 7pm local = 19:00 local = 19 - (-5) = 24 = 0 UTC
 		eveningActivity := 0
@@ -163,58 +172,19 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 					}
 				}
 			case sleepLocalMid >= 22 || sleepLocalMid <= 6:
-				testConfidence += 4 // Sleep detected but unusual timing
-				adjustments = append(adjustments, fmt.Sprintf("+4 (unusual sleep, mid=%.1f)", sleepLocalMid))
+				// Sleep at unusual but possible times - small bonus
+				testConfidence += 2 // Reduced from 4 
+				adjustments = append(adjustments, fmt.Sprintf("+2 (late or early sleep pattern, mid=%.1f)", sleepLocalMid))
 			default:
-				// Sleep pattern exists but timing is very unusual
-				testConfidence++
-				adjustments = append(adjustments, fmt.Sprintf("+1 (unusual sleep timing, mid=%.1f)", sleepLocalMid))
+				// Sleep pattern exists but timing is very unusual - penalty
+				testConfidence -= 3 // Changed from +1 to -3
+				adjustments = append(adjustments, fmt.Sprintf("-3 (very unusual sleep timing, mid=%.1f)", sleepLocalMid))
 			}
 		} else {
 			adjustments = append(adjustments, "0 (no reasonable sleep pattern)")
 		}
 
-		// STEP 2: Distance-from-noon lunch bonus system
-		var noonDistanceBonus float64
-		if bestGlobalLunch.Confidence > 0 {
-			// Calculate what local time the global lunch would be for this timezone
-			globalLunchLocalTime := math.Mod(bestGlobalLunch.StartUTC+float64(testOffset)+24, 24)
-
-			// Calculate distance from noon (12:00) in 30-minute buckets
-			distanceFromNoon := math.Abs(globalLunchLocalTime - 12.0)
-
-			// Convert distance to number of 30-minute buckets
-			bucketsFromNoon := distanceFromNoon / 0.5
-
-			// Moderate bonus based on proximity to noon
-			// Perfect noon (0 buckets away) = 10 points
-			// 1 bucket away (30 min) = 6 points
-			// 2 buckets away (1 hour) = 3 points
-			// 3 buckets away (1.5 hours) = 1 point
-			// 4+ buckets away (2+ hours) = minimal points
-			switch {
-			case bucketsFromNoon == 0:
-				noonDistanceBonus = 10 * bestGlobalLunch.Confidence // Perfect noon
-				adjustments = append(adjustments, fmt.Sprintf("+%.1f (perfect noon lunch)", noonDistanceBonus))
-			case bucketsFromNoon <= 1:
-				noonDistanceBonus = 6 * bestGlobalLunch.Confidence // Within 30 min of noon
-				adjustments = append(adjustments, fmt.Sprintf("+%.1f (lunch within 30min of noon)", noonDistanceBonus))
-			case bucketsFromNoon <= 2:
-				noonDistanceBonus = 3 * bestGlobalLunch.Confidence // Within 1 hour of noon
-				adjustments = append(adjustments, fmt.Sprintf("+%.1f (lunch within 1hr of noon)", noonDistanceBonus))
-			case bucketsFromNoon <= 3:
-				noonDistanceBonus = 1 * bestGlobalLunch.Confidence // Within 1.5 hours of noon
-				adjustments = append(adjustments, fmt.Sprintf("+%.1f (lunch within 1.5hr of noon)", noonDistanceBonus))
-			case bucketsFromNoon <= 4:
-				noonDistanceBonus = 0.5 * bestGlobalLunch.Confidence // Within 2 hours of noon
-				adjustments = append(adjustments, fmt.Sprintf("+%.1f (lunch within 2hr of noon)", noonDistanceBonus))
-			default:
-				noonDistanceBonus = 0.2 * bestGlobalLunch.Confidence // Too far from reasonable lunch time
-				adjustments = append(adjustments, fmt.Sprintf("+%.1f (lunch >2hr from noon)", noonDistanceBonus))
-			}
-
-			testConfidence += noonDistanceBonus
-		}
+		// Skip the global lunch distance bonus - will be handled in the main lunch timing section to avoid duplicates
 
 		// Lunch timing - 15 points max (strong signal when clear)
 		if lunchReasonable {
@@ -222,19 +192,30 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			// CRITICAL: Noon (12:00) is the most common lunch time globally
 			switch {
 			case lunchLocalStart >= 11.75 && lunchLocalStart <= 12.25:
-				// Within 15 minutes of noon - STRONGEST signal
+				// Within 15 minutes of noon - STRONGEST signal (combine both bonuses here)
 				lunchScore = 15 // Perfect noon timing gets maximum bonus
-				adjustments = append(adjustments, fmt.Sprintf("+15 (perfect noon lunch, at %.1f)", lunchLocalStart))
+				// Add global lunch context bonus if applicable
+				if bestGlobalLunch.Confidence > 0 {
+					globalLunchLocalTime := math.Mod(bestGlobalLunch.StartUTC+float64(testOffset)+24, 24)
+					if math.Abs(globalLunchLocalTime-12.0) < 0.5 { // Within 30 min of noon
+						lunchScore += 5 // Additional bonus for matching global pattern
+						adjustments = append(adjustments, fmt.Sprintf("+%.0f (perfect noon lunch matching global pattern)", lunchScore))
+					} else {
+						adjustments = append(adjustments, fmt.Sprintf("+%.0f (perfect noon lunch)", lunchScore))
+					}
+				} else {
+					adjustments = append(adjustments, fmt.Sprintf("+%.0f (perfect noon lunch)", lunchScore))
+				}
 			case lunchLocalStart >= 11.5 && lunchLocalStart <= 13.5:
 				// 11:30am to 1:30pm are good lunch times
 				lunchScore = 10 // Good lunch timing
-				adjustments = append(adjustments, fmt.Sprintf("+10 (good lunch 11:30am-1:30pm, at %.1f)", lunchLocalStart))
+				adjustments = append(adjustments, "+10 (good lunch timing 11:30am-1:30pm)")
 			case lunchLocalStart >= 11.0 && lunchLocalStart <= 14.0:
 				lunchScore = 8 // Acceptable lunch timing (11am-2pm)
-				adjustments = append(adjustments, fmt.Sprintf("+8 (acceptable lunch 11am-2pm, at %.1f)", lunchLocalStart))
+				adjustments = append(adjustments, "+8 (acceptable lunch timing 11am-2pm)")
 			case lunchLocalStart >= 10.5 && lunchLocalStart <= 14.5:
 				lunchScore = 6 // Acceptable lunch timing
-				adjustments = append(adjustments, fmt.Sprintf("+6 (acceptable lunch 10:30am-2:30pm, at %.1f)", lunchLocalStart))
+				adjustments = append(adjustments, "+6 (acceptable lunch timing 10:30am-2:30pm)")
 			default:
 				lunchScore = 2 // Lunch detected but unusual timing
 				adjustments = append(adjustments, fmt.Sprintf("+2 (unusual lunch timing at %.1f)", lunchLocalStart))
@@ -274,57 +255,74 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			adjustments = append(adjustments, "-5 (no lunch detected)")
 		}
 
-		// Work hours - 8 points max, with penalties for too-early starts
+		// Work hours - 8 points max, with STRONG penalties for too-early starts
 		// CRITICAL: Use firstActivityLocal which is calculated per-timezone, not testWorkStart
-		if workReasonable && firstActivityLocal < 24 {
+		if firstActivityLocal < 24 {
 			actualWorkStart := int(firstActivityLocal)
-			switch {
-			case actualWorkStart >= 7 && actualWorkStart <= 9:
-				testConfidence += 8 // Good work start (7-9am)
-				adjustments = append(adjustments, fmt.Sprintf("+8 (good work start %dam)", actualWorkStart))
-			case actualWorkStart == 6:
-				testConfidence += 4 // 6am is early but some people do it
-				adjustments = append(adjustments, "+4 (early 6am work start)")
-			case actualWorkStart >= 5 && actualWorkStart <= 10:
-				testConfidence += 2 // Acceptable but unusual
-				adjustments = append(adjustments, fmt.Sprintf("+2 (unusual work start %dam)", actualWorkStart))
-			default:
-				testConfidence++ // Work hours detected but very unusual
-				adjustments = append(adjustments, fmt.Sprintf("+1 (very unusual work start %dam)", actualWorkStart))
-			}
-		} else if firstActivityLocal < 24 {
-			// Apply STRONG penalty for unreasonable work hours
-			actualWorkStart := int(firstActivityLocal)
-			if actualWorkStart >= 0 && actualWorkStart < 5 {
-				// Starting work before 5am is absurd - massive penalty
-				testConfidence -= 30 // HUGE penalty for pre-5am starts
+			
+			// ALWAYS penalize very early starts, regardless of workReasonable flag
+			if actualWorkStart < 5 {
+				// Pre-5am is absurd - massive penalty
+				testConfidence -= 30
 				adjustments = append(adjustments, fmt.Sprintf("-30 (absurd pre-5am start %dam)", actualWorkStart))
 				if actualWorkStart < 2 {
-					// Midnight to 2am? Even more absurd
-					testConfidence -= 20 // Additional massive penalty
-					adjustments = append(adjustments, fmt.Sprintf("-20 (extra penalty for midnight-%dam start)", actualWorkStart))
+					testConfidence -= 20 // Additional penalty for midnight starts
+					adjustments = append(adjustments, fmt.Sprintf("-20 (extra penalty for midnight-%dam)", actualWorkStart))
 				}
 			} else if actualWorkStart == 5 {
-				// 5am is very early but some people do it - moderate penalty
-				testConfidence -= 8
-				adjustments = append(adjustments, "-8 (very early 5am start)")
+				// 5am is very early - STRONG penalty (increased from 8 to 15)
+				testConfidence -= 15
+				adjustments = append(adjustments, "-15 (very early 5am start)")
+			} else if workReasonable {
+				// Only give bonuses for reasonable starts (6am+)
+				switch {
+				case actualWorkStart >= 7 && actualWorkStart <= 9:
+					testConfidence += 12 // Good work start (7-9am) - increased from 8 to 12
+					adjustments = append(adjustments, fmt.Sprintf("+12 (good work start %dam)", actualWorkStart))
+				case actualWorkStart == 6:
+					testConfidence += 4 // 6am is early but some people do it
+					adjustments = append(adjustments, "+4 (early 6am work start)")
+				case actualWorkStart >= 6 && actualWorkStart <= 10:
+					testConfidence += 2 // Acceptable but unusual
+					adjustments = append(adjustments, fmt.Sprintf("+2 (unusual work start %dam)", actualWorkStart))
+				default:
+					testConfidence++ // Work hours detected but very unusual
+					adjustments = append(adjustments, fmt.Sprintf("+1 (very unusual work start %dam)", actualWorkStart))
+				}
+			} else {
+				// Work hours detected but not reasonable - apply penalties
+				testConfidence -= 5
+				adjustments = append(adjustments, fmt.Sprintf("-5 (unreasonable work hours %dam)", actualWorkStart))
 			}
 		}
 
-		// Evening activity - up to 1 point (very weak signal, many users only use GitHub for work)
+		// Evening activity - VERY conservative scoring (max 0.5 points)
 		// NOT ALL GITHUB USERS CODE IN THE EVENING
 		// What looks like "evening" in one timezone might be afternoon work in another
-		// Example: 19:00-23:00 UTC is 7-11pm for UTC+1 but 3-7pm for UTC-4 (normal work hours)
+		// Also check for misclassified late afternoon activity (5-6pm) 
 		if eveningActivity > 0 {
 			eveningRatio := float64(eveningActivity) / float64(totalActivity)
+			
+			// Also check 5-6pm activity to detect misclassification
+			lateAfternoonActivity := 0
+			for localHour := 17; localHour <= 18; localHour++ {
+				utcHour := (localHour - testOffset + 24) % 24
+				lateAfternoonActivity += hourCounts[utcHour]
+			}
+			lateAfternoonRatio := float64(lateAfternoonActivity) / float64(totalActivity)
 
 			// Only give points if evening activity is VERY SUBSTANTIAL (>30% of total)
-			// This helps avoid misinterpreting afternoon work as evening coding
-			if eveningRatio > 0.3 {
-				// Ultra conservative scoring - max 1 point, only if >30% evening
-				eveningPoints := 1 * math.Min(1.0, (eveningRatio-0.3)*3.33)
+			// AND late afternoon (5-6pm) isn't also high (which would indicate wrong timezone)
+			if eveningRatio > 0.3 && lateAfternoonRatio < 0.2 {
+				// Ultra conservative scoring - max 0.5 points, only if >30% evening
+				eveningPoints := 0.5 * math.Min(1.0, (eveningRatio-0.3)*3.33)
 				testConfidence += eveningPoints
-				adjustments = append(adjustments, fmt.Sprintf("+%.1f (evening activity %.1f%%)", eveningPoints, eveningRatio*100))
+				adjustments = append(adjustments, fmt.Sprintf("+%.1f (evening 7-11pm: %.1f%%)", eveningPoints, eveningRatio*100))
+			} else if lateAfternoonRatio > 0.15 && eveningRatio < 0.2 {
+				// PENALTY: High 5-6pm but low 7-11pm suggests wrong timezone
+				// This is likely afternoon work being misinterpreted
+				testConfidence -= 3
+				adjustments = append(adjustments, fmt.Sprintf("-3 (high 5-6pm %.1f%% but low evening %.1f%%)", lateAfternoonRatio*100, eveningRatio*100))
 			}
 			// No points for <30% evening activity - likely just late afternoon work
 
@@ -364,50 +362,60 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 				maxActivityHour = hour
 			}
 		}
+		
+		// Track if peak time is reasonable
+		peakReasonable := false
 		if maxActivityHour >= 0 {
 			// Convert peak activity UTC hour to local time for this timezone
 			peakLocalHour := (maxActivityHour + testOffset + 24) % 24
-			// Bonus for peak activity during ideal work hours (10am-4pm = 10-16 local)
-			if peakLocalHour >= 10 && peakLocalHour <= 16 {
-				// Perfect timing: 5 points for peak during 1-3pm, 3 points for 12-2pm or 3-4pm
-				var peakBonus float64
-				switch {
-				case peakLocalHour >= 13 && peakLocalHour <= 15:
-					// 1-3pm is ideal afternoon work time
-					peakBonus = 5.0
-					adjustments = append(adjustments, fmt.Sprintf("+5 (peak at %dpm ideal)", peakLocalHour-12))
-				case peakLocalHour >= 12 && peakLocalHour <= 16:
-					// 12-4pm is good work time
-					peakBonus = 3.0
-					adjustments = append(adjustments, fmt.Sprintf("+3 (peak at %d good work time)", peakLocalHour))
-				default:
-					// 10-12pm is morning work time
-					peakBonus = 2.0
-					adjustments = append(adjustments, fmt.Sprintf("+2 (peak at %dam morning)", peakLocalHour))
-				}
-				testConfidence += peakBonus
+			
+			// Peak is reasonable if it's between 9am-4pm (work) or 6-9pm (OSS hobbyist)  
+			// Morning productivity (9am-12pm) is very common and healthy
+			peakReasonable = (peakLocalHour >= 9 && peakLocalHour <= 16) || (peakLocalHour >= 18 && peakLocalHour <= 21)
+			// Bonus for peak activity during ideal work hours (10am-3pm = 10-15 local)
+			// PENALTY for peak at 5-6pm (transitioning to dinner/hobbies)
+			var peakBonus float64
+			switch {
+			case peakLocalHour >= 17 && peakLocalHour <= 18:
+				// 5-6pm peak is suspicious - transition/dinner time (increased penalty)
+				peakBonus = -8.0 // Increased from -3 to -8
+				adjustments = append(adjustments, fmt.Sprintf("-8 (suspicious peak at %d:00, dinner/transition time)", peakLocalHour))
+			case peakLocalHour >= 19 && peakLocalHour <= 21:
+				// 7-9pm peak is common for OSS hobbyists working from home
+				peakBonus = 2.0
+				adjustments = append(adjustments, fmt.Sprintf("+2 (evening OSS peak at %dpm)", peakLocalHour-12))
+			case peakLocalHour >= 22:
+				// After 10pm peak is very unusual
+				peakBonus = -15.0 // Increased from -10 to -15
+				adjustments = append(adjustments, fmt.Sprintf("-15 (very late peak at %dpm)", peakLocalHour-12))
+			case peakLocalHour >= 13 && peakLocalHour <= 15:
+				// 1-3pm is ideal afternoon work time
+				peakBonus = 5.0
+				adjustments = append(adjustments, fmt.Sprintf("+5 (peak at %dpm ideal)", peakLocalHour-12))
+			case peakLocalHour >= 9 && peakLocalHour <= 12:
+				// 9am-noon is good morning work time (many people are most productive in the morning)
+				peakBonus = 3.0
+				adjustments = append(adjustments, fmt.Sprintf("+3 (peak at %dam good morning)", peakLocalHour))
+			case peakLocalHour == 16:
+				// 4pm is still good work time
+				peakBonus = 3.0
+				adjustments = append(adjustments, "+3 (peak at 4pm good work time)")
+			default:
+				// Other times are neutral or negative
+				peakBonus = 0.0
+				adjustments = append(adjustments, fmt.Sprintf("0 (unusual peak time %d:00)", peakLocalHour))
 			}
+			testConfidence += peakBonus
+		}
 
-			// REDUCED PENALTY for late peak activity (5-7pm)
-			// Some people do their best work in the evening, especially remote workers
-			// Only penalize peaks after 7pm as those are truly unusual
-			if peakLocalHour >= 19 {
-				testConfidence -= 10 // Strong penalty for very late peak (after 7pm)
-				adjustments = append(adjustments, fmt.Sprintf("-10 (very late peak at %dpm)", peakLocalHour-12))
-			} else if peakLocalHour >= 17 {
-				testConfidence -= 3 // Small penalty for 5-7pm peak (could be valid)
-				adjustments = append(adjustments, fmt.Sprintf("-3 (evening peak at %dpm)", peakLocalHour-12))
-			}
-
-			// PENALTY for very late work start (after 2pm)
-			// Nobody regularly starts work at 2:30pm regardless of timezone
-			if firstActivityLocal >= 14 {
-				testConfidence -= 20 // Massive penalty for starting after 2pm
-				adjustments = append(adjustments, fmt.Sprintf("-20 (work starts after 2pm at %.1f)", firstActivityLocal))
-			} else if firstActivityLocal >= 12 {
-				testConfidence -= 10 // Moderate penalty for starting after noon
-				adjustments = append(adjustments, fmt.Sprintf("-10 (work starts after noon at %.1f)", firstActivityLocal))
-			}
+		// PENALTY for very late work start (after 2pm)
+		// Nobody regularly starts work at 2:30pm regardless of timezone
+		if firstActivityLocal >= 14 {
+			testConfidence -= 20 // Massive penalty for starting after 2pm
+			adjustments = append(adjustments, fmt.Sprintf("-20 (work starts after 2pm at %.1f)", firstActivityLocal))
+		} else if firstActivityLocal >= 12 {
+			testConfidence -= 10 // Moderate penalty for starting after noon
+			adjustments = append(adjustments, fmt.Sprintf("-10 (work starts after noon at %.1f)", firstActivityLocal))
 		}
 
 		// Pacific timezone pattern recognition - 25 points max (increased)
@@ -591,6 +599,9 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		// South American timezone pattern recognition (UTC-3)
 		// Brazil, Argentina, Uruguay, etc. have distinct patterns
 		if testOffset == -3 {
+			if username == "egibs" {
+				fmt.Printf("SOUTH AMERICA BONUS: Evaluating UTC-3 for egibs\n")
+			}
 			southAmericaBonus := 0.0
 
 			// UTC-3 typically has lunch at 12:00-1:00pm (not early like US)
@@ -600,27 +611,29 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 				adjustments = append(adjustments, fmt.Sprintf("+6 (South America noon lunch at %.1f)", lunchLocalStart))
 			}
 
-			// CRITICAL: 6pm end-of-day peak is common in South America
-			// For UTC-3: 18:00 local = 21:00 UTC
-			endOfDayUTC := 21
+			// CRITICAL: 6pm end-of-day peak is SUSPICIOUS in South America
+			// 5-6pm is dinner/transition time, not productive work time
+			// For UTC-3: 17:00-18:00 local = 20:00-21:00 UTC
+			lateAfternoonUTC20 := hourCounts[20] // 5pm local
+			endOfDayUTC21 := hourCounts[21]      // 6pm local
 
-			// Check if 6pm has significant activity
-			if hourCounts[endOfDayUTC] >= 20 {
-				// Strong 6pm activity is typical for Brazil/Argentina
-				southAmericaBonus += 8.0
-				adjustments = append(adjustments, fmt.Sprintf("+8 (South America 6pm peak with %d events)", hourCounts[endOfDayUTC]))
-
-				// If 21:00 UTC is a peak hour, that's very strong for UTC-3
+			// PENALTY for high 5-6pm activity - this is dinner time!
+			if lateAfternoonUTC20 >= 20 || endOfDayUTC21 >= 20 {
+				// High 5-6pm activity is SUSPICIOUS - people are usually transitioning
+				southAmericaBonus -= 25.0 // Increased from 15 to 25
+				adjustments = append(adjustments, fmt.Sprintf("-25 (suspicious 5-6pm activity %d/%d - dinner time)", lateAfternoonUTC20, endOfDayUTC21))
+				
+				// Check if this is actually the peak - if so, it's very wrong
 				isPeak := true
 				for h := range 24 {
-					if h != endOfDayUTC && hourCounts[h] > hourCounts[endOfDayUTC] {
+					if h != 20 && h != 21 && hourCounts[h] > max(lateAfternoonUTC20, endOfDayUTC21) {
 						isPeak = false
 						break
 					}
 				}
 				if isPeak {
-					southAmericaBonus += 4.0
-					adjustments = append(adjustments, "+4 (6pm is peak hour - typical South America)")
+					southAmericaBonus -= 30.0 // Increased from 20 to 30
+					adjustments = append(adjustments, "-30 (peak at 5-6pm is wrong - dinner/transition time)")
 				}
 			}
 
@@ -781,24 +794,33 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		// Ensure confidence stays above 0 (no upper cap - let real scores determine ranking)
 		testConfidence = math.Max(0, testConfidence)
 
+		// Debug: Log scoring details for all candidates
+		// For egibs debugging specifically
+		if username == "egibs" && (testOffset == -3 || testOffset == -5 || testOffset == -6) {
+			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f adjustments=%v\n", 
+				username, testOffset, testConfidence, adjustments)
+		}
+		
 		// Add to candidates if confidence is reasonable (at least 10%)
 		if testConfidence >= 10 {
 			candidate := Candidate{
-				Timezone:         fmt.Sprintf("UTC%+d", testOffset),
-				Offset:           float64(testOffset),
-				Confidence:       testConfidence,
-				EveningActivity:  eveningActivity,
-				LunchReasonable:  lunchReasonable,
-				WorkHoursNormal:  workReasonable,
-				LunchLocalTime:   lunchLocalStart,
-				WorkStartLocal:   testWorkStart,
-				SleepMidLocal:    sleepLocalMid,
-				LunchDipStrength: lunchDipStrength,
-				LunchStartUTC:    testLunchStart, // Store for reuse
-				LunchEndUTC:      testLunchEnd,   // Store for reuse
-				LunchConfidence:  testLunchConf,  // Store for reuse
+				Timezone:            fmt.Sprintf("UTC%+d", testOffset),
+				Offset:              float64(testOffset),
+				Confidence:          testConfidence,
+				EveningActivity:     eveningActivity,
+				LunchReasonable:     lunchReasonable,
+				WorkHoursReasonable: workReasonable,
+				SleepReasonable:     sleepReasonable,
+				PeakTimeReasonable:  peakReasonable,
+				LunchLocalTime:      lunchLocalStart,
+				WorkStartLocal:      testWorkStart,
+				SleepMidLocal:       sleepLocalMid,
+				LunchDipStrength:    lunchDipStrength,
+				LunchStartUTC:       testLunchStart, // Store for reuse
+				LunchEndUTC:         testLunchEnd,   // Store for reuse
+				LunchConfidence:     testLunchConf,  // Store for reuse
+				ScoringDetails:      adjustments,    // Include scoring details for Gemini
 			}
-			_ = adjustments // Suppress unused warning for debug variable
 			candidates = append(candidates, candidate)
 		}
 	}

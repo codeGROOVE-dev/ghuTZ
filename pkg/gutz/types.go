@@ -132,6 +132,7 @@ type Result struct {
 	Timezone                   string                 `json:"timezone"`
 	GeminiReasoning            string                 `json:"gemini_reasoning,omitempty"`
 	Username                   string                 `json:"username"`
+	CreatedAt                  *time.Time             `json:"created_at,omitempty"`
 	ActivityTimezone           string                 `json:"activity_timezone,omitempty"`
 	GeminiPrompt               string                 `json:"gemini_prompt,omitempty"`
 	ActivityDateRange          DateRange              `json:"activity_date_range,omitempty"`

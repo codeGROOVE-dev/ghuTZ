@@ -100,6 +100,24 @@ fmt.Printf("%s probably lives in %s (confidence: %.0f%%)\n",
 - **Data Sources:** GitHub API, GraphQL, Google Maps, Gemini AI, social platforms, and good old web scraping
 - **Confidence Scoring:** Every detection includes confidence metrics based on signal strength
 
+## Security Research Applications
+
+**guTZ** is particularly valuable for cybersecurity professionals and researchers conducting:
+
+🛡️ **Supply-Chain Security Analysis:**
+- Identify maintainer locations and working patterns to assess project risk
+- Detect anomalies in contribution patterns that may indicate compromised accounts
+- Map development team geographic distribution for security assessment
+- Validate claimed locations against actual activity patterns
+
+🎯 **Threat Actor Identification:**
+- Analyze developer behavior patterns to identify potentially malicious actors
+- Detect coordinated inauthentic behavior across multiple accounts
+- Unmask threat actors using timezone analysis and activity correlation
+- Investigate suspicious contributors to critical infrastructure projects
+
+*Note: This tool is designed for defensive security research and legitimate investigations. Please use responsibly and in accordance with applicable laws and ethical guidelines.*
+
 ## Contributing
 
 Found a bug? Want to add a detection method? PRs welcome!

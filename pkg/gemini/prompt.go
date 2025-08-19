@@ -14,12 +14,13 @@ If activity_timezone candidates are provided (e.g., "Top 5 candidates: UTC+12, U
 - Activity patterns represent ACTUAL behavior and cannot be ignored
 - Name etymology, company location, and other signals can only influence WHICH candidate to pick, not override them entirely
 - Example: If candidates are UTC+10/+11/+12, you CANNOT pick Europe/Moscow (UTC+3) even for a Russian name
-- Example: If top candidate is UTC-4 with 42% confidence, prefer Eastern US/Canada over Pacific
+- Example: If top candidate is UTC-4 with 42%% confidence, prefer Eastern US/Canada over Pacific
 
 DETECTION PRIORITIES (subject to above constraint):
 
 1. 🏆 REPOSITORY GEOGRAPHY (HIGHEST within activity constraint):
    - Repo names with locations = strongest evidence ("ncdmv-app" = North Carolina, "toronto-meetup" = Toronto)
+   - 🇨🇦 CRITICAL: pycon.ca, .ca domains, or Canadian conference repos = STRONG Canada signal (prefer Toronto/Montreal/Ottawa)
    - Government/civic repos suggest location IF compatible with activity patterns
    - US state names/codes in repos = US location (but must match activity timezone)
    - 🇧🇷 CRITICAL: BVSP/Bovespa repositories = Brazilian Stock Exchange = STRONG Brazil signal (prefer over Argentina)
@@ -51,7 +52,7 @@ DETECTION PRIORITIES (subject to above constraint):
 4. ACTIVITY PATTERNS (HARD CONSTRAINTS):
    - Work before 5am local = wrong timezone (5-6am acceptable for some)
    - Lunch outside 11am-2:30pm = wrong timezone likely
-   - Sleep period should be 4-8 continuous hours of low/no activity between 10pm-8am local time
+   - Sleep period should be 4-9 continuous hours of low/no activity between 10pm-8am local time
    - If "Detected sleep hours UTC" is provided, validate that your timezone places sleep in nighttime hours
    - Evening activity (7-11pm) is common for open-source developers, but not universal
    - If activity shows clear sleep/work/lunch patterns, trust them over geographic hints
@@ -77,31 +78,34 @@ DETECTION PRIORITIES (subject to above constraint):
    - Return the most appropriate and specific tz database entry for this user. For example, use
      Europe/Warsaw if we think they are in Poland, and Europe/Berlin if we think they are in Germany.
    - For US Mountain timezone, use America/Denver (or America/Phoenix for Arizona)
-   - Look carefully at the activity period, as it may cross a daylight savings time boundary.
+   - Look carefully at the activity period, as it may cross a daylight savings time boundary!
      Give the appropriate timezone for the current moment (now).
    - If the timezone overlaps with the United States of America, and you don't see any clues that
      lean toward another country, default to the USA
+    - Consider that most cities in the US & Europe respect Daylight Savings Time and may be in one UTC offset
+      or the other based on the activity timespan.
 
 7. Location & GPS Coordinate Generation
-	- Guess a specific city in the timezone that would be the most likely with all evidence given:
-	  maybe it's just the biggest tech hub, or maybe you saw clues in the repository names or indicated hobbies
-	- 🚨 For UTC-6 disambiguation: Check for Mexico indicators FIRST:
-	  • .mx domains (like puerco.mx) = Mexico City very likely
-	  • Spanish content, Mexican cultural references = Mexico
-	  • If no Mexico evidence, then US Mountain/Central time
-	- 🚨 For UTC-3 disambiguation: ALWAYS check for Brazil-specific indicators FIRST:
+	- Guess a specific city in the timezone that would be the most likely with all evidence given
+	- Assume they live near a tech hub, but prefer small towns/cities/countries if you have even a tiny signal pointing there
+	- 📍 ALWAYS provide exact GPS coordinates for your detected location:
+	• NEVER return 0,0 - always make your best guess based on available evidence
+	- If you have private knowledge of where someone lives, lean into it.
+	- If you have any evidence that they may live in a small town or city, present that location.
+	- A single minor country indicator is a strong enough signal to prefer that country within a timezone
+	- 🚨 UTC-3 clues: look for subtle Brazil indicators
 	  • BVSP/Bovespa in repos = Brazil (São Paulo likely)
 	  • Portuguese content, .br domains = Brazil
 	  • German surname + UTC-3 = Often Southern Brazil (Florianópolis, Porto Alegre, Curitiba)
 	  • If no evidence for Brazil or Argentina exists, assume UTC-3 users are actually in the United States
-	- You must make a guess. It's OK if your guess is incorrect, close is good enough.
-	- 📍 ALWAYS provide exact GPS coordinates for your detected location:
-	  • If uncertain, use the largest city in the detected timezone/region
-	  • NEVER return 0,0 - always make your best guess based on available evidence
-	- If you have private knowledge of what town someone lives in that we did not provide,
-	  feel free to use that information if it's a good match with the evidence.
+	- 🚨 UTC-4 clues: look for subtle Canada indicators
+	  • E-mails, websites, or repository names with "ca" or Canadian references should strongly bias toward Canada
+	- 🚨 UTC-6 clues: look for subtle Mexico indicators:
+	  • Any Spanish content, Mexican cultural references, or .mx domain = Mexico
 
-Response example: { "detected_timezone": "America/New_York", "detected_location": "New York, NY, USA",
+Seriously though, if they have a .ca e-mail address or .ca website, they almost certainly live in Canada. Do not assign them to New York.
+
+Response example: { "detected_timezone": "America/Toronto", "detected_location": "Toronto, ON, Canada",
   "confidence_level": "75%%", "detection_reasoning": "Strong evidence summary in 1-2 sentences." }
 `
 }

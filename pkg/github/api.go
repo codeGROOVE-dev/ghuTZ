@@ -78,6 +78,43 @@ func (c *Client) FetchPublicEvents(ctx context.Context, username string) ([]Publ
 	return allEvents, nil
 }
 
+// FetchUserGistsDetails fetches full gist objects with descriptions for a user.
+func (c *Client) FetchUserGistsDetails(ctx context.Context, username string) ([]Gist, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/users/%s/gists?per_page=100", url.PathEscape(username))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	if c.githubToken != "" && c.isValidGitHubToken(c.githubToken) {
+		req.Header.Set("Authorization", "token "+c.githubToken)
+	}
+
+	resp, err := c.cachedHTTPDo(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		c.logger.Warn("🚩 GitHub API Error", "status", resp.StatusCode, "url", apiURL)
+		return nil, fmt.Errorf("GitHub API error: %d", resp.StatusCode)
+	}
+
+	var gists []Gist
+	if err := json.NewDecoder(resp.Body).Decode(&gists); err != nil {
+		return nil, fmt.Errorf("decoding gists response: %w", err)
+	}
+
+	c.logger.Debug("fetched gist details", "username", username, "count", len(gists))
+	return gists, nil
+}
+
 // FetchUserGists fetches gist timestamps for a user.
 func (c *Client) FetchUserGists(ctx context.Context, username string) ([]time.Time, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/users/%s/gists?per_page=100", url.PathEscape(username))
@@ -168,10 +205,10 @@ func (c *Client) fetchPRPage(ctx context.Context, username string, page, perPage
 	if resp.StatusCode != http.StatusOK {
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page)
+			c.logger.Warn("🚩 GitHub API Error", "status", resp.StatusCode, "page", page)
 			return nil, pageResult{}, nil
 		}
-		c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
+		c.logger.Warn("🚩 GitHub API Error", "status", resp.StatusCode, "page", page, "body", string(body))
 		return nil, pageResult{}, nil
 	}
 
@@ -275,10 +312,10 @@ func (c *Client) fetchIssuePage(ctx context.Context, username string, page, perP
 	if resp.StatusCode != http.StatusOK {
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page)
+			c.logger.Warn("🚩 GitHub API Error", "status", resp.StatusCode, "page", page)
 			return nil, pageResult{}, nil
 		}
-		c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
+		c.logger.Warn("🚩 GitHub API Error", "status", resp.StatusCode, "page", page, "body", string(body))
 		return nil, pageResult{}, nil
 	}
 
@@ -353,142 +390,6 @@ func (c *Client) FetchIssuesWithLimit(ctx context.Context, username string, maxP
 	return allIssues, nil
 }
 
-// FetchUserWithGraphQL fetches user data including social accounts via GraphQL.
-func (c *Client) FetchUserWithGraphQL(ctx context.Context, username string) *User {
-	c.logger.Debug("attempting GraphQL user fetch", "username", username)
-	query := fmt.Sprintf(`{
-		user(login: "%s") {
-			login
-			name
-			location
-			company
-			bio
-			websiteUrl
-			twitterUsername
-			createdAt
-			socialAccounts(first: 10) {
-				nodes {
-					displayName
-					url
-					provider
-				}
-			}
-		}
-	}`, username)
-
-	reqBody := map[string]string{
-		"query": query,
-	}
-
-	jsonBody, err := json.Marshal(reqBody)
-	if err != nil {
-		c.logger.Debug("failed to marshal GraphQL query", "error", err)
-		return nil
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.github.com/graphql", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		c.logger.Debug("failed to create GraphQL request", "error", err)
-		return nil
-	}
-
-	req.Header.Set("Authorization", "Bearer "+c.githubToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.cachedHTTPDo(ctx, req)
-	if err != nil {
-		c.logger.Debug("failed to execute GraphQL request", "error", err)
-		return nil
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			c.logger.Debug("failed to close response body", "error", err)
-		}
-	}()
-
-	// Check if response was from cache
-	fromCache := resp.Header.Get("X-From-Cache") == "true"
-
-	var result struct {
-		Data struct {
-			User struct {
-				Login           string `json:"login"`
-				Name            string `json:"name"`
-				Location        string `json:"location"`
-				Company         string `json:"company"`
-				Bio             string `json:"bio"`
-				Email           string `json:"email"`
-				WebsiteURL      string `json:"websiteUrl"`
-				TwitterUsername string `json:"twitterUsername"`
-				CreatedAt       string `json:"createdAt"`
-				SocialAccounts  struct {
-					Nodes []struct {
-						DisplayName string `json:"displayName"`
-						URL         string `json:"url"`
-						Provider    string `json:"provider"`
-					} `json:"nodes"`
-				} `json:"socialAccounts"`
-			} `json:"user"`
-		} `json:"data"`
-		Errors []struct {
-			Message string `json:"message"`
-		} `json:"errors"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		c.logger.Debug("failed to decode GraphQL response", "error", err)
-		return nil
-	}
-
-	if len(result.Errors) > 0 {
-		c.logger.Debug("GraphQL user profile query failed",
-			"username", username,
-			"error", result.Errors[0].Message,
-			"query_type", "user_profile_with_social_accounts")
-		return nil
-	}
-
-	user := &User{
-		Login:         result.Data.User.Login,
-		Name:          result.Data.User.Name,
-		Location:      result.Data.User.Location,
-		Company:       result.Data.User.Company,
-		Bio:           result.Data.User.Bio,
-		Email:         result.Data.User.Email,
-		Blog:          result.Data.User.WebsiteURL,
-		TwitterHandle: result.Data.User.TwitterUsername,
-	}
-
-	// Process social accounts
-	c.logger.Debug("GraphQL social accounts raw", "username", username,
-		"accounts_count", len(result.Data.User.SocialAccounts.Nodes))
-
-	for _, account := range result.Data.User.SocialAccounts.Nodes {
-		c.logger.Debug("processing social account", "provider", account.Provider,
-			"url", account.URL, "display_name", account.DisplayName)
-
-		// Add social links to bio for extraction
-		if user.Bio != "" {
-			user.Bio += " | "
-		}
-
-		// Include provider information in bio for better context
-		if account.Provider != "" && account.Provider != "GENERIC" {
-			user.Bio += fmt.Sprintf("[%s] ", account.Provider)
-		}
-		user.Bio += account.URL
-
-		// Use first website-like URL as blog if not set
-		if user.Blog == "" && account.Provider == "GENERIC" {
-			user.Blog = account.URL
-		}
-	}
-
-	c.logger.Debug("fetched user via GraphQL", "username", username, "name", user.Name,
-		"blog", user.Blog, "social_accounts", len(result.Data.User.SocialAccounts.Nodes), "cache", fromCache)
-
-	return user
-}
 
 // FetchUserComments fetches recent comments made by a user via GraphQL.
 func (c *Client) FetchUserComments(ctx context.Context, username string) ([]Comment, error) {
@@ -607,7 +508,7 @@ func (c *Client) FetchUserComments(ctx context.Context, username string) ([]Comm
 	}
 
 	if len(result.Errors) > 0 {
-		c.logger.Debug("GitHub GraphQL errors", "username", username, "errors", result.Errors)
+		c.logger.Error("🚩 GitHub GraphQL API Error", "username", username, "errors", result.Errors)
 		return nil, fmt.Errorf("GraphQL errors: %v", result.Errors[0].Message)
 	}
 
@@ -700,66 +601,6 @@ func (c *Client) FetchOrganizations(ctx context.Context, username string) ([]Org
 	return orgs, nil
 }
 
-// FetchUser fetches comprehensive user data, trying GraphQL first then REST API.
-func (c *Client) FetchUser(ctx context.Context, username string) *User {
-	// First try to get enhanced data via GraphQL if we have a token
-	if c.githubToken != "" && c.isValidGitHubToken(c.githubToken) {
-		if user := c.FetchUserWithGraphQL(ctx, username); user != nil {
-			// If GraphQL didn't find social accounts, try HTML scraping
-			if !strings.Contains(user.Bio, "@") && !strings.Contains(user.Bio, "http") {
-				c.logger.Debug("GraphQL found no social accounts, trying HTML scraping", "username", username)
-				if htmlSocials := c.FetchSocialFromHTML(ctx, username); len(htmlSocials) > 0 {
-					for _, social := range htmlSocials {
-						if user.Bio != "" {
-							user.Bio += " | "
-						}
-						user.Bio += social
-					}
-					c.logger.Debug("HTML scraping found social accounts", "username", username, "count", len(htmlSocials))
-				}
-			}
-			return user
-		}
-	}
-
-	// Fallback to REST API
-	apiURL := fmt.Sprintf("https://api.github.com/users/%s", url.PathEscape(username))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
-	if err != nil {
-		return nil
-	}
-
-	// SECURITY: Validate and sanitize GitHub token before use
-	if c.githubToken != "" {
-		token := c.githubToken
-		// Validate token format to prevent injection attacks
-		if c.isValidGitHubToken(token) {
-			req.Header.Set("Authorization", "token "+token)
-		}
-	}
-
-	resp, err := c.cachedHTTPDo(ctx, req)
-	if err != nil {
-		c.logger.Debug("failed to fetch user", "username", username, "error", err)
-		return nil
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			c.logger.Debug("failed to close response body", "error", err)
-		}
-	}()
-
-	var user User
-	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
-		c.logger.Debug("failed to decode user", "username", username, "error", err)
-		return nil
-	}
-
-	c.logger.Debug("fetched user full name", "username", username, "name", user.Name)
-
-	return &user
-}
 
 // FetchUserRepositories fetches public repositories owned by a user.
 func (c *Client) FetchUserRepositories(ctx context.Context, username string) ([]Repository, error) {
@@ -876,7 +717,7 @@ func (c *Client) FetchPinnedRepositories(ctx context.Context, username string) (
 	}
 
 	if len(result.Errors) > 0 {
-		c.logger.Debug("GitHub GraphQL errors", "username", username, "errors", result.Errors)
+		c.logger.Error("🚩 GitHub GraphQL API Error", "username", username, "errors", result.Errors)
 		return nil, fmt.Errorf("GraphQL errors: %v", result.Errors[0].Message)
 	}
 
@@ -1209,7 +1050,7 @@ func (c *Client) fetchCommitPage(ctx context.Context, username string, page int,
 		if err != nil {
 			return nil, fmt.Errorf("failed to read response body: %w", err)
 		}
-		c.logger.Debug("GitHub API error", "status", resp.StatusCode, "page", page, "body", string(body))
+		c.logger.Warn("🚩 GitHub API Error", "status", resp.StatusCode, "page", page, "body", string(body))
 		return timestamps, fmt.Errorf("GitHub API error: %d", resp.StatusCode)
 	}
 
@@ -1244,4 +1085,284 @@ func (c *Client) fetchCommitPage(ctx context.Context, username string, page int,
 	}
 
 	return timestamps, nil
+}
+
+// FetchUserCommitActivities fetches commit activities with repository information using GraphQL.
+func (c *Client) FetchUserCommitActivities(ctx context.Context, username string) ([]CommitActivity, error) {
+	return c.FetchUserCommitActivitiesWithLimit(ctx, username, 1) // Default to 1 page (100 commits)
+}
+
+// FetchUserCommitActivitiesGraphQL fetches commit activities using REST API fallback.
+// NOTE: GitHub's GraphQL search API doesn't support COMMIT type, so we use REST API.
+func (c *Client) FetchUserCommitActivitiesGraphQL(ctx context.Context, username string, maxCommits int) ([]CommitActivity, error) {
+	// GitHub's GraphQL search API doesn't support searching commits directly
+	// Fall back to using the search API to find commits
+	c.logger.Debug("using REST API for commit activities (GraphQL doesn't support commit search)", "username", username)
+	
+	if maxCommits <= 0 {
+		maxCommits = 100
+	}
+	
+	// Calculate pages needed (100 commits per page max from search API)
+	maxPages := (maxCommits + 99) / 100 // Round up
+	if maxPages > 10 {
+		maxPages = 10 // Reasonable limit
+	}
+	
+	var allActivities []CommitActivity
+	
+	// Use GitHub search API to find commits by the user
+	for page := 1; page <= maxPages; page++ {
+		apiURL := fmt.Sprintf("https://api.github.com/search/commits?q=author:%s&sort=committer-date&order=desc&per_page=100&page=%d",
+			url.QueryEscape(username), page)
+			
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
+		if err != nil {
+			return allActivities, fmt.Errorf("creating commit search request: %w", err)
+		}
+		
+		// SECURITY: Validate and sanitize GitHub token before use
+		if c.githubToken != "" && c.isValidGitHubToken(c.githubToken) {
+			req.Header.Set("Authorization", "token "+c.githubToken)
+		}
+		
+		// Required for commit search API
+		req.Header.Set("Accept", "application/vnd.github.cloak-preview")
+		
+		resp, err := c.cachedHTTPDo(ctx, req)
+		if err != nil {
+			c.logger.Debug("commit search API request failed", "page", page, "error", err)
+			break
+		}
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				c.logger.Debug("failed to close response body", "error", err)
+			}
+		}()
+		
+		if resp.StatusCode != http.StatusOK {
+			body, readErr := io.ReadAll(resp.Body)
+			if readErr != nil {
+				c.logger.Warn("🚩 GitHub Commit Search API Error", "status", resp.StatusCode, "page", page, "read_error", readErr)
+			} else {
+				c.logger.Warn("🚩 GitHub Commit Search API Error", "status", resp.StatusCode, "page", page, "body", string(body))
+			}
+			break
+		}
+		
+		var searchResult struct {
+			Items []struct {
+				Repository struct {
+					FullName string `json:"full_name"`
+					ID       int    `json:"id"`
+				} `json:"repository"`
+				Commit struct {
+					Author struct {
+						Name  string `json:"name"`
+						Email string `json:"email"`
+						Date  time.Time `json:"date"`
+					} `json:"author"`
+					Committer struct {
+						Name  string `json:"name"`
+						Email string `json:"email"`
+						Date  time.Time `json:"date"`
+					} `json:"committer"`
+				} `json:"commit"`
+			} `json:"items"`
+			TotalCount int `json:"total_count"`
+		}
+		
+		if err := json.NewDecoder(resp.Body).Decode(&searchResult); err != nil {
+			c.logger.Debug("failed to decode commit search response", "page", page, "error", err)
+			break
+		}
+		
+		// Convert to CommitActivity objects
+		for _, item := range searchResult.Items {
+			if item.Repository.FullName != "" && !item.Commit.Committer.Date.IsZero() {
+				allActivities = append(allActivities, CommitActivity{
+					AuthorDate:     item.Commit.Committer.Date,
+					Repository:     item.Repository.FullName,
+					RepositoryID:   item.Repository.ID,
+					AuthorName:     item.Commit.Author.Name,
+					AuthorEmail:    item.Commit.Author.Email,
+					CommitterName:  item.Commit.Committer.Name,
+					CommitterEmail: item.Commit.Committer.Email,
+				})
+			}
+		}
+		
+		// If this page had fewer than 100 results, we're done
+		if len(searchResult.Items) < 100 {
+			break
+		}
+		
+		// Respect maxCommits limit
+		if len(allActivities) >= maxCommits {
+			allActivities = allActivities[:maxCommits]
+			break
+		}
+	}
+	
+	c.logger.Debug("fetched commit activities via REST API", "username", username, "count", len(allActivities))
+	return allActivities, nil
+}
+
+// FetchUserCommitActivitiesWithLimit fetches commit activities with repository info and configurable page limit.
+func (c *Client) FetchUserCommitActivitiesWithLimit(ctx context.Context, username string, maxPages int) ([]CommitActivity, error) {
+	var allCommits []CommitActivity
+	const perPage = 100
+
+	for page := 1; page <= maxPages; page++ {
+		commits, err := c.fetchCommitActivitiesPage(ctx, username, page, perPage)
+		if err != nil {
+			c.logger.Debug("failed to fetch commit activities page", "page", page, "error", err)
+			// Return partial data if we got some results from earlier pages
+			if len(allCommits) > 0 {
+				break
+			}
+			return nil, fmt.Errorf("failed to fetch commit activities for user %s: %w", username, err)
+		}
+		
+		allCommits = append(allCommits, commits...)
+		
+		// If we got fewer results than perPage, we've reached the end
+		if len(commits) < perPage {
+			break
+		}
+	}
+
+	c.logger.Debug("fetched user commit activities", "username", username, "count", len(allCommits), "pages", maxPages)
+	return allCommits, nil
+}
+
+// fetchCommitActivitiesPage fetches a single page of commit activities with repository information.
+func (c *Client) fetchCommitActivitiesPage(ctx context.Context, username string, page int, perPage int) ([]CommitActivity, error) {
+	var activities []CommitActivity
+
+	// Use GitHub Search API to find commits by this user
+	searchURL := fmt.Sprintf("https://api.github.com/search/commits?q=author:%s&sort=author-date&order=desc&per_page=%d&page=%d",
+		url.QueryEscape(username), perPage, page)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, http.NoBody)
+	if err != nil {
+		return activities, fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/vnd.github.cloak-preview+json")
+
+	if c.githubToken != "" {
+		token := c.githubToken
+		if c.isValidGitHubToken(token) {
+			req.Header.Set("Authorization", "token "+token)
+		}
+	}
+
+	resp, err := c.cachedHTTPDo(ctx, req)
+	if err != nil {
+		return activities, err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response body: %w", err)
+		}
+		c.logger.Warn("🚩 GitHub API Error", "status", resp.StatusCode, "page", page, "body", string(body))
+		return activities, fmt.Errorf("GitHub API error: %d", resp.StatusCode)
+	}
+
+	// Enhanced response structure that includes repository information and email data
+	var searchResult struct {
+		Items []struct {
+			Repository struct {
+				FullName string `json:"full_name"`
+				ID       int    `json:"id"`
+			} `json:"repository"`
+			Commit struct {
+				Author struct {
+					Name  string    `json:"name"`
+					Email string    `json:"email"`
+					Date  time.Time `json:"date"`
+				} `json:"author"`
+				Committer struct {
+					Name  string    `json:"name"`
+					Email string    `json:"email"`
+					Date  time.Time `json:"date"`
+				} `json:"committer"`
+			} `json:"commit"`
+		} `json:"items"`
+		TotalCount int `json:"total_count"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&searchResult); err != nil {
+		return activities, err
+	}
+
+	if page == 1 {
+		c.logger.Debug("GitHub commit activities search results", "username", username, "total_count", searchResult.TotalCount)
+	}
+
+	for _, item := range searchResult.Items {
+		if !item.Commit.Author.Date.IsZero() && item.Repository.FullName != "" {
+			activities = append(activities, CommitActivity{
+				AuthorDate:     item.Commit.Author.Date,
+				Repository:     item.Repository.FullName,
+				RepositoryID:   item.Repository.ID,
+				AuthorName:     item.Commit.Author.Name,
+				AuthorEmail:    item.Commit.Author.Email,
+				CommitterName:  item.Commit.Committer.Name,
+				CommitterEmail: item.Commit.Committer.Email,
+			})
+		}
+	}
+
+	return activities, nil
+}
+
+// FetchUserSSHKeys fetches public SSH keys for a user.
+func (c *Client) FetchUserSSHKeys(ctx context.Context, username string) ([]SSHKey, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/users/%s/keys", url.PathEscape(username))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	// Add GitHub token if available for higher rate limits
+	if c.githubToken != "" && c.isValidGitHubToken(c.githubToken) {
+		req.Header.Set("Authorization", "token "+c.githubToken)
+	}
+
+	resp, err := c.cachedHTTPDo(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close response body", "error", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response body: %w", err)
+		}
+		c.logger.Warn("🚩 GitHub SSH Keys API Error", "username", username, "status", resp.StatusCode, "body", string(body))
+		return []SSHKey{}, nil // Return empty slice rather than error for non-critical data
+	}
+
+	var keys []SSHKey
+	if err := json.NewDecoder(resp.Body).Decode(&keys); err != nil {
+		return nil, fmt.Errorf("decoding SSH keys response: %w", err)
+	}
+
+	c.logger.Debug("fetched SSH keys", "username", username, "count", len(keys))
+	return keys, nil
 }

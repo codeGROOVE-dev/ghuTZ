@@ -43,11 +43,13 @@ type UserContext struct {
 	StarredRepos  []github.Repository
 	Repositories  []github.Repository
 	Issues        []github.Issue
-	Comments      []github.Comment
-	Gists         []time.Time
-	Commits       []time.Time
-	Organizations []github.Organization
-	Events        []github.PublicEvent
+	Comments        []github.Comment
+	Gists           []github.Gist  // Full gist objects with descriptions
+	Commits         []time.Time
+	CommitActivities []github.CommitActivity // Enhanced commit data with repository info
+	Organizations   []github.Organization
+	Events          []github.PublicEvent
+	SSHKeys         []github.SSHKey // SSH public keys with creation timestamps
 }
 
 // Detector performs timezone detection for GitHub users.
@@ -355,7 +357,11 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking user profile", "username", username)
-		user := d.githubClient.FetchUser(ctx, username)
+		user, err := d.githubClient.FetchUserEnhancedGraphQL(ctx, username)
+		if err != nil {
+			d.logger.Warn("🚩 User Profile Fetch Failed", "username", username, "error", err, 
+				"impact", "Gemini analysis will be skipped due to missing profile data")
+		}
 		mu.Lock()
 		userCtx.User = user
 		mu.Unlock()
@@ -470,32 +476,31 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 		mu.Unlock()
 	}()
 
-	// Fetch pull requests
+	// Fetch pull requests and issues using GraphQL (combined in single query!)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		d.logger.Debug("checking pull requests", "username", username)
-		prs, err := d.githubClient.FetchPullRequests(ctx, username)
+		d.logger.Debug("fetching PRs and Issues via GraphQL", "username", username)
+
+		// Use the new GraphQL method that fetches both PRs and Issues together
+		prs, issues, err := d.githubClient.FetchActivityWithGraphQL(ctx, username)
 		if err != nil {
-			d.logger.Debug("failed to fetch pull requests", "username", username, "error", err)
+			d.logger.Warn("🚩 GraphQL Activity Fetch Failed", "username", username, "error", err)
+			// No fallback - GraphQL is the primary method now
+			prs = []github.PullRequest{}
+			issues = []github.Issue{}
 		}
+
 		mu.Lock()
 		userCtx.PullRequests = prs
-		mu.Unlock()
-	}()
-
-	// Fetch issues
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		d.logger.Debug("checking issues", "username", username)
-		issues, err := d.githubClient.FetchIssues(ctx, username)
-		if err != nil {
-			d.logger.Debug("failed to fetch issues", "username", username, "error", err)
-		}
-		mu.Lock()
 		userCtx.Issues = issues
 		mu.Unlock()
+
+		d.logger.Info("activity data fetched",
+			"username", username,
+			"prs", len(prs),
+			"issues", len(issues),
+			"method", "GraphQL")
 	}()
 
 	// Fetch comments
@@ -517,12 +522,41 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking gists", "username", username)
-		gists, err := d.githubClient.FetchUserGists(ctx, username)
+		gists, err := d.githubClient.FetchUserGistsDetails(ctx, username)
 		if err != nil {
 			d.logger.Debug("failed to fetch user gists", "username", username, "error", err)
 		}
 		mu.Lock()
 		userCtx.Gists = gists
+		mu.Unlock()
+	}()
+	
+	// Fetch commit activities with repository information (using GraphQL for better quota)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.logger.Debug("checking commit activities", "username", username)
+		commitActivities, err := d.githubClient.FetchUserCommitActivitiesGraphQL(ctx, username, 100)
+		if err != nil {
+			d.logger.Debug("failed to fetch commit activities", "username", username, "error", err)
+		}
+		mu.Lock()
+		userCtx.CommitActivities = commitActivities
+		mu.Unlock()
+	}()
+
+	// Fetch SSH keys (cheap public API call with timezone hints from creation times)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.logger.Debug("checking SSH keys", "username", username)
+		keys, err := d.githubClient.FetchUserSSHKeys(ctx, username)
+		if err != nil {
+			d.logger.Debug("failed to fetch SSH keys", "username", username, "error", err)
+			keys = []github.SSHKey{}
+		}
+		mu.Lock()
+		userCtx.SSHKeys = keys
 		mu.Unlock()
 	}()
 
@@ -539,9 +573,19 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 		"prs", len(userCtx.PullRequests),
 		"issues", len(userCtx.Issues),
 		"comments", len(userCtx.Comments),
-		"gists", len(userCtx.Gists))
+		"gists", len(userCtx.Gists),
+		"commit_activities", len(userCtx.CommitActivities),
+		"ssh_keys", len(userCtx.SSHKeys))
 
 	return userCtx
+}
+
+// getCreatedAtFromUser safely extracts the created_at time from a user, returning nil if not available.
+func getCreatedAtFromUser(user *github.User) *time.Time {
+	if user == nil || user.CreatedAt.IsZero() {
+		return nil
+	}
+	return &user.CreatedAt
 }
 
 // Detect performs timezone detection for the given GitHub username.
@@ -788,6 +832,7 @@ func (d *Detector) tryLocationFieldWithContext(ctx context.Context, userCtx *Use
 		LocationName: userCtx.User.Location,
 		Confidence:   0.8,
 		Method:       "location_field",
+		CreatedAt:    getCreatedAtFromUser(userCtx.User),
 	}
 }
 

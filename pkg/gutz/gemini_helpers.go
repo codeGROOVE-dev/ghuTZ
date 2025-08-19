@@ -2,8 +2,10 @@ package gutz
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/codeGROOVE-dev/guTZ/pkg/github"
 	"github.com/codeGROOVE-dev/guTZ/pkg/timezone"
@@ -20,7 +22,7 @@ const (
 	maxTextSamples        = 8
 	maxLocationIndicators = 5
 	maxTopCandidates      = 5
-	maxDetailedCandidates = 3
+	maxDetailedCandidates = 5
 	commitMessageMaxLen   = 132
 	websiteContentMaxLen  = 4000
 	mastodonContentMaxLen = 3000
@@ -67,8 +69,34 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		if user.TwitterHandle != "" {
 			fmt.Fprintf(&sb, "- Twitter: @%s\n", user.TwitterHandle)
 		}
+		if user.Email != "" {
+			fmt.Fprintf(&sb, "- Email: %s\n", user.Email)
+		}
 		sb.WriteString("\n")
 	}
+
+	// Display deduped emails from all sources if available
+	if emails, ok := contextData["emails"].([]string); ok && len(emails) > 0 {
+		sb.WriteString("Collected Email Addresses:\n")
+		for _, email := range emails {
+			fmt.Fprintf(&sb, "- %s\n", email)
+		}
+		sb.WriteString("\n")
+	}
+	
+	// Display social accounts from GraphQL
+	if socialAccounts, ok := contextData["social_accounts"].([]github.SocialAccount); ok && len(socialAccounts) > 0 {
+		sb.WriteString("Social Media Accounts:\n")
+		for _, account := range socialAccounts {
+			fmt.Fprintf(&sb, "- %s: %s", account.Provider, account.URL)
+			if account.DisplayName != "" {
+				fmt.Fprintf(&sb, " (%s)", account.DisplayName)
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
+
 
 	// Organizations with their locations and descriptions.
 	if orgs, ok := contextData["organizations"].([]github.Organization); ok && len(orgs) > 0 {
@@ -159,14 +187,42 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		if mastodonProfile.Username != "" {
 			fmt.Fprintf(&sb, "- Username: @%s\n", mastodonProfile.Username)
 		}
-		if mastodonProfile.Bio != "" {
-			fmt.Fprintf(&sb, "- Bio: %s\n", mastodonProfile.Bio)
-		}
 		if mastodonProfile.DisplayName != "" {
 			fmt.Fprintf(&sb, "- Display name: %s\n", mastodonProfile.DisplayName)
 		}
-		for _, website := range mastodonProfile.Websites {
-			fmt.Fprintf(&sb, "- Website: %s\n", website)
+		if mastodonProfile.Bio != "" {
+			fmt.Fprintf(&sb, "- Bio: %s\n", mastodonProfile.Bio)
+		}
+		if mastodonProfile.JoinedDate != "" {
+			fmt.Fprintf(&sb, "- Joined: %s\n", mastodonProfile.JoinedDate)
+		}
+		
+		// Display profile fields (these often contain location, pronouns, websites, etc.)
+		if len(mastodonProfile.ProfileFields) > 0 {
+			sb.WriteString("- Profile fields:\n")
+			for key, value := range mastodonProfile.ProfileFields {
+				fmt.Fprintf(&sb, "  • %s: %s\n", key, value)
+			}
+		}
+		
+		// Display extracted websites
+		if len(mastodonProfile.Websites) > 0 {
+			sb.WriteString("- Websites found:\n")
+			for _, website := range mastodonProfile.Websites {
+				fmt.Fprintf(&sb, "  • %s\n", website)
+			}
+		}
+		
+		// Display hashtags if present (can indicate interests/location)
+		if len(mastodonProfile.Hashtags) > 0 {
+			sb.WriteString("- Hashtags: ")
+			for i, tag := range mastodonProfile.Hashtags {
+				if i > 0 {
+					sb.WriteString(", ")
+				}
+				fmt.Fprintf(&sb, "#%s", tag)
+			}
+			sb.WriteString("\n")
 		}
 		sb.WriteString("\n")
 	}
@@ -187,9 +243,40 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 			}
 			fmt.Fprintf(&sb, "UTC%+.0f", candidate.Offset)
 		}
-		sb.WriteString("\n\n")
+		sb.WriteString("\n")
+		
+		// Add time range analyzed and DST warning if applicable
+		if dateRange, ok := contextData["activity_date_range"].(map[string]any); ok {
+			if oldest, ok := dateRange["oldest"].(time.Time); ok {
+				if newest, ok := dateRange["newest"].(time.Time); ok {
+					fmt.Fprintf(&sb, "Time range analyzed: %s to %s", 
+						oldest.Format("2006-01-02"), newest.Format("2006-01-02"))
+					
+					// Add DST transition warning if applicable
+					if spansDST, ok := dateRange["spans_dst_transitions"].(bool); ok && spansDST {
+						sb.WriteString(" ⚠️ WARNING: Analysis spans daylight saving time transitions")
+						
+						// Determine if it's US or EU DST transitions based on date ranges
+						oldestMonth := oldest.Month()
+						newestMonth := newest.Month()
+						
+						// Check for US DST transitions (March/November)
+						if (oldestMonth <= 3 && newestMonth >= 3) || (oldestMonth <= 11 && newestMonth >= 11) {
+							sb.WriteString(" (US: March/November)")
+						}
+						
+						// Check for EU DST transitions (March/October)  
+						if (oldestMonth <= 3 && newestMonth >= 3) || (oldestMonth <= 10 && newestMonth >= 10) {
+							sb.WriteString(" (EU: March/October)")
+						}
+					}
+					sb.WriteString("\n")
+				}
+			}
+		}
+		sb.WriteString("\n")
 
-		// Show detailed signals for top 3 candidates.
+		// Show detailed signals for top 3 candidates with work patterns.
 		for i, candidate := range candidates {
 			if i >= maxDetailedCandidates {
 				break
@@ -197,19 +284,131 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 			fmt.Fprintf(&sb, "%d. UTC%+.1f (%.0f%% confidence)\n",
 				i+1, candidate.Offset, candidate.Confidence)
 
-			// Format key signals compactly.
-			signals := []string{}
-			if candidate.WorkStartLocal >= workStartEarliest && candidate.WorkStartLocal <= workStartLatest {
-				signals = append(signals, fmt.Sprintf("work %dam", candidate.WorkStartLocal))
+			// Calculate local times for this candidate
+			offset := int(candidate.Offset)
+
+			// Work hours
+			if workHours, ok := contextData["work_hours_utc"].([]int); ok && len(workHours) == 2 {
+				localStart := (workHours[0] + offset + 24) % 24
+				localEnd := (workHours[1] + offset + 24) % 24
+				fmt.Fprintf(&sb, "   Work hours: %02d:00-%02d:00 local", localStart, localEnd)
+				if localStart < 6 {
+					sb.WriteString(" ⚠️ very early")
+				}
+				sb.WriteString("\n")
 			}
-			if candidate.LunchReasonable && candidate.LunchLocalTime > 0 {
-				signals = append(signals, fmt.Sprintf("lunch %d:00", int(candidate.LunchLocalTime)))
+
+			// Lunch break - use the candidate's own lunch calculation
+			if candidate.LunchStartUTC >= 0 {
+				// Convert candidate's UTC lunch time to local time for this candidate
+				localLunchStart := math.Mod(candidate.LunchStartUTC+float64(offset)+24, 24)
+				localLunchEnd := math.Mod(candidate.LunchEndUTC+float64(offset)+24, 24)
+				
+				// Format the times properly
+				startHour := int(localLunchStart)
+				startMin := int((localLunchStart - float64(startHour)) * 60)
+				endHour := int(localLunchEnd)
+				endMin := int((localLunchEnd - float64(endHour)) * 60)
+				
+				fmt.Fprintf(&sb, "   Lunch: %02d:%02d-%02d:%02d local", startHour, startMin, endHour, endMin)
+				if localLunchStart >= 11 && localLunchStart <= 14 {
+					sb.WriteString(" ✓")
+				} else {
+					sb.WriteString(" ⚠️ unusual")
+				}
+				if candidate.LunchConfidence > 0 {
+					fmt.Fprintf(&sb, " (%.0f%% conf)", candidate.LunchConfidence*100)
+				}
+				sb.WriteString("\n")
 			}
+
+			// Sleep hours
+			if sleepHours, ok := contextData["sleep_hours"].([]int); ok && len(sleepHours) > 0 {
+				// Calculate local sleep hours
+				localSleepStart := (sleepHours[0] + offset + 24) % 24
+				localSleepEnd := (sleepHours[len(sleepHours)-1] + offset + 24) % 24
+				fmt.Fprintf(&sb, "   Sleep: %02d:00-%02d:00 local", localSleepStart, localSleepEnd)
+				// Check if sleep is at night - normal sleep starts 8pm-2am and ends 4am-10am
+				nighttimeStart := (localSleepStart >= 20 && localSleepStart <= 23) || (localSleepStart >= 0 && localSleepStart <= 2)
+				nighttimeEnd := (localSleepEnd >= 4 && localSleepEnd <= 10) || (localSleepEnd >= 0 && localSleepEnd <= 3)
+				if nighttimeStart && nighttimeEnd {
+					sb.WriteString(" ✓ nighttime")
+				} else {
+					sb.WriteString(" ⚠️ daytime sleep")
+				}
+				sb.WriteString("\n")
+			}
+
+			// Evening activity
 			if candidate.EveningActivity > 0 {
-				signals = append(signals, fmt.Sprintf("evening activity %d", candidate.EveningActivity))
+				fmt.Fprintf(&sb, "   Evening activity (7-11pm): %d events", candidate.EveningActivity)
+				if candidate.EveningActivity > 20 {
+					sb.WriteString(" (high)")
+				}
+				sb.WriteString("\n")
 			}
-			if len(signals) > 0 {
-				sb.WriteString("   → " + strings.Join(signals, ", ") + "\n")
+
+			// Peak productivity
+			if peakHours, ok := contextData["peak_productivity_utc"].([]int); ok && len(peakHours) >= 2 {
+				localPeakStart := (peakHours[0] + offset + 24) % 24
+				localPeakEnd := (peakHours[1] + offset + 24) % 24
+				fmt.Fprintf(&sb, "   Peak productivity: %02d:00-%02d:00 local", localPeakStart, localPeakEnd)
+				if !candidate.PeakTimeReasonable {
+					sb.WriteString(" ⚠️ unusual peak time")
+				}
+				sb.WriteString("\n")
+			}
+			
+			// Add validation indicators
+			if candidate.WorkHoursReasonable && candidate.LunchReasonable && candidate.SleepReasonable && candidate.PeakTimeReasonable {
+				sb.WriteString("   ✓ All patterns align well with this timezone\n")
+			} else {
+				var issues []string
+				if !candidate.WorkHoursReasonable {
+					issues = append(issues, "unusual work hours")
+				}
+				if !candidate.LunchReasonable {
+					issues = append(issues, "unusual lunch time")
+				}
+				if !candidate.SleepReasonable {
+					issues = append(issues, "unusual sleep time")
+				}
+				if !candidate.PeakTimeReasonable {
+					issues = append(issues, "unusual peak time")
+				}
+				if len(issues) > 0 {
+					fmt.Fprintf(&sb, "   ⚠️ Issues: %s\n", strings.Join(issues, ", "))
+				}
+			}
+			
+			// Include human-readable scoring analysis for AI
+			if len(candidate.ScoringDetails) > 0 {
+				var positives, negatives []string
+				for _, detail := range candidate.ScoringDetails {
+					if strings.HasPrefix(detail, "+") {
+						// Convert "+8 (good work start 7am)" to "Good work start at 7am"
+						reason := strings.TrimSpace(strings.Split(detail, "(")[1])
+						reason = strings.TrimSuffix(reason, ")")
+						positives = append(positives, reason)
+					} else if strings.HasPrefix(detail, "-") {
+						// Convert "-15 (suspicious 5-6pm activity)" to "Suspicious 5-6pm activity" 
+						reason := strings.TrimSpace(strings.Split(detail, "(")[1])
+						reason = strings.TrimSuffix(reason, ")")
+						negatives = append(negatives, reason)
+					}
+				}
+				
+				if len(positives) > 0 {
+					sb.WriteString("   ✓ Reasons this timezone fits: ")
+					sb.WriteString(strings.Join(positives, "; "))
+					sb.WriteString("\n")
+				}
+				
+				if len(negatives) > 0 {
+					sb.WriteString("   ⚠️ Reasons this may not be correct: ")
+					sb.WriteString(strings.Join(negatives, "; "))
+					sb.WriteString("\n")
+				}
 			}
 		}
 		sb.WriteString("\n")
@@ -445,11 +644,30 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		sb.WriteString("\n")
 	}
 
-	// Section 5: Work patterns.
-	sb.WriteString("\n=== WORK PATTERNS ===\n\n")
+	// Recent gist descriptions can reveal location, interests, and language preferences.
+	if recentGists, ok := contextData["recent_gists"].([]github.Gist); ok && len(recentGists) > 0 {
+		sb.WriteString("Recent Gist Descriptions (interests/location clues):\n")
+		for i, gist := range recentGists {
+			if i >= 5 { // Limit to 5 gists as requested
+				break
+			}
+			description := gist.Description
+			if description == "" {
+				description = "[No description]"
+			}
+			// Truncate very long descriptions
+			if len(description) > 100 {
+				description = description[:100] + "..."
+			}
+			fmt.Fprintf(&sb, "- %s (created: %s)\n", description, gist.CreatedAt.Format("2006-01-02"))
+		}
+		sb.WriteString("\n")
+	}
 
-	// Weekend versus weekday activity reveals work style.
+	// Section 5: Additional patterns (weekend/weekday ratio)
+	// Only show this if we have the data
 	if weekendActivity, ok := contextData["weekend_activity_ratio"].(float64); ok {
+		sb.WriteString("\n=== ADDITIONAL PATTERNS ===\n\n")
 		fmt.Fprintf(&sb, "Weekend activity: %.1f%% of weekday activity\n", weekendActivity*100)
 		switch {
 		case weekendActivity < 0.3:
@@ -461,71 +679,6 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		}
 		sb.WriteString("\n")
 	}
-
-	// Day of week activity shows work schedule patterns.
-	if dayActivity, ok := contextData["day_of_week_activity"].(map[string]int); ok && len(dayActivity) > 0 {
-		sb.WriteString("Activity by day of week:\n")
-		days := []string{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
-		for _, day := range days {
-			if count, exists := dayActivity[day]; exists && count > 0 {
-				fmt.Fprintf(&sb, "- %s: %d events\n", day, count)
-			}
-		}
-		sb.WriteString("\n")
-	}
-
-	// Lunch break patterns help validate timezone.
-	if lunchHours, ok := contextData["lunch_break_utc"].([]int); ok && len(lunchHours) >= 2 {
-		if confidence, ok := contextData["lunch_confidence"].(float64); ok {
-			fmt.Fprintf(&sb, "Lunch break UTC: %02d:00-%02d:00 (%.0f%% confidence)\n",
-				lunchHours[0], lunchHours[1], confidence*100)
-		}
-	}
-
-	// Peak productivity hours indicate work style.
-	if peakHours, ok := contextData["peak_productivity_utc"].([]int); ok && len(peakHours) >= 2 {
-		fmt.Fprintf(&sb, "Peak productivity UTC: %02d:00-%02d:00\n", peakHours[0], peakHours[1])
-	}
-
-	// Sleep hours indicate timezone alignment
-	if sleepHours, ok := contextData["sleep_hours"].([]int); ok && len(sleepHours) > 0 {
-		// Group consecutive hours for cleaner display
-		var sleepRanges []string
-		if len(sleepHours) > 0 {
-			start := sleepHours[0]
-			end := sleepHours[0]
-			for i := 1; i < len(sleepHours); i++ {
-				if sleepHours[i] == (end+1)%24 {
-					end = sleepHours[i]
-				} else {
-					if start == end {
-						sleepRanges = append(sleepRanges, fmt.Sprintf("%02d:00", start))
-					} else {
-						sleepRanges = append(sleepRanges, fmt.Sprintf("%02d:00-%02d:00", start, (end+1)%24))
-					}
-					start = sleepHours[i]
-					end = sleepHours[i]
-				}
-			}
-			// Add final range
-			if start == end {
-				sleepRanges = append(sleepRanges, fmt.Sprintf("%02d:00", start))
-			} else {
-				sleepRanges = append(sleepRanges, fmt.Sprintf("%02d:00-%02d:00", start, (end+1)%24))
-			}
-		}
-		fmt.Fprintf(&sb, "Detected sleep hours UTC: %s\n", strings.Join(sleepRanges, ", "))
-		fmt.Fprintf(&sb, "Note: Primary sleep period should be 4-8 continuous hours between 10pm-8am local time\n")
-	}
-
-	// Evening activity indicates personal coding time.
-	if eveningHours, ok := contextData["evening_activity_hours"].([]int); ok && len(eveningHours) > 0 {
-		fmt.Fprintf(&sb, "Evening activity hours (7-11pm window): %v\n", eveningHours)
-		if eveningPct, ok := contextData["evening_activity_percentage"].(float64); ok {
-			fmt.Fprintf(&sb, "Evening activity percentage: %.1f%%\n", eveningPct)
-		}
-	}
-	sb.WriteString("\n")
 
 	// Section 6: Website content (kept full for hobby detection).
 	if websiteContent, ok := contextData["website_content"].(string); ok && websiteContent != "" {

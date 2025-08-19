@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"regexp"
 	"strings"
@@ -220,6 +221,14 @@ func main() {
 	// Get tokens from environment if not provided as flags
 	if *githubToken == "" {
 		*githubToken = os.Getenv("GITHUB_TOKEN")
+		// If still empty, try to get from gh CLI
+		if *githubToken == "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if token, err := exec.CommandContext(ctx, "gh", "auth", "token").Output(); err == nil {
+				*githubToken = strings.TrimSpace(string(token))
+			}
+		}
 	}
 	if *geminiAPIKey == "" {
 		*geminiAPIKey = os.Getenv("GEMINI_API_KEY")

@@ -332,6 +332,27 @@ func FindSleepHours(hourCounts map[int]int) []int {
 	// If we found 4-12 quiet hours (sleep time), use them
 	// User specified 4-9 hours of sleep is most likely
 	if len(quietHours) >= 4 && len(quietHours) <= 12 {
+		// Check if hours wrap around midnight by looking for a gap
+		// If there's a gap larger than 1 hour, it indicates wrap-around
+		hasWrapAround := false
+		wrapPoint := -1
+		for i := 1; i < len(quietHours); i++ {
+			if quietHours[i] != quietHours[i-1]+1 {
+				// Found a gap - this might be wrap-around
+				// e.g., [2,3,4,5,6,7,8,9,10,22] has gap between 10 and 22
+				hasWrapAround = true
+				wrapPoint = i
+				break
+			}
+		}
+		
+		if hasWrapAround && wrapPoint > 0 {
+			// Reorder to maintain wrap-around: move the end hours to the beginning
+			// e.g., [2,3,4,5,6,7,8,9,10,22] -> [22,2,3,4,5,6,7,8,9,10]
+			reordered := append(quietHours[wrapPoint:], quietHours[:wrapPoint]...)
+			return reordered
+		}
+		
 		return quietHours
 	}
 
