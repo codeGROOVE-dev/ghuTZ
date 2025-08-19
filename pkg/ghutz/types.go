@@ -10,7 +10,7 @@ import (
 // Option configures a Detector.
 type Option func(*OptionHolder)
 
-// Options for Detector.
+// WithGitHubToken sets the GitHub API token for the Detector.
 func WithGitHubToken(token string) Option {
 	return func(o *OptionHolder) {
 		o.githubToken = token
@@ -117,26 +117,26 @@ type Result struct {
 	HourlyOrganizationActivity map[int]map[string]int       `json:"hourly_organization_activity,omitempty"`
 	HourlyActivityUTC          map[int]int                  `json:"hourly_activity_utc"`
 	HalfHourlyActivityUTC      map[float64]int              `json:"-"`
-	Method                     string                       `json:"method"`
+	ActivityTimezone           string                       `json:"activity_timezone,omitempty"`
 	LocationName               string                       `json:"location_name,omitempty"`
 	GeminiSuggestedLocation    string                       `json:"gemini_suggested_location,omitempty"`
 	Name                       string                       `json:"name,omitempty"`
 	Timezone                   string                       `json:"timezone"`
 	GeminiReasoning            string                       `json:"gemini_reasoning,omitempty"`
 	Username                   string                       `json:"username"`
-	ActivityTimezone           string                       `json:"activity_timezone,omitempty"`
+	Method                     string                       `json:"method"`
 	GeminiPrompt               string                       `json:"gemini_prompt,omitempty"`
 	ActivityDateRange          DateRange                    `json:"activity_date_range,omitempty"`
 	TopOrganizations           []OrgActivity                `json:"top_organizations"`
 	SleepHoursUTC              []int                        `json:"sleep_hours_utc,omitempty"`
 	SleepBucketsUTC            []float64                    `json:"sleep_buckets_utc,omitempty"`
+	TimezoneCandidates         []timezone.TimezoneCandidate `json:"timezone_candidates,omitempty"`
 	LunchHoursUTC              LunchBreak                   `json:"lunch_hours_utc,omitempty"`
 	PeakProductivity           PeakTime                     `json:"peak_productivity"`
 	ActiveHoursLocal           ActiveHours                  `json:"active_hours_local,omitempty"`
 	LocationConfidence         float64                      `json:"location_confidence,omitempty"`
 	TimezoneConfidence         float64                      `json:"timezone_confidence,omitempty"`
 	Confidence                 float64                      `json:"confidence"`
-	TimezoneCandidates         []timezone.TimezoneCandidate `json:"timezone_candidates,omitempty"`
 }
 
 // Location represents geographic coordinates.
@@ -146,7 +146,7 @@ type Location struct {
 }
 
 // Note: GitHub-related types (GitHubUser, PullRequest, Issue, Comment, Organization, Repository)
-// have been moved to the github package
+// have been moved to the github package.
 
 // ActivityData holds all activity data for timezone detection.
 type ActivityData struct {

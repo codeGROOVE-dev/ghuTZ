@@ -194,17 +194,18 @@ func TestEveningActivityDetection(t *testing.T) {
 
 			// Apply sleep pattern validation (from the improved logic)
 			offsetFromUTC := bestOffset
-			if bestTimezone == "eastern" && midQuiet > 8.0 {
+			switch {
+			case bestTimezone == "eastern" && midQuiet > 8.0:
 				// Eastern time but very late sleep pattern - might actually be Central
 				if float64(tt.eveningActivityCentral) > float64(tt.eveningActivityEastern)*0.7 {
 					offsetFromUTC = -6.0 // Central Time
 				}
-			} else if bestTimezone == "mountain" && midQuiet < 6.0 {
+			case bestTimezone == "mountain" && midQuiet < 6.0:
 				// Mountain time but very early sleep pattern - might actually be Eastern
 				if float64(tt.eveningActivityEastern) > float64(tt.eveningActivityMountain)*0.7 {
 					offsetFromUTC = -5.0 // Eastern Time
 				}
-			} else if bestTimezone == "pacific" && midQuiet < 8.0 {
+			case bestTimezone == "pacific" && midQuiet < 8.0:
 				// Pacific time but earlier sleep pattern - might actually be Mountain
 				if float64(tt.eveningActivityMountain) > float64(tt.eveningActivityPacific)*0.7 {
 					offsetFromUTC = -7.0 // Mountain Time

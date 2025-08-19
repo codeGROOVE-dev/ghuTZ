@@ -17,7 +17,7 @@ func (d *Detector) cachedHTTPDo(ctx context.Context, req *http.Request) (*http.R
 	return cachedClient.Do(ctx, req)
 }
 
-// retryableHTTPClient wraps the Detector's retryableHTTPDo method to implement HTTPClient interface
+// retryableHTTPClient wraps the Detector's retryableHTTPDo method to implement HTTPClient interface.
 type retryableHTTPClient struct {
 	detector *Detector
 	doFunc   func(*http.Request) (*http.Response, error)

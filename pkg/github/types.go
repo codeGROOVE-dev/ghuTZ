@@ -7,24 +7,24 @@ import (
 
 // GitHubUser represents a GitHub user profile.
 type GitHubUser struct {
-	Login          string          `json:"login"`
-	Name           string          `json:"name"`
-	Location       string          `json:"location"`
-	Bio            string          `json:"bio"`
-	Blog           string          `json:"blog"`
-	Company        string          `json:"company"`
-	Email          string          `json:"email"`
-	TwitterHandle  string          `json:"twitter_username"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	Email          string    `json:"email"`
+	Bio            string    `json:"bio"`
+	Blog           string    `json:"blog"`
+	Company        string    `json:"company"`
+	Login          string    `json:"login"`
+	TwitterHandle  string    `json:"twitter_username"`
+	Location       string    `json:"location"`
+	Name           string    `json:"name"`
+	ProfileHTML    string
+	SocialAccounts []SocialAccount `json:"socialAccounts,omitempty"`
 	Followers      int             `json:"followers"`
 	Following      int             `json:"following"`
 	PublicRepos    int             `json:"public_repos"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
-	ProfileHTML    string          // HTML content of profile page
-	SocialAccounts []SocialAccount `json:"socialAccounts,omitempty"`
 }
 
-// SocialAccount represents a social media account linked to GitHub profile
+// SocialAccount represents a social media account linked to GitHub profile.
 type SocialAccount struct {
 	Provider    string `json:"provider"`
 	URL         string `json:"url"`
@@ -43,29 +43,29 @@ type PublicEvent struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-// Gist represents a GitHub gist
+// Gist represents a GitHub gist.
 type Gist struct {
-	ID          string    `json:"id"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
 	Description string    `json:"description"`
-	Public      bool      `json:"public"`
 	HTMLURL     string    `json:"html_url"`
+	Public      bool      `json:"public"`
 }
 
-// Repository represents a GitHub repository
+// Repository represents a GitHub repository.
 type Repository struct {
-	Name        string    `json:"name"`
-	FullName    string    `json:"full_name"`
-	Description string    `json:"description"`
-	Fork        bool      `json:"fork"`
-	Language    string    `json:"language"`
-	StarCount   int       `json:"stargazers_count"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	PushedAt    time.Time `json:"pushed_at"`
-	Topics      []string  `json:"topics"`
+	Name        string    `json:"name"`
+	FullName    string    `json:"full_name"`
+	Description string    `json:"description"`
+	Language    string    `json:"language"`
 	HTMLURL     string    `json:"html_url"`
+	Topics      []string  `json:"topics"`
+	StarCount   int       `json:"stargazers_count"`
+	Fork        bool      `json:"fork"`
 }
 
 // Organization represents a GitHub organization.
@@ -77,60 +77,60 @@ type Organization struct {
 	Blog        string `json:"blog"`
 }
 
-// Issue represents a GitHub issue
+// Issue represents a GitHub issue.
 type Issue struct {
-	Number    int       `json:"number"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 	Title     string    `json:"title"`
 	Body      string    `json:"body"`
 	State     string    `json:"state"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
 	HTMLURL   string    `json:"html_url"`
-	RepoName  string    // Added to track which repo this issue belongs to
+	RepoName  string
+	Number    int `json:"number"`
 }
 
-// PullRequest represents a GitHub pull request
+// PullRequest represents a GitHub pull request.
 type PullRequest struct {
-	Number    int        `json:"number"`
-	Title     string     `json:"title"`
-	Body      string     `json:"body"`
-	State     string     `json:"state"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	MergedAt  *time.Time `json:"merged_at"`
+	Title     string     `json:"title"`
+	Body      string     `json:"body"`
+	State     string     `json:"state"`
 	HTMLURL   string     `json:"html_url"`
-	RepoName  string     // Added to track which repo this PR belongs to
+	RepoName  string
+	Number    int `json:"number"`
 }
 
-// PRSearchItem represents a GitHub pull request search result
+// PRSearchItem represents a GitHub pull request search result.
 type PRSearchItem struct {
-	Number     int       `json:"number"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 	Title      string    `json:"title"`
 	Body       string    `json:"body"`
 	State      string    `json:"state"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
 	HTMLURL    string    `json:"html_url"`
 	Repository struct {
 		FullName string `json:"full_name"`
 	} `json:"repository"`
+	Number int `json:"number"`
 }
 
-// IssueSearchItem represents a GitHub issue search result
+// IssueSearchItem represents a GitHub issue search result.
 type IssueSearchItem struct {
-	Number     int       `json:"number"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 	Title      string    `json:"title"`
 	Body       string    `json:"body"`
 	State      string    `json:"state"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
 	HTMLURL    string    `json:"html_url"`
 	Repository struct {
 		FullName string `json:"full_name"`
 	} `json:"repository"`
+	Number int `json:"number"`
 }
 
-// Comment represents a GitHub comment (issue or commit)
+// Comment represents a GitHub comment (issue or commit).
 type Comment struct {
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`

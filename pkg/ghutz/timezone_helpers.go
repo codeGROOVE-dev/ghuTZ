@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// offsetFromNamedTimezone converts IANA timezone name to current UTC offset
+// offsetFromNamedTimezone converts IANA timezone name to current UTC offset.
 func offsetFromNamedTimezone(tzName string) int {
 	// Handle UTC offset strings like "UTC-4" or "UTC+8"
 	if strings.HasPrefix(tzName, "UTC") {

@@ -60,7 +60,7 @@ func TestAsh2kSydneyDetection(t *testing.T) {
 
 	// Calculate quiet hours
 	quietHoursUTC := []int{}
-	for hour := 0; hour < 24; hour++ {
+	for hour := range 24 {
 		count := 0
 		if c, exists := halfHourCounts[float64(hour)]; exists {
 			count += c

@@ -38,14 +38,15 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 
 	for i := 1; i < len(quietBuckets); i++ {
 		// Check if consecutive (0.5 apart) or wraparound (23.5 to 0.0)
-		if quietBuckets[i] == currentPeriod.end+0.5 {
+		switch {
+		case quietBuckets[i] == currentPeriod.end+0.5:
 			currentPeriod.end = quietBuckets[i]
 			currentPeriod.length++
-		} else if currentPeriod.end == 23.5 && quietBuckets[i] == 0.0 {
+		case currentPeriod.end == 23.5 && quietBuckets[i] == 0.0:
 			// Wraparound case
 			currentPeriod.end = quietBuckets[i]
 			currentPeriod.length++
-		} else {
+		default:
 			// End of current period
 			if currentPeriod.length >= 6 { // At least 3 hours
 				periods = append(periods, currentPeriod)
@@ -160,7 +161,7 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 	return sleepBuckets
 }
 
-// FindSleepHours identifies sleep hours from hourly activity data
+// FindSleepHours identifies sleep hours from hourly activity data.
 func FindSleepHours(hourCounts map[int]int) []int {
 	// Calculate total activity to determine thresholds
 	totalActivity := 0
@@ -184,7 +185,7 @@ func FindSleepHours(hourCounts map[int]int) []int {
 	}
 
 	var quietHours []int
-	for hour := 0; hour < 24; hour++ {
+	for hour := range 24 {
 		if float64(hourCounts[hour]) <= threshold {
 			quietHours = append(quietHours, hour)
 		}
@@ -201,7 +202,7 @@ func FindSleepHours(hourCounts map[int]int) []int {
 		// Find the quietest consecutive 12-hour period
 		bestSum := totalActivity
 		bestStart := 0
-		for start := 0; start < len(quietHours); start++ {
+		for start := range len(quietHours) {
 			sum := 0
 			count := 0
 			for i := start; i < start+12 && i < len(quietHours); i++ {
@@ -223,9 +224,9 @@ func FindSleepHours(hourCounts map[int]int) []int {
 	bestStart := 0
 
 	for windowSize := 4; windowSize <= 12; windowSize++ {
-		for start := 0; start < 24; start++ {
+		for start := range 24 {
 			sum := 0
-			for i := 0; i < windowSize; i++ {
+			for i := range windowSize {
 				hour := (start + i) % 24
 				sum += hourCounts[hour]
 			}
@@ -245,7 +246,7 @@ func FindSleepHours(hourCounts map[int]int) []int {
 
 	// Build the sleep hours array
 	var sleepHours []int
-	for i := 0; i < bestWindowSize; i++ {
+	for i := range bestWindowSize {
 		sleepHours = append(sleepHours, (bestStart+i)%24)
 	}
 

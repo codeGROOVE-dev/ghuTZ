@@ -11,7 +11,7 @@ import (
 	"github.com/fatih/color"
 )
 
-// Result represents timezone detection results - imported type needed for histogram
+// Result represents timezone detection results - imported type needed for histogram.
 type Result struct {
 	HalfHourlyActivityUTC      map[float64]int        `json:"-"`
 	HourlyOrganizationActivity map[int]map[string]int `json:"hourly_organization_activity,omitempty"`
@@ -22,20 +22,20 @@ type Result struct {
 	LunchHoursUTC              LunchBreak             `json:"lunch_hours_utc,omitempty"`
 }
 
-// OrgActivity represents activity for an organization
+// OrgActivity represents activity for an organization.
 type OrgActivity struct {
 	Name  string `json:"name"`
 	Count int    `json:"count"`
 }
 
-// PeakProductivity represents peak productivity hours
+// PeakProductivity represents peak productivity hours.
 type PeakProductivity struct {
 	Start float64 `json:"start"`
 	End   float64 `json:"end"`
 	Count int     `json:"count"`
 }
 
-// LunchBreak represents lunch break times
+// LunchBreak represents lunch break times.
 type LunchBreak struct {
 	Start      float64 `json:"start"`
 	End        float64 `json:"end"`
@@ -75,7 +75,7 @@ func getOrgColorFunc(org string, topOrgs []OrgActivity) *color.Color {
 	return color.New(color.FgHiBlack)
 }
 
-// convertUTCToLocal converts a UTC hour (float) to local time using Go's timezone database
+// convertUTCToLocal converts a UTC hour (float) to local time using Go's timezone database.
 func convertUTCToLocal(utcHour float64, timezone string) float64 {
 	if loc, err := time.LoadLocation(timezone); err == nil {
 		// Use Go's native timezone conversion
@@ -147,9 +147,9 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, timezone string) 
 	}
 
 	// Build the histogram with 30-minute buckets in UTC order
-	for utcHour := 0; utcHour < 24; utcHour++ {
+	for utcHour := range 24 {
 		// Process both half-hour buckets for each hour
-		for halfHour := 0; halfHour < 2; halfHour++ {
+		for halfHour := range 2 {
 			bucket := float64(utcHour) + float64(halfHour)*0.5
 			count := halfHourCounts[bucket]
 

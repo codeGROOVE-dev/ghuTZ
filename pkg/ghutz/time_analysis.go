@@ -31,7 +31,7 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 
 	// If no clear work start found, look for any morning activity
 	if workStart == -1 {
-		for h := 0; h < 24; h++ {
+		for h := range 24 {
 			localHour := (h + utcOffset + 24) % 24
 			if localHour >= 6 && localHour <= 11 && hourCounts[h] > 0 {
 				workStart = h

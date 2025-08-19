@@ -200,7 +200,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	// Hourly activity distribution helps validate timezone candidates.
 	if hourCounts, ok := contextData["hour_counts"].(map[int]int); ok && len(hourCounts) > 0 {
 		sb.WriteString("\nHourly activity (UTC):\n")
-		for hour := 0; hour < 24; hour++ {
+		for hour := range 24 {
 			if count, exists := hourCounts[hour]; exists && count > 0 {
 				fmt.Fprintf(&sb, "%02d:00: %d events\n", hour, count)
 			}

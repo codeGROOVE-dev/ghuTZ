@@ -4,6 +4,7 @@ package gemini
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -13,7 +14,7 @@ import (
 	"google.golang.org/genai"
 )
 
-// Response represents the Gemini API response structure
+// Response represents the Gemini API response structure.
 type Response struct {
 	DetectedTimezone   string `json:"detected_timezone"`
 	DetectedLocation   string `json:"detected_location"`
@@ -28,14 +29,14 @@ type Response struct {
 	Reasoning      string      `json:"reasoning,omitempty"`
 }
 
-// Client represents a Gemini API client
+// Client represents a Gemini API client.
 type Client struct {
 	apiKey     string
 	model      string
 	gcpProject string
 }
 
-// NewClient creates a new Gemini API client
+// NewClient creates a new Gemini API client.
 func NewClient(apiKey, model, gcpProject string) *Client {
 	return &Client{
 		apiKey:     apiKey,
@@ -213,22 +214,21 @@ func (c *Client) CallWithSDK(ctx context.Context, prompt string, verbose bool, c
 			logger.Debug("Retrying Gemini API call", "attempt", n+1, "error", err)
 		}),
 	)
-
 	if err != nil {
-		return nil, fmt.Errorf("Gemini API call failed after retries: %w", err)
+		return nil, fmt.Errorf("gemini API call failed after retries: %w", err)
 	}
 
 	// Extract text from response
 	if resp == nil {
 		logger.Error("Gemini API returned nil response")
-		return nil, fmt.Errorf("nil response from Gemini API")
+		return nil, errors.New("nil response from Gemini API")
 	}
 
 	if len(resp.Candidates) == 0 {
 		logger.Error("Gemini API returned no candidates",
 			"usage", resp.UsageMetadata,
 			"model", modelName)
-		return nil, fmt.Errorf("no candidates in Gemini API response")
+		return nil, errors.New("no candidates in Gemini API response")
 	}
 
 	candidate := resp.Candidates[0]
@@ -241,13 +241,13 @@ func (c *Client) CallWithSDK(ctx context.Context, prompt string, verbose bool, c
 
 	if candidate.Content == nil {
 		logger.Error("Gemini candidate has nil content")
-		return nil, fmt.Errorf("nil content in Gemini response")
+		return nil, errors.New("nil content in Gemini response")
 	}
 
 	if len(candidate.Content.Parts) == 0 {
 		logger.Error("Gemini candidate has no content parts",
 			"finish_reason", candidate.FinishReason)
-		return nil, fmt.Errorf("empty response from Gemini API")
+		return nil, errors.New("empty response from Gemini API")
 	}
 
 	// Get the JSON response
@@ -262,7 +262,7 @@ func (c *Client) CallWithSDK(ctx context.Context, prompt string, verbose bool, c
 	}
 
 	if jsonText == "" {
-		return nil, fmt.Errorf("no text in Gemini response")
+		return nil, errors.New("no text in Gemini response")
 	}
 
 	// Always log raw response for debugging (truncate if too long)

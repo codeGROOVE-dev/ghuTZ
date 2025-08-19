@@ -112,8 +112,7 @@ func (c *Client) FetchUserGists(ctx context.Context, username string) ([]time.Ti
 	// Collect both created and updated timestamps
 	timestamps := make([]time.Time, 0, len(gists)*2)
 	for _, gist := range gists {
-		timestamps = append(timestamps, gist.CreatedAt)
-		timestamps = append(timestamps, gist.UpdatedAt)
+		timestamps = append(timestamps, gist.CreatedAt, gist.UpdatedAt)
 	}
 
 	c.logger.Debug("fetched gist timestamps", "username", username, "count", len(timestamps))
@@ -313,7 +312,7 @@ func (c *Client) FetchIssuesWithLimit(ctx context.Context, username string, maxP
 	return allIssues, nil
 }
 
-// fetchUserWithGraphQL fetches user data including social accounts via GraphQL
+// fetchUserWithGraphQL fetches user data including social accounts via GraphQL.
 func (c *Client) FetchUserWithGraphQL(ctx context.Context, username string) *GitHubUser {
 	c.logger.Debug("attempting GraphQL user fetch", "username", username)
 	query := fmt.Sprintf(`{
@@ -527,17 +526,17 @@ func (c *Client) FetchUserComments(ctx context.Context, username string) ([]Comm
 			User struct {
 				IssueComments struct {
 					Nodes []struct {
-						CreatedAt  time.Time `json:"createdAt"`
-						Body       string    `json:"body"`
-						Repository struct {
-							NameWithOwner string `json:"nameWithOwner"`
-						} `json:"repository"`
-						Issue *struct {
+						CreatedAt time.Time `json:"createdAt"`
+						Issue     *struct {
 							Number int `json:"number"`
 						} `json:"issue"`
 						PullRequest *struct {
 							Number int `json:"number"`
 						} `json:"pullRequest"`
+						Body       string `json:"body"`
+						Repository struct {
+							NameWithOwner string `json:"nameWithOwner"`
+						} `json:"repository"`
 					} `json:"nodes"`
 				} `json:"issueComments"`
 				CommitComments struct {
@@ -919,7 +918,7 @@ func (c *Client) FetchPopularRepositories(ctx context.Context, username string) 
 	return repositories, nil
 }
 
-// FetchProfileHTML fetches the raw HTML of a GitHub profile page
+// FetchProfileHTML fetches the raw HTML of a GitHub profile page.
 func (c *Client) FetchProfileHTML(ctx context.Context, username string) string {
 	profileURL := fmt.Sprintf("https://github.com/%s", url.PathEscape(username))
 
@@ -955,7 +954,7 @@ func (c *Client) FetchProfileHTML(ctx context.Context, username string) string {
 	return string(body)
 }
 
-// fetchSocialFromHTML scrapes GitHub profile HTML for social media links
+// fetchSocialFromHTML scrapes GitHub profile HTML for social media links.
 func (c *Client) FetchSocialFromHTML(ctx context.Context, username string) []string {
 	url := fmt.Sprintf("https://github.com/%s", username)
 
@@ -1120,7 +1119,7 @@ func (c *Client) FetchUserCommitsWithLimit(ctx context.Context, username string,
 	return allTimestamps, nil
 }
 
-// fetchCommitPage fetches a single page of commits
+// fetchCommitPage fetches a single page of commits.
 func (c *Client) fetchCommitPage(ctx context.Context, username string, page int, perPage int) ([]time.Time, error) {
 	var timestamps []time.Time
 

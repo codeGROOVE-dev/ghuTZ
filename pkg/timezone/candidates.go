@@ -8,7 +8,7 @@ import (
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/lunch"
 )
 
-// GlobalLunchPattern represents the best lunch pattern found globally in UTC
+// GlobalLunchPattern represents the best lunch pattern found globally in UTC.
 type GlobalLunchPattern struct {
 	StartUTC    float64
 	EndUTC      float64
@@ -16,7 +16,7 @@ type GlobalLunchPattern struct {
 	DropPercent float64
 }
 
-// EvaluateTimezoneCandidates evaluates multiple timezone offsets to find the best candidates
+// EvaluateTimezoneCandidates evaluates multiple timezone offsets to find the best candidates.
 func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHourCounts map[float64]int, totalActivity int, quietHours []int, midQuiet float64, activeStart int, bestGlobalLunch GlobalLunchPattern) []TimezoneCandidate {
 	var candidates []TimezoneCandidate // Store timezone candidates for Gemini
 
@@ -28,7 +28,6 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 	maxOffset := 14
 
 	for testOffset := minOffset; testOffset <= maxOffset; testOffset++ {
-
 		// Calculate metrics for this offset
 		// 1. Lunch timing analysis
 		testLunchStart, testLunchEnd, testLunchConf := lunch.DetectLunchBreakNoonCentered(halfHourCounts, testOffset)
@@ -41,7 +40,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 		// Find first SIGNIFICANT activity in this timezone (more accurate than activeStart which uses initial offset)
 		// Look for sustained activity (>5 events) not just any blip
 		firstActivityLocal := 24.0
-		for utcHour := 0; utcHour < 24; utcHour++ {
+		for utcHour := range 24 {
 			if hourCounts[utcHour] > 5 { // Changed from > 0 to > 5 for significant activity
 				localHour := float64((utcHour + testOffset + 24) % 24)
 				if localHour < firstActivityLocal {
@@ -591,7 +590,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 
 				// If 21:00 UTC is a peak hour, that's very strong for UTC-3
 				isPeak := true
-				for h := 0; h < 24; h++ {
+				for h := range 24 {
 					if h != endOfDayUTC && hourCounts[h] > hourCounts[endOfDayUTC] {
 						isPeak = false
 						break
@@ -780,7 +779,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 	}
 
 	// Sort candidates by confidence score
-	for i := 0; i < len(candidates)-1; i++ {
+	for i := range len(candidates) - 1 {
 		for j := i + 1; j < len(candidates); j++ {
 			if candidates[j].Confidence > candidates[i].Confidence {
 				candidates[i], candidates[j] = candidates[j], candidates[i]

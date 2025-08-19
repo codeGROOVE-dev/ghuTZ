@@ -8,15 +8,15 @@ import (
 	"strings"
 )
 
-// Client provides methods for interacting with the GitHub API
+// Client provides methods for interacting with the GitHub API.
 type Client struct {
 	logger       *slog.Logger
 	httpClient   *http.Client
-	githubToken  string
 	cachedHTTPDo func(context.Context, *http.Request) (*http.Response, error)
+	githubToken  string
 }
 
-// NewClient creates a new GitHub API client
+// NewClient creates a new GitHub API client.
 func NewClient(logger *slog.Logger, httpClient *http.Client, githubToken string, cachedHTTPDo func(context.Context, *http.Request) (*http.Response, error)) *Client {
 	return &Client{
 		logger:       logger,
@@ -26,7 +26,7 @@ func NewClient(logger *slog.Logger, httpClient *http.Client, githubToken string,
 	}
 }
 
-// isValidGitHubToken checks if a token looks valid (basic check)
+// isValidGitHubToken checks if a token looks valid (basic check).
 func (c *Client) isValidGitHubToken(token string) bool {
 	// GitHub tokens have specific prefixes
 	// Classic: 40 chars hex

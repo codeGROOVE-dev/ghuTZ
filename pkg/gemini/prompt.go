@@ -1,6 +1,6 @@
 package gemini
 
-// UnifiedPrompt returns the streamlined prompt for timezone detection
+// UnifiedPrompt returns the streamlined prompt for timezone detection.
 func UnifiedPrompt() string {
 	return `Analyze this GitHub user's location based on digital evidence. ALWAYS provide a specific location guess.
 
@@ -39,7 +39,7 @@ DETECTION PRIORITIES (subject to above constraint):
    - ⚠️ CAUTION: Don't assume employees work at company HQ - remote work is very common
    - ⚠️ CRITICAL: If activity strongly suggests Eastern Time (UTC-4/5), don't default to Seattle/SF just because of tech company
    - Only use company location if it matches activity patterns
-   - Being a Ukranian company, GitLab employees are more likely to live in Ukraine than Russia
+   - Being a Ukrainian company, GitLab employees are more likely to live in Ukraine than Russia
    - Company names may be GitHub org names, like "@gitlabhq" being a reference for GitLab
    - References to country-specific organizations in commit messages or repositories indicate a country strongly (for example, BVSP for Brazil, FTC for USA)
 

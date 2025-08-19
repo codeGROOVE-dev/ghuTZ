@@ -86,15 +86,15 @@ func extractCountryTLDs(urls ...string) []CountryTLD {
 	return tlds
 }
 
-// MastodonProfileData represents all extracted data from a Mastodon profile
+// MastodonProfileData represents all extracted data from a Mastodon profile.
 type MastodonProfileData struct {
+	ProfileFields map[string]string
 	Username      string
 	DisplayName   string
 	Bio           string
-	ProfileFields map[string]string // Key-value pairs from profile metadata
-	Websites      []string          // All discovered websites
-	Hashtags      []string          // Hashtags from bio
 	JoinedDate    string
+	Websites      []string
+	Hashtags      []string
 }
 
 // extractSocialMediaURLs extracts social media profile URLs from GitHub user data.

@@ -7,13 +7,13 @@ import (
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/github"
 )
 
-// CommitMessageSample represents a sample commit message for analysis
+// CommitMessageSample represents a sample commit message for analysis.
 type CommitMessageSample struct {
 	Message string
 	Author  string
 }
 
-// collectCommitMessageSamples collects sample commit messages from events
+// collectCommitMessageSamples collects sample commit messages from events.
 func collectCommitMessageSamples(events []github.PublicEvent, maxSamples int) []CommitMessageSample {
 	var samples []CommitMessageSample
 	seen := make(map[string]bool)
@@ -67,47 +67,47 @@ func collectCommitMessageSamples(events []github.PublicEvent, maxSamples int) []
 	return samples
 }
 
-// collectTextSamples collects sample text from PRs, issues, and comments
+// collectTextSamples collects sample text from PRs, issues, and comments.
 func collectTextSamples(prs []github.PullRequest, issues []github.Issue, comments []github.Comment, maxSamples int) []string {
 	var samples []string
 	seen := make(map[string]bool)
 
 	// Collect from PR titles and bodies
-	for _, pr := range prs {
-		if pr.Title != "" && !seen[pr.Title] && len(samples) < maxSamples {
-			seen[pr.Title] = true
-			samples = append(samples, "PR Title: "+pr.Title)
+	for i := range prs {
+		if prs[i].Title != "" && !seen[prs[i].Title] && len(samples) < maxSamples {
+			seen[prs[i].Title] = true
+			samples = append(samples, "PR Title: "+prs[i].Title)
 		}
-		if pr.Body != "" && !seen[pr.Body] && len(samples) < maxSamples {
+		if prs[i].Body != "" && !seen[prs[i].Body] && len(samples) < maxSamples {
 			// Take first 200 chars of body if it's long
-			body := pr.Body
+			body := prs[i].Body
 			if len(body) > 200 {
 				body = body[:200] + "..."
 			}
 			if !strings.Contains(body, "<!--") && !strings.Contains(body, "## Checklist") {
-				seen[pr.Body] = true
+				seen[prs[i].Body] = true
 				samples = append(samples, "PR Body: "+body)
 			}
 		}
 	}
 
 	// Collect from issue titles and bodies
-	for _, issue := range issues {
+	for i := range issues {
 		if len(samples) >= maxSamples {
 			break
 		}
-		if issue.Title != "" && !seen[issue.Title] {
-			seen[issue.Title] = true
-			samples = append(samples, "Issue Title: "+issue.Title)
+		if issues[i].Title != "" && !seen[issues[i].Title] {
+			seen[issues[i].Title] = true
+			samples = append(samples, "Issue Title: "+issues[i].Title)
 		}
-		if issue.Body != "" && !seen[issue.Body] && len(samples) < maxSamples {
+		if issues[i].Body != "" && !seen[issues[i].Body] && len(samples) < maxSamples {
 			// Take first 200 chars of body if it's long
-			body := issue.Body
+			body := issues[i].Body
 			if len(body) > 200 {
 				body = body[:200] + "..."
 			}
 			if !strings.Contains(body, "<!--") && !strings.Contains(body, "## Checklist") {
-				seen[issue.Body] = true
+				seen[issues[i].Body] = true
 				samples = append(samples, "Issue Body: "+body)
 			}
 		}

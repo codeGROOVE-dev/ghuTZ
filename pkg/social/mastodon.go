@@ -14,18 +14,18 @@ import (
 	"time"
 )
 
-// MastodonProfileData represents all extracted data from a Mastodon profile
+// MastodonProfileData represents all extracted data from a Mastodon profile.
 type MastodonProfileData struct {
+	ProfileFields map[string]string
 	Username      string
 	DisplayName   string
 	Bio           string
-	ProfileFields map[string]string // Key-value pairs from profile metadata
-	Websites      []string          // All discovered websites
-	Hashtags      []string          // Hashtags from bio
 	JoinedDate    string
+	Websites      []string
+	Hashtags      []string
 }
 
-// MastodonAccount represents the API response from Mastodon
+// MastodonAccount represents the API response from Mastodon.
 type MastodonAccount struct {
 	ID             string          `json:"id"`
 	Username       string          `json:"username"`
@@ -40,14 +40,14 @@ type MastodonAccount struct {
 	StatusesCount  int             `json:"statuses_count"`
 }
 
-// MastodonField represents a custom field on a Mastodon profile
+// MastodonField represents a custom field on a Mastodon profile.
 type MastodonField struct {
-	Name       string     `json:"name"`
-	Value      string     `json:"value"` // HTML content
 	VerifiedAt *time.Time `json:"verified_at,omitempty"`
+	Name       string     `json:"name"`
+	Value      string     `json:"value"`
 }
 
-// fetchMastodonProfileViaAPI fetches profile data using the Mastodon API
+// fetchMastodonProfileViaAPI fetches profile data using the Mastodon API.
 func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger *slog.Logger) *MastodonProfileData {
 	// Parse the Mastodon URL to extract hostname and username
 	parsedURL, err := url.Parse(mastodonURL)
@@ -223,7 +223,7 @@ func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger 
 	return profileData
 }
 
-// fetchMastodonProfile fetches comprehensive info from a Mastodon profile via HTML scraping
+// fetchMastodonProfile fetches comprehensive info from a Mastodon profile via HTML scraping.
 func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.Logger) *MastodonProfileData {
 	// Mastodon profiles often have metadata in the HTML
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mastodonURL, http.NoBody)
@@ -365,7 +365,7 @@ func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.
 	return profileData
 }
 
-// stripHTML removes HTML tags from a string
+// stripHTML removes HTML tags from a string.
 func stripHTML(htmlStr string) string {
 	// First unescape HTML entities
 	unescaped := html.UnescapeString(htmlStr)
@@ -387,7 +387,7 @@ func stripHTML(htmlStr string) string {
 	return strings.TrimSpace(cleaned)
 }
 
-// extractURLsFromHTML extracts all URLs from HTML content
+// extractURLsFromHTML extracts all URLs from HTML content.
 func extractURLsFromHTML(htmlContent string) []string {
 	var urls []string
 
@@ -407,7 +407,7 @@ func extractURLsFromHTML(htmlContent string) []string {
 	return urls
 }
 
-// containsMastodonDomain checks if a URL is a Mastodon instance
+// containsMastodonDomain checks if a URL is a Mastodon instance.
 func containsMastodonDomain(url string) bool {
 	mastodonDomains := []string{
 		"mastodon",

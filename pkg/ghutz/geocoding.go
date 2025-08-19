@@ -36,7 +36,7 @@ func (d *Detector) timezoneForCoordinates(ctx context.Context, lat, lng float64)
 	return client.TimezoneForCoordinates(ctx, lat, lng)
 }
 
-// cachedHTTPClient wraps the Detector's cachedHTTPDo method to implement HTTPClient interface
+// cachedHTTPClient wraps the Detector's cachedHTTPDo method to implement HTTPClient interface.
 type cachedHTTPClient struct {
 	detector *Detector
 	doFunc   func(*http.Request) (*http.Response, error)

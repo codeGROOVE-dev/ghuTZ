@@ -81,7 +81,7 @@ func TestKimstervPacificHardcodedDetection(t *testing.T) {
 
 	// Test quiet hours detection (sleep time)
 	quietHours := []int{}
-	for hour := 0; hour < 24; hour++ {
+	for hour := range 24 {
 		count1 := halfHourlyData[float64(hour)]
 		count2 := halfHourlyData[float64(hour)+0.5]
 		if count1 == 0 && count2 == 0 {

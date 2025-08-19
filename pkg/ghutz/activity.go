@@ -17,7 +17,7 @@ import (
 
 // GlobalLunchPattern represents the best lunch pattern found globally in UTC
 // aggregateHalfHoursToHours converts 30-minute buckets back to hourly buckets for display
-// This keeps CLI output and Gemini communication simple while using 30-min precision internally
+// This keeps CLI output and Gemini communication simple while using 30-min precision internally.
 func aggregateHalfHoursToHours(halfHourCounts map[float64]int) map[int]int {
 	hourCounts := make(map[int]int)
 
@@ -29,7 +29,7 @@ func aggregateHalfHoursToHours(halfHourCounts map[float64]int) map[int]int {
 	return hourCounts
 }
 
-// tryActivityPatternsWithContext performs activity pattern analysis using UserContext
+// tryActivityPatternsWithContext performs activity pattern analysis using UserContext.
 func (d *Detector) tryActivityPatternsWithContext(ctx context.Context, userCtx *UserContext) *Result {
 	return d.tryActivityPatternsWithEvents(ctx, userCtx.Username, userCtx.Events)
 }
@@ -237,20 +237,21 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// - Europeans tend to sleep earlier (midpoint ~2:30am)
 	// - Asians vary widely
 	var assumedSleepMidpoint float64
-	if float64(europeanActivity) > float64(americanActivity)*1.2 {
+	switch {
+	case float64(europeanActivity) > float64(americanActivity)*1.2:
 		// Strong European pattern
 		// Europeans typically have earlier sleep patterns, midpoint around 2am
 		assumedSleepMidpoint = 2.0
 		d.logger.Debug("detected European activity pattern", "username", username,
 			"european_activity", europeanActivity, "american_activity", americanActivity)
-	} else if float64(americanActivity) > float64(europeanActivity)*1.2 {
+	case float64(americanActivity) > float64(europeanActivity)*1.2:
 		// Strong American pattern
 		// Americans typically sleep midnight-5am, midpoint around 2.5am
 		// Using 2.5 instead of 3.5 to better match Eastern Time patterns
 		assumedSleepMidpoint = 2.5
 		d.logger.Debug("detected American activity pattern", "username", username,
 			"european_activity", europeanActivity, "american_activity", americanActivity)
-	} else {
+	default:
 		// Unclear or Asian pattern, use default
 		assumedSleepMidpoint = 3.0
 		d.logger.Debug("unclear activity pattern", "username", username,
@@ -337,15 +338,16 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			// 5am UTC = 10pm PDT (UTC-7) - very early sleep
 
 			// Make a simple initial guess based on midQuiet hour
-			if midQuiet <= 5 {
+			switch {
+			case midQuiet <= 5:
 				offsetFromUTC = -4.0 // Likely Eastern (EDT)
-			} else if midQuiet <= 7 {
+			case midQuiet <= 7:
 				offsetFromUTC = -5.0 // Likely Eastern (EST) or Central (CDT)
-			} else if midQuiet <= 9 {
+			case midQuiet <= 9:
 				offsetFromUTC = -6.0 // Likely Central (CST) or Mountain (MDT)
-			} else if midQuiet <= 11 {
+			case midQuiet <= 11:
 				offsetFromUTC = -7.0 // Likely Mountain (MST) or Pacific (PDT)
-			} else {
+			default:
 				offsetFromUTC = -8.0 // Likely Pacific (PST)
 			}
 
@@ -848,7 +850,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 // fetchSupplementalActivity fetches additional activity data when events are insufficient.
 
 // fetchSupplementalActivityWithDepth fetches additional activity data with control over depth.
-// maxPages controls how many pages of PRs/issues to fetch (1 = first 100, 2 = up to 200)
+// maxPages controls how many pages of PRs/issues to fetch (1 = first 100, 2 = up to 200).
 func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, username string, maxPages int) *ActivityData {
 	type result struct {
 		prs          []github.PullRequest

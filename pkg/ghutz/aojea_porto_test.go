@@ -136,7 +136,7 @@ func TestAojeaPortoDetection(t *testing.T) {
 
 	// 1. Work starts at reasonable hour (7am)
 	firstSignificantActivity := -1
-	for hour := 0; hour < 24; hour++ {
+	for hour := range 24 {
 		if hourCounts[hour] > 5 {
 			firstSignificantActivity = hour
 			break
@@ -185,7 +185,7 @@ func TestAojeaPortoDetection(t *testing.T) {
 	t.Logf("✗ UTC-5: Work would start at %dam (absurd!)", eastWorkStart)
 
 	// UTC-7 (US Mountain/Pacific DST)
-	pacificWorkStart := (7 - 7 + 24) % 24 // midnight
+	pacificWorkStart := 0 // midnight (7am UTC in UTC-7)
 	t.Logf("✗ UTC-7: Work would start at %dam (even more absurd!)", pacificWorkStart)
 
 	t.Logf("\n✅ Pattern clearly indicates Porto, Portugal (UTC+0)")

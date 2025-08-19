@@ -145,7 +145,7 @@ func (c *Client) GeocodeLocation(ctx context.Context, location string) (*Locatio
 // TimezoneForCoordinates gets the timezone for given coordinates using Google Timezone API.
 func (c *Client) TimezoneForCoordinates(ctx context.Context, lat, lng float64) (string, error) {
 	if c.apiKey == "" {
-		return "", fmt.Errorf("Google Maps API key not configured")
+		return "", errors.New("google Maps API key not configured")
 	}
 
 	timestamp := "1609459200" // 2021-01-01 00:00:00 UTC (arbitrary date for timezone lookup)

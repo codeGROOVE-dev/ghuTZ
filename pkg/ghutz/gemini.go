@@ -15,13 +15,13 @@ import (
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/social"
 )
 
-// geminiQueryResult holds the result from a Gemini API query
+// geminiQueryResult holds the result from a Gemini API query.
 type geminiQueryResult struct {
 	Timezone   string
 	Reasoning  string
-	Confidence float64
 	Location   string
 	Prompt     string
+	Confidence float64
 }
 
 // queryUnifiedGeminiForTimezone queries Gemini AI for timezone detection.
@@ -48,7 +48,7 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	client := gemini.NewClient(d.geminiAPIKey, d.geminiModel, d.gcpProject)
 	resp, err := client.CallWithSDK(ctx, prompt, isVerbose, d.cache, d.logger)
 	if err != nil {
-		return nil, fmt.Errorf("Gemini API call failed: %w", err)
+		return nil, fmt.Errorf("gemini API call failed: %w", err)
 	}
 
 	// Handle both new and old response formats
@@ -123,7 +123,7 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	}, nil
 }
 
-// tryUnifiedGeminiAnalysisWithContext attempts timezone detection using Gemini AI with UserContext
+// tryUnifiedGeminiAnalysisWithContext attempts timezone detection using Gemini AI with UserContext.
 func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, userCtx *UserContext, activityResult *Result) *Result {
 	if userCtx.User == nil {
 		d.logger.Debug("could not fetch user for Gemini analysis", "username", userCtx.Username)
@@ -213,12 +213,12 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	var recentPRs []github.PullRequest
 	contributedRepos := make(map[string]int) // repo -> contribution count
 	cutoff := time.Now().AddDate(0, -3, 0)
-	for _, pr := range userCtx.PullRequests {
-		if pr.CreatedAt.After(cutoff) {
-			recentPRs = append(recentPRs, pr)
+	for i := range userCtx.PullRequests {
+		if userCtx.PullRequests[i].CreatedAt.After(cutoff) {
+			recentPRs = append(recentPRs, userCtx.PullRequests[i])
 			// Track contributed repositories (not owned by user)
-			if pr.RepoName != "" && !strings.HasPrefix(pr.RepoName, userCtx.Username+"/") {
-				contributedRepos[pr.RepoName]++
+			if userCtx.PullRequests[i].RepoName != "" && !strings.HasPrefix(userCtx.PullRequests[i].RepoName, userCtx.Username+"/") {
+				contributedRepos[userCtx.PullRequests[i].RepoName]++
 			}
 			if len(recentPRs) >= 20 {
 				break
@@ -231,12 +231,12 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 
 	// Filter recent issues and collect more contributed repositories
 	var recentIssues []github.Issue
-	for _, issue := range userCtx.Issues {
-		if issue.CreatedAt.After(cutoff) {
-			recentIssues = append(recentIssues, issue)
+	for i := range userCtx.Issues {
+		if userCtx.Issues[i].CreatedAt.After(cutoff) {
+			recentIssues = append(recentIssues, userCtx.Issues[i])
 			// Track contributed repositories (not owned by user)
-			if issue.RepoName != "" && !strings.HasPrefix(issue.RepoName, userCtx.Username+"/") {
-				contributedRepos[issue.RepoName]++
+			if userCtx.Issues[i].RepoName != "" && !strings.HasPrefix(userCtx.Issues[i].RepoName, userCtx.Username+"/") {
+				contributedRepos[userCtx.Issues[i].RepoName]++
 			}
 			if len(recentIssues) >= 20 {
 				break
@@ -246,7 +246,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	if len(recentIssues) > 0 {
 		contextData["issues"] = recentIssues
 	}
-	
+
 	// Add contributed repositories to context (repos user has contributed to but doesn't own)
 	if len(contributedRepos) > 0 {
 		// Convert map to sorted slice for consistent output

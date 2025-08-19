@@ -247,7 +247,7 @@ func printTimezone(result *ghutz.Result) {
 	fmt.Println()
 }
 
-// Removed - no longer needed since we use UTC throughout
+// Removed - no longer needed since we use UTC throughout.
 
 func printWorkSchedule(result *ghutz.Result) {
 	if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
@@ -474,7 +474,7 @@ func printGeminiInfo(result *ghutz.Result) {
 	fmt.Println()
 }
 
-// convertUTCToLocal converts a UTC hour (float) to local time using Go's timezone database
+// convertUTCToLocal converts a UTC hour (float) to local time using Go's timezone database.
 func convertUTCToLocal(utcHour float64, timezone string) float64 {
 	if loc, err := time.LoadLocation(timezone); err == nil {
 		// Use Go's native timezone conversion

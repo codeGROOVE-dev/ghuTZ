@@ -298,19 +298,19 @@ func (c *OtterCache) Stats() map[string]interface{} {
 	}
 }
 
-// HTTPClient interface for making HTTP requests
+// HTTPClient interface for making HTTP requests.
 type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// CachedHTTPClient wraps an HTTP client with caching support
+// CachedHTTPClient wraps an HTTP client with caching support.
 type CachedHTTPClient struct {
 	cache      *OtterCache
 	httpClient HTTPClient
 	logger     *slog.Logger
 }
 
-// NewCachedHTTPClient creates a new cached HTTP client
+// NewCachedHTTPClient creates a new cached HTTP client.
 func NewCachedHTTPClient(cache *OtterCache, httpClient HTTPClient, logger *slog.Logger) *CachedHTTPClient {
 	return &CachedHTTPClient{
 		cache:      cache,
@@ -319,7 +319,7 @@ func NewCachedHTTPClient(cache *OtterCache, httpClient HTTPClient, logger *slog.
 	}
 }
 
-// Do performs an HTTP request with caching support
+// Do performs an HTTP request with caching support.
 func (c *CachedHTTPClient) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 	// If cache is not available, fall back to non-cached request
 	if c.cache == nil {

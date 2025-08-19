@@ -27,45 +27,46 @@ import (
 
 // SECURITY: Compiled regex patterns for validation and extraction.
 var (
-	// GitHub token patterns for validation (compiled once for performance)
+	// GitHub token patterns for validation (compiled once for performance).
 	githubPATRegex         = regexp.MustCompile(`^ghp_[a-zA-Z0-9]{36}$`)
 	githubAppTokenRegex    = regexp.MustCompile(`^ghs_[a-zA-Z0-9]{36}$`)
 	githubFineGrainedRegex = regexp.MustCompile(`^github_pat_[a-zA-Z0-9_]{82}$`)
-	
+
 	// Timezone extraction patterns.
 	timezoneDataAttrRegex = regexp.MustCompile(`data-timezone="([^"]+)"`)
 	timezoneJSONRegex     = regexp.MustCompile(`"timezone":"([^"]+)"`)
 	timezoneFieldRegex    = regexp.MustCompile(`timezone:([^,}]+)`)
 )
 
-// UserContext holds all fetched data for a user to avoid redundant API calls
+// UserContext holds all fetched data for a user to avoid redundant API calls.
 type UserContext struct {
-	Username      string
 	User          *github.GitHubUser
-	Events        []github.PublicEvent
-	Organizations []github.Organization
-	Repositories  []github.Repository // User's own repos
-	StarredRepos  []github.Repository // Repos the user has starred
+	FromCache     map[string]bool
+	Username      string
+	ProfileHTML   string
 	PullRequests  []github.PullRequest
+	StarredRepos  []github.Repository
+	Repositories  []github.Repository
 	Issues        []github.Issue
 	Comments      []github.Comment
-	Gists         []time.Time     // Gist timestamps
-	Commits       []time.Time     // Commit timestamps
-	ProfileHTML   string          // Cached profile HTML
-	FromCache     map[string]bool // Track which data was from cache
+	Gists         []time.Time
+	Commits       []time.Time
+	Organizations []github.Organization
+	Events        []github.PublicEvent
 }
 
+// Detector performs timezone detection for GitHub users.
 type Detector struct {
+	logger        *slog.Logger
+	httpClient    *http.Client
+	cache         *httpcache.OtterCache
+	githubClient  *github.Client
 	githubToken   string
 	mapsAPIKey    string
 	geminiAPIKey  string
 	geminiModel   string
 	gcpProject    string
-	logger        *slog.Logger
-	httpClient    *http.Client
 	forceActivity bool
-	cache         *httpcache.OtterCache
-	githubClient  *github.Client
 }
 
 // retryableHTTPDo performs an HTTP request with exponential backoff and jitter.
@@ -132,7 +133,7 @@ func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*htt
 func (d *Detector) isValidGitHubToken(token string) bool {
 	// SECURITY: Validate token format to prevent injection attacks
 	token = strings.TrimSpace(token)
-	
+
 	// Check against known GitHub token patterns (compiled regex for performance)
 	return githubPATRegex.MatchString(token) ||
 		githubAppTokenRegex.MatchString(token) ||
@@ -176,10 +177,12 @@ func isValidGitHubUsername(username string) bool {
 	return true
 }
 
+// New creates a new Detector with default logger.
 func New(ctx context.Context, opts ...Option) *Detector {
 	return NewWithLogger(ctx, slog.Default(), opts...)
 }
 
+// NewWithLogger creates a new Detector with a custom logger.
 func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *Detector {
 	optHolder := &OptionHolder{}
 	for _, opt := range opts {
@@ -286,16 +289,17 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 		// e.g., America/Los_Angeles could be -7 (PDT) or -8 (PST)
 		// We prefer the current offset (newOffset) first
 		possibleOffsets := []int{newOffset}
-		if result.Timezone == "America/Los_Angeles" {
+		switch result.Timezone {
+		case "America/Los_Angeles":
 			// Currently August, so PDT (-7) is active
 			possibleOffsets = []int{-7, -8}
-		} else if result.Timezone == "America/New_York" {
+		case "America/New_York":
 			// Currently August, so EDT (-4) is active
 			possibleOffsets = []int{-4, -5}
-		} else if result.Timezone == "America/Chicago" {
+		case "America/Chicago":
 			// Currently August, so CDT (-5) is active
 			possibleOffsets = []int{-5, -6}
-		} else if result.Timezone == "America/Denver" {
+		case "America/Denver":
 			// Currently August, so MDT (-6) is active
 			possibleOffsets = []int{-6, -7}
 		}
@@ -349,7 +353,7 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 	}
 }
 
-// fetchAllUserData fetches all data for a user at once to avoid redundant API calls
+// fetchAllUserData fetches all data for a user at once to avoid redundant API calls.
 func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserContext {
 	userCtx := &UserContext{
 		Username:  username,
@@ -441,12 +445,12 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 
 		// Combine and deduplicate repos
 		repoMap := make(map[string]github.Repository)
-		for _, repo := range pinnedRepos {
-			repoMap[repo.FullName] = repo
+		for i := range pinnedRepos {
+			repoMap[pinnedRepos[i].FullName] = pinnedRepos[i]
 		}
-		for _, repo := range popularRepos {
-			if _, exists := repoMap[repo.FullName]; !exists {
-				repoMap[repo.FullName] = repo
+		for i := range popularRepos {
+			if _, exists := repoMap[popularRepos[i].FullName]; !exists {
+				repoMap[popularRepos[i].FullName] = popularRepos[i]
 			}
 		}
 		// Sort repo names for deterministic order
@@ -553,6 +557,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	return userCtx
 }
 
+// Detect performs timezone detection for the given GitHub username.
 func (d *Detector) Detect(ctx context.Context, username string) (*Result, error) {
 	// SECURITY: Validate username to prevent injection attacks
 	if !isValidGitHubUsername(username) {
@@ -633,24 +638,24 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 	if !strings.HasPrefix(blogURL, "http://") && !strings.HasPrefix(blogURL, "https://") {
 		blogURL = "https://" + blogURL
 	}
-	
+
 	// SECURITY: Parse URL to validate it's safe to fetch
 	parsedURL, err := url.Parse(blogURL)
 	if err != nil {
 		d.logger.Debug("invalid URL format", "url", blogURL, "error", err)
 		return ""
 	}
-	
+
 	// SECURITY: Prevent SSRF attacks by blocking internal/private IPs and local URLs
 	host := strings.ToLower(parsedURL.Hostname())
-	
+
 	// Block localhost and local domains
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" || 
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" ||
 		strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") {
 		d.logger.Debug("blocked fetch to local/internal host", "host", host)
 		return ""
 	}
-	
+
 	// Block private IP ranges (RFC 1918)
 	if ip := net.ParseIP(host); ip != nil {
 		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
@@ -658,9 +663,9 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 			return ""
 		}
 	}
-	
+
 	// Block metadata service endpoints (AWS, GCP, Azure)
-	if host == "169.254.169.254" || host == "metadata.google.internal" || 
+	if host == "169.254.169.254" || host == "metadata.google.internal" ||
 		host == "metadata.azure.com" {
 		d.logger.Debug("blocked fetch to metadata service", "host", host)
 		return ""
@@ -707,7 +712,7 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 	return markdown
 }
 
-// tryProfileScrapingWithContext tries to extract timezone from profile HTML using UserContext
+// tryProfileScrapingWithContext tries to extract timezone from profile HTML using UserContext.
 func (d *Detector) tryProfileScrapingWithContext(_ context.Context, userCtx *UserContext) *Result {
 	html := userCtx.ProfileHTML
 	if html == "" {
@@ -749,7 +754,7 @@ func (d *Detector) tryProfileScrapingWithContext(_ context.Context, userCtx *Use
 	return nil
 }
 
-// tryLocationFieldWithContext tries to detect timezone from user location field using UserContext
+// tryLocationFieldWithContext tries to detect timezone from user location field using UserContext.
 func (d *Detector) tryLocationFieldWithContext(ctx context.Context, userCtx *UserContext) *Result {
 	if userCtx.User == nil || userCtx.User.Location == "" {
 		d.logger.Debug("no location field found", "username", userCtx.Username)

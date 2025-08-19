@@ -41,7 +41,7 @@ func TestElijahQuinonesRostonDetection(t *testing.T) {
 
 	// Calculate quiet hours (sleep time)
 	quietHours := []int{}
-	for hour := 0; hour < 24; hour++ {
+	for hour := range 24 {
 		if hourCounts[hour] == 0 {
 			quietHours = append(quietHours, hour)
 		}

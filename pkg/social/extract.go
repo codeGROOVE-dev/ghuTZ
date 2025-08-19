@@ -17,7 +17,7 @@ import (
 
 // Extract processes a map of social media URLs/data and returns structured content for each
 // The map key is the type (e.g., "mastodon", "twitter", "website", "linkedin")
-// The map value is the URL or identifier
+// The map value is the URL or identifier.
 func Extract(ctx context.Context, data map[string]string, logger *slog.Logger) []Content {
 	if logger == nil {
 		logger = slog.Default()
@@ -68,7 +68,7 @@ func Extract(ctx context.Context, data map[string]string, logger *slog.Logger) [
 	return results
 }
 
-// extractMastodon extracts content from a Mastodon profile
+// extractMastodon extracts content from a Mastodon profile.
 func extractMastodon(ctx context.Context, mastodonURL string, logger *slog.Logger) *Content {
 	// First try API, then fall back to HTML scraping
 	profileData := fetchMastodonProfileViaAPI(ctx, mastodonURL, logger)
@@ -133,7 +133,7 @@ func extractMastodon(ctx context.Context, mastodonURL string, logger *slog.Logge
 }
 
 // extractTwitter extracts content from a Twitter/X profile
-// This is a dummy implementation for now to demonstrate the API
+// This is a dummy implementation for now to demonstrate the API.
 func extractTwitter(ctx context.Context, twitterURL string, logger *slog.Logger) *Content {
 	// Extract username from URL
 	username := ""
@@ -182,7 +182,7 @@ func extractTwitter(ctx context.Context, twitterURL string, logger *slog.Logger)
 }
 
 // extractLinkedIn extracts content from a LinkedIn profile
-// This is a dummy implementation for now
+// This is a dummy implementation for now.
 func extractLinkedIn(ctx context.Context, linkedinURL string, logger *slog.Logger) *Content {
 	// Extract username/profile ID from URL
 	profileID := ""
@@ -220,7 +220,7 @@ func extractLinkedIn(ctx context.Context, linkedinURL string, logger *slog.Logge
 	return content
 }
 
-// extractWebsite extracts content from a generic website
+// extractWebsite extracts content from a generic website.
 func extractWebsite(ctx context.Context, websiteURL string, logger *slog.Logger) *Content {
 	// Fetch website content
 	htmlContent := fetchWebsiteContent(ctx, websiteURL, logger)
@@ -261,7 +261,7 @@ func extractWebsite(ctx context.Context, websiteURL string, logger *slog.Logger)
 	return content
 }
 
-// fetchWebsiteContent fetches the content of a website
+// fetchWebsiteContent fetches the content of a website.
 func fetchWebsiteContent(ctx context.Context, websiteURL string, logger *slog.Logger) string {
 	if websiteURL == "" {
 		return ""
@@ -270,24 +270,24 @@ func fetchWebsiteContent(ctx context.Context, websiteURL string, logger *slog.Lo
 	if !strings.HasPrefix(websiteURL, "http://") && !strings.HasPrefix(websiteURL, "https://") {
 		websiteURL = "https://" + websiteURL
 	}
-	
+
 	// SECURITY: Parse URL to validate it's safe to fetch
 	parsedURL, err := url.Parse(websiteURL)
 	if err != nil {
 		logger.Debug("invalid URL format", "url", websiteURL, "error", err)
 		return ""
 	}
-	
+
 	// SECURITY: Prevent SSRF attacks by blocking internal/private IPs and local URLs
 	host := strings.ToLower(parsedURL.Hostname())
-	
+
 	// Block localhost and local domains
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" || 
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" ||
 		strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") {
 		logger.Debug("blocked fetch to local/internal host", "host", host)
 		return ""
 	}
-	
+
 	// Block private IP ranges (RFC 1918)
 	if ip := net.ParseIP(host); ip != nil {
 		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
@@ -295,9 +295,9 @@ func fetchWebsiteContent(ctx context.Context, websiteURL string, logger *slog.Lo
 			return ""
 		}
 	}
-	
+
 	// Block metadata service endpoints (AWS, GCP, Azure)
-	if host == "169.254.169.254" || host == "metadata.google.internal" || 
+	if host == "169.254.169.254" || host == "metadata.google.internal" ||
 		host == "metadata.azure.com" {
 		logger.Debug("blocked fetch to metadata service", "host", host)
 		return ""
@@ -337,7 +337,7 @@ func fetchWebsiteContent(ctx context.Context, websiteURL string, logger *slog.Lo
 	return string(body)
 }
 
-// htmlToMarkdown converts HTML content to markdown format
+// htmlToMarkdown converts HTML content to markdown format.
 func htmlToMarkdown(htmlContent string) string {
 	if htmlContent == "" {
 		return ""
@@ -396,7 +396,7 @@ func htmlToMarkdown(htmlContent string) string {
 	return content
 }
 
-// extractTitle extracts the title from HTML content
+// extractTitle extracts the title from HTML content.
 func extractTitle(htmlContent string) string {
 	// Try to extract from <title> tag
 	titlePattern := regexp.MustCompile(`(?i)<title[^>]*>([^<]+)</title>`)
@@ -419,7 +419,7 @@ func extractTitle(htmlContent string) string {
 	return ""
 }
 
-// extractMetaDescription extracts the meta description from HTML content
+// extractMetaDescription extracts the meta description from HTML content.
 func extractMetaDescription(htmlContent string) string {
 	// Try to extract from meta description tag
 	descPattern := regexp.MustCompile(`<meta\s+name=["']description["']\s+content=["']([^"']+)["']`)
@@ -436,7 +436,7 @@ func extractMetaDescription(htmlContent string) string {
 	return ""
 }
 
-// extractSocialMediaFromHTML extracts social media links from HTML content
+// extractSocialMediaFromHTML extracts social media links from HTML content.
 func extractSocialMediaFromHTML(htmlContent string) []string {
 	var urls []string
 
