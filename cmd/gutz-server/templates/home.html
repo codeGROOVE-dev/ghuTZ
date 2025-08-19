@@ -28,7 +28,7 @@
                 line-height: 1.5;
                 color: #000;
                 background: #fff;
-                max-width: 640px;
+                max-width: 840px;
                 margin: 0 auto;
                 padding: 32px 24px;
                 -webkit-font-smoothing: antialiased;
@@ -61,7 +61,8 @@
                 width: 36px;
                 height: 36px;
                 margin-right: 16px;
-                transition: transform 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+                transition: transform 0.4s
+                    cubic-bezier(0.68, -0.55, 0.265, 1.55);
                 flex-shrink: 0;
             }
 
@@ -182,7 +183,7 @@
             }
 
             button::before {
-                content: '';
+                content: "";
                 position: absolute;
                 top: 0;
                 left: -100%;
@@ -438,11 +439,22 @@
             }
 
             @keyframes groovyWiggle {
-                0%, 100% { transform: rotate(0deg); }
-                20% { transform: rotate(-10deg) translateY(-2px); }
-                40% { transform: rotate(10deg) translateY(-2px); }
-                60% { transform: rotate(-5deg); }
-                80% { transform: rotate(5deg); }
+                0%,
+                100% {
+                    transform: rotate(0deg);
+                }
+                20% {
+                    transform: rotate(-10deg) translateY(-2px);
+                }
+                40% {
+                    transform: rotate(10deg) translateY(-2px);
+                }
+                60% {
+                    transform: rotate(-5deg);
+                }
+                80% {
+                    transform: rotate(5deg);
+                }
             }
 
             /* Add some style to result emojis */
@@ -539,9 +551,8 @@
         </div>
 
         <p class="intro-text">
-            Detect the location, timezone, and working hours of any GitHub user
-            for improved collaboration, supply-chain security research, and
-            threat actor identification.
+            Detect the approximate location, timezone, and working hours of any
+            GitHub user.
         </p>
 
         <div class="form-section">
@@ -608,7 +619,7 @@
             </div>
 
             <div class="result-row" id="activityRow" style="display: none">
-                <span class="result-label">Activity timezone:</span>
+                <span class="result-label">Activity offset:</span>
                 <span class="result-value" id="activityTz">-</span>
             </div>
 
@@ -698,7 +709,9 @@
             <a href="https://github.com/codeGROOVE-dev/guTZ">GitHub</a>
             <a href="/api/v1/detect?username=octocat">API</a>
             <span
-                >made with <span class="goose-wrapper"><span class="goose">🪿</span></span> by
+                >made with
+                <span class="goose-wrapper"><span class="goose">🪿</span></span>
+                by
                 <a href="https://codegroove.dev/" style="margin: 0"
                     >codeGROOVE</a
                 ></span
