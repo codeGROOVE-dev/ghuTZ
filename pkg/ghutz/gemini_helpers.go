@@ -11,21 +11,21 @@ import (
 
 // Constants for data limits and thresholds.
 const (
-	maxUserRepos         = 20
-	maxStarredRepos      = 15
-	maxExternalContribs  = 15
-	maxRecentPRs         = 10
-	maxRecentIssues      = 10
-	maxRecentCommits     = 10
-	maxTextSamples       = 8
+	maxUserRepos          = 20
+	maxStarredRepos       = 15
+	maxExternalContribs   = 15
+	maxRecentPRs          = 10
+	maxRecentIssues       = 10
+	maxRecentCommits      = 10
+	maxTextSamples        = 8
 	maxLocationIndicators = 5
-	maxTopCandidates     = 5
+	maxTopCandidates      = 5
 	maxDetailedCandidates = 3
-	commitMessageMaxLen  = 100
-	websiteContentMaxLen = 4000
+	commitMessageMaxLen   = 100
+	websiteContentMaxLen  = 4000
 	mastodonContentMaxLen = 3000
-	workStartEarliest    = 5
-	workStartLatest      = 10
+	workStartEarliest     = 5
+	workStartLatest       = 10
 )
 
 // repoContribution tracks contributions to a repository.
@@ -48,22 +48,22 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	if user, ok := contextData["user"].(*github.GitHubUser); ok && user != nil {
 		sb.WriteString("GitHub Profile:\n")
 		if user.Name != "" {
-			sb.WriteString(fmt.Sprintf("- Name: %s\n", user.Name))
+			fmt.Fprintf(&sb, "- Name: %s\n", user.Name)
 		}
 		if user.Location != "" {
-			sb.WriteString(fmt.Sprintf("- Location: %s\n", user.Location))
+			fmt.Fprintf(&sb, "- Location: %s\n", user.Location)
 		}
 		if user.Company != "" {
-			sb.WriteString(fmt.Sprintf("- Company: %s\n", user.Company))
+			fmt.Fprintf(&sb, "- Company: %s\n", user.Company)
 		}
 		if user.Bio != "" {
-			sb.WriteString(fmt.Sprintf("- Bio: %s\n", user.Bio))
+			fmt.Fprintf(&sb, "- Bio: %s\n", user.Bio)
 		}
 		if user.Blog != "" {
-			sb.WriteString(fmt.Sprintf("- Website: %s\n", user.Blog))
+			fmt.Fprintf(&sb, "- Website: %s\n", user.Blog)
 		}
 		if user.TwitterHandle != "" {
-			sb.WriteString(fmt.Sprintf("- Twitter: @%s\n", user.TwitterHandle))
+			fmt.Fprintf(&sb, "- Twitter: @%s\n", user.TwitterHandle)
 		}
 		sb.WriteString("\n")
 	}
@@ -73,15 +73,15 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		sb.WriteString("GitHub Organizations:\n")
 		for _, org := range orgs {
 			if org.Name != "" && org.Name != org.Login {
-				sb.WriteString(fmt.Sprintf("- %s (%s)", org.Login, org.Name))
+				fmt.Fprintf(&sb, "- %s (%s)", org.Login, org.Name)
 			} else {
-				sb.WriteString(fmt.Sprintf("- %s", org.Login))
+				fmt.Fprintf(&sb, "- %s", org.Login)
 			}
 			if org.Location != "" {
-				sb.WriteString(fmt.Sprintf(" - Location: %s", org.Location))
+				fmt.Fprintf(&sb, " - Location: %s", org.Location)
 			}
 			if org.Description != "" {
-				sb.WriteString(fmt.Sprintf(" - %s", org.Description))
+				fmt.Fprintf(&sb, " - %s", org.Description)
 			}
 			sb.WriteString("\n")
 		}
@@ -95,7 +95,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(fmt.Sprintf("%s (%s)", tld.TLD, tld.Country))
+			fmt.Fprintf(&sb, "%s (%s)", tld.TLD, tld.Country)
 		}
 		sb.WriteString("\n\n")
 	}
@@ -106,13 +106,13 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		for _, url := range socialURLs {
 			switch {
 			case strings.Contains(url, "twitter.com") || strings.Contains(url, "x.com"):
-				sb.WriteString(fmt.Sprintf("- Twitter/X: %s\n", url))
+				fmt.Fprintf(&sb, "- Twitter/X: %s\n", url)
 			case strings.Contains(url, "linkedin.com"):
-				sb.WriteString(fmt.Sprintf("- LinkedIn: %s\n", url))
+				fmt.Fprintf(&sb, "- LinkedIn: %s\n", url)
 			case strings.Contains(url, "@") || strings.Contains(url, "mastodon") || strings.Contains(url, "fosstodon"):
-				sb.WriteString(fmt.Sprintf("- Mastodon: %s\n", url))
+				fmt.Fprintf(&sb, "- Mastodon: %s\n", url)
 			default:
-				sb.WriteString(fmt.Sprintf("- %s\n", url))
+				fmt.Fprintf(&sb, "- %s\n", url)
 			}
 		}
 		sb.WriteString("\n")
@@ -122,16 +122,16 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	if mastodonProfile, ok := contextData["mastodon_profile"].(*MastodonProfileData); ok && mastodonProfile != nil {
 		sb.WriteString("Mastodon profile details:\n")
 		if mastodonProfile.Username != "" {
-			sb.WriteString(fmt.Sprintf("- Username: @%s\n", mastodonProfile.Username))
+			fmt.Fprintf(&sb, "- Username: @%s\n", mastodonProfile.Username)
 		}
 		if mastodonProfile.Bio != "" {
-			sb.WriteString(fmt.Sprintf("- Bio: %s\n", mastodonProfile.Bio))
+			fmt.Fprintf(&sb, "- Bio: %s\n", mastodonProfile.Bio)
 		}
 		if mastodonProfile.DisplayName != "" {
-			sb.WriteString(fmt.Sprintf("- Display name: %s\n", mastodonProfile.DisplayName))
+			fmt.Fprintf(&sb, "- Display name: %s\n", mastodonProfile.DisplayName)
 		}
 		for _, website := range mastodonProfile.Websites {
-			sb.WriteString(fmt.Sprintf("- Website: %s\n", website))
+			fmt.Fprintf(&sb, "- Website: %s\n", website)
 		}
 		sb.WriteString("\n")
 	}
@@ -150,7 +150,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(fmt.Sprintf("UTC%+.0f", candidate.Offset))
+			fmt.Fprintf(&sb, "UTC%+.0f", candidate.Offset)
 		}
 		sb.WriteString("\n\n")
 
@@ -159,8 +159,8 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 			if i >= maxDetailedCandidates {
 				break
 			}
-			sb.WriteString(fmt.Sprintf("%d. UTC%+.1f (%.0f%% confidence)\n",
-				i+1, candidate.Offset, candidate.Confidence))
+			fmt.Fprintf(&sb, "%d. UTC%+.1f (%.0f%% confidence)\n",
+				i+1, candidate.Offset, candidate.Confidence)
 
 			// Format key signals compactly.
 			signals := []string{}
@@ -184,17 +184,17 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	if dateRange, ok := contextData["activity_date_range"].(map[string]any); ok {
 		if totalEvents, ok := dateRange["total_events"].(int); ok {
 			if totalDays, ok := dateRange["total_days"].(int); ok {
-				sb.WriteString(fmt.Sprintf("Activity: %d events over %d days\n", totalEvents, totalDays))
+				fmt.Fprintf(&sb, "Activity: %d events over %d days\n", totalEvents, totalDays)
 			}
 		}
 	}
 
 	// Time patterns help validate timezone candidates.
 	if workHours, ok := contextData["work_hours_utc"].([]int); ok && len(workHours) == 2 {
-		sb.WriteString(fmt.Sprintf("Active hours UTC: %02d:00-%02d:00\n", workHours[0], workHours[1]))
+		fmt.Fprintf(&sb, "Active hours UTC: %02d:00-%02d:00\n", workHours[0], workHours[1])
 	}
 	if quietHours, ok := contextData["quiet_hours"].([]int); ok && len(quietHours) > 0 {
-		sb.WriteString(fmt.Sprintf("Quiet hours UTC: %v\n", quietHours))
+		fmt.Fprintf(&sb, "Quiet hours UTC: %v\n", quietHours)
 	}
 
 	// Hourly activity distribution helps validate timezone candidates.
@@ -202,7 +202,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		sb.WriteString("\nHourly activity (UTC):\n")
 		for hour := 0; hour < 24; hour++ {
 			if count, exists := hourCounts[hour]; exists && count > 0 {
-				sb.WriteString(fmt.Sprintf("%02d:00: %d events\n", hour, count))
+				fmt.Fprintf(&sb, "%02d:00: %d events\n", hour, count)
 			}
 		}
 	}
@@ -218,9 +218,9 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		for i := range repos {
 			if !repos[i].Fork && count < maxUserRepos { // Show up to 20 non-fork repos.
 				if repos[i].Description != "" {
-					sb.WriteString(fmt.Sprintf("- %s: %s\n", repos[i].Name, repos[i].Description))
+					fmt.Fprintf(&sb, "- %s: %s\n", repos[i].Name, repos[i].Description)
 				} else {
-					sb.WriteString(fmt.Sprintf("- %s\n", repos[i].Name))
+					fmt.Fprintf(&sb, "- %s\n", repos[i].Name)
 				}
 				count++
 			}
@@ -236,9 +236,9 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 				break
 			}
 			if starredRepos[i].Description != "" {
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", starredRepos[i].Name, starredRepos[i].Description))
+				fmt.Fprintf(&sb, "- %s: %s\n", starredRepos[i].Name, starredRepos[i].Description)
 			} else {
-				sb.WriteString(fmt.Sprintf("- %s\n", starredRepos[i].Name))
+				fmt.Fprintf(&sb, "- %s\n", starredRepos[i].Name)
 			}
 		}
 		sb.WriteString("\n")
@@ -322,7 +322,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 			if count >= maxLocationIndicators { // Limit to 5 location indicators.
 				break
 			}
-			sb.WriteString(fmt.Sprintf("- %s → %s\n", name, locationRepos[name]))
+			fmt.Fprintf(&sb, "- %s → %s\n", name, locationRepos[name])
 			count++
 		}
 		sb.WriteString("\n")
@@ -332,7 +332,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	if len(hobbyIndicators) > 0 {
 		sb.WriteString("Hobby/Interest indicators:\n")
 		for hobby := range hobbyIndicators {
-			sb.WriteString(fmt.Sprintf("- %s\n", hobby))
+			fmt.Fprintf(&sb, "- %s\n", hobby)
 		}
 		sb.WriteString("\n")
 	}
@@ -344,7 +344,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 			if i >= maxExternalContribs { // Show up to 15 external contributions.
 				break
 			}
-			sb.WriteString(fmt.Sprintf("- %s (%d contributions)\n", contrib.Name, contrib.Count))
+			fmt.Fprintf(&sb, "- %s (%d contributions)\n", contrib.Name, contrib.Count)
 		}
 		sb.WriteString("\n")
 	}
@@ -359,7 +359,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 			if i >= maxRecentPRs {
 				break
 			}
-			sb.WriteString(fmt.Sprintf("- %s\n", prs[i].Title))
+			fmt.Fprintf(&sb, "- %s\n", prs[i].Title)
 		}
 		sb.WriteString("\n")
 	}
@@ -371,7 +371,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 			if i >= maxRecentIssues {
 				break
 			}
-			sb.WriteString(fmt.Sprintf("- %s\n", issues[i].Title))
+			fmt.Fprintf(&sb, "- %s\n", issues[i].Title)
 		}
 		sb.WriteString("\n")
 	}
@@ -387,7 +387,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 			if len(msg) > commitMessageMaxLen {
 				msg = msg[:commitMessageMaxLen] + "..."
 			}
-			sb.WriteString(fmt.Sprintf("- %s\n", msg))
+			fmt.Fprintf(&sb, "- %s\n", msg)
 		}
 		sb.WriteString("\n")
 	}
@@ -399,7 +399,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 			if i >= maxTextSamples {
 				break
 			}
-			sb.WriteString(fmt.Sprintf("- %s\n", sample))
+			fmt.Fprintf(&sb, "- %s\n", sample)
 		}
 		sb.WriteString("\n")
 	}
@@ -409,7 +409,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 
 	// Weekend versus weekday activity reveals work style.
 	if weekendActivity, ok := contextData["weekend_activity_ratio"].(float64); ok {
-		sb.WriteString(fmt.Sprintf("Weekend activity: %.1f%% of weekday activity\n", weekendActivity*100))
+		fmt.Fprintf(&sb, "Weekend activity: %.1f%% of weekday activity\n", weekendActivity*100)
 		switch {
 		case weekendActivity < 0.3:
 			sb.WriteString("Pattern: Strong work/life separation (typical employee)\n")
@@ -427,7 +427,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		days := []string{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
 		for _, day := range days {
 			if count, exists := dayActivity[day]; exists && count > 0 {
-				sb.WriteString(fmt.Sprintf("- %s: %d events\n", day, count))
+				fmt.Fprintf(&sb, "- %s: %d events\n", day, count)
 			}
 		}
 		sb.WriteString("\n")
@@ -436,21 +436,21 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	// Lunch break patterns help validate timezone.
 	if lunchHours, ok := contextData["lunch_break_utc"].([]int); ok && len(lunchHours) >= 2 {
 		if confidence, ok := contextData["lunch_confidence"].(float64); ok {
-			sb.WriteString(fmt.Sprintf("Lunch break UTC: %02d:00-%02d:00 (%.0f%% confidence)\n",
-				lunchHours[0], lunchHours[1], confidence*100))
+			fmt.Fprintf(&sb, "Lunch break UTC: %02d:00-%02d:00 (%.0f%% confidence)\n",
+				lunchHours[0], lunchHours[1], confidence*100)
 		}
 	}
 
 	// Peak productivity hours indicate work style.
 	if peakHours, ok := contextData["peak_productivity_utc"].([]int); ok && len(peakHours) >= 2 {
-		sb.WriteString(fmt.Sprintf("Peak productivity UTC: %02d:00-%02d:00\n", peakHours[0], peakHours[1]))
+		fmt.Fprintf(&sb, "Peak productivity UTC: %02d:00-%02d:00\n", peakHours[0], peakHours[1])
 	}
 
 	// Evening activity indicates personal coding time.
 	if eveningHours, ok := contextData["evening_activity_hours"].([]int); ok && len(eveningHours) > 0 {
-		sb.WriteString(fmt.Sprintf("Evening activity hours (7-11pm window): %v\n", eveningHours))
+		fmt.Fprintf(&sb, "Evening activity hours (7-11pm window): %v\n", eveningHours)
 		if eveningPct, ok := contextData["evening_activity_percentage"].(float64); ok {
-			sb.WriteString(fmt.Sprintf("Evening activity percentage: %.1f%%\n", eveningPct))
+			fmt.Fprintf(&sb, "Evening activity percentage: %.1f%%\n", eveningPct)
 		}
 	}
 	sb.WriteString("\n")
@@ -469,7 +469,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	// Mastodon-linked website content.
 	if websiteContents, ok := contextData["mastodon_website_contents"].(map[string]string); ok && len(websiteContents) > 0 {
 		for website, content := range websiteContents {
-			sb.WriteString(fmt.Sprintf("Content from %s:\n", website))
+			fmt.Fprintf(&sb, "Content from %s:\n", website)
 			contentPreview := content
 			if len(contentPreview) > mastodonContentMaxLen {
 				contentPreview = contentPreview[:mastodonContentMaxLen] + "...\n[TRUNCATED]"
@@ -481,4 +481,3 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 
 	return sb.String()
 }
-

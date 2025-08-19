@@ -19,12 +19,14 @@ import (
 	"github.com/maypok86/otter/v2"
 )
 
+// CacheEntry represents a cached HTTP response with expiration and ETag support.
 type CacheEntry struct {
 	ExpiresAt time.Time `json:"expires_at"`
 	ETag      string    `json:"etag,omitempty"`
 	Data      []byte    `json:"data"`
 }
 
+// OtterCache implements an HTTP cache using the Otter library for efficient in-memory caching.
 type OtterCache struct {
 	cache      otter.Cache[string, CacheEntry]
 	logger     *slog.Logger
