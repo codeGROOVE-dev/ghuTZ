@@ -169,7 +169,7 @@ func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger 
 
 		// Extract URLs from field value HTML
 		urls := extractURLsFromHTML(field.Value)
-		for _, url := range urls {
+		for _, urlStr := range urls {
 			// Check if this looks like a personal website/blog
 			// Common field names for websites
 			lowerFieldName := strings.ToLower(fieldName)
@@ -182,11 +182,11 @@ func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger 
 				strings.Contains(lowerFieldName, "web") ||
 				field.VerifiedAt != nil { // Verified fields are often personal websites
 				// This is likely a personal website
-				if !containsMastodonDomain(url) {
-					profileData.Websites = append(profileData.Websites, url)
+				if !containsMastodonDomain(urlStr) {
+					profileData.Websites = append(profileData.Websites, urlStr)
 					logger.Debug("found website in Mastodon field",
 						"field", fieldName,
-						"url", url,
+						"url", urlStr,
 						"verified", field.VerifiedAt != nil)
 				}
 			}
@@ -195,18 +195,18 @@ func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger 
 
 	// Also check bio for URLs
 	bioURLs := extractURLsFromHTML(account.Note)
-	for _, url := range bioURLs {
-		if !containsMastodonDomain(url) {
+	for _, urlStr := range bioURLs {
+		if !containsMastodonDomain(urlStr) {
 			// Check if URL already exists in websites
 			found := false
 			for _, existing := range profileData.Websites {
-				if existing == url {
+				if existing == urlStr {
 					found = true
 					break
 				}
 			}
 			if !found {
-				profileData.Websites = append(profileData.Websites, url)
+				profileData.Websites = append(profileData.Websites, urlStr)
 			}
 		}
 	}
@@ -296,18 +296,18 @@ func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.
 		cleanValue := fieldValue
 		for _, link := range links {
 			if len(link) > 2 {
-				url := link[1]
+				urlStr := link[1]
 				linkText := link[2]
 				if linkText != "" {
 					cleanValue = strings.Replace(cleanValue, link[0], linkText, 1)
 				} else {
-					cleanValue = strings.Replace(cleanValue, link[0], url, 1)
+					cleanValue = strings.Replace(cleanValue, link[0], urlStr, 1)
 				}
 
 				// Add to websites list if it's a website
-				if strings.HasPrefix(url, "http") && !strings.Contains(url, "mastodon") &&
-					!strings.Contains(url, ".social") && !strings.Contains(url, "infosec.exchange") {
-					profileData.Websites = append(profileData.Websites, url)
+				if strings.HasPrefix(urlStr, "http") && !strings.Contains(urlStr, "mastodon") &&
+					!strings.Contains(urlStr, ".social") && !strings.Contains(urlStr, "infosec.exchange") {
+					profileData.Websites = append(profileData.Websites, urlStr)
 				}
 			}
 		}
@@ -327,24 +327,24 @@ func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.
 	websiteMatches := websitePattern.FindAllStringSubmatch(content, -1)
 	for _, match := range websiteMatches {
 		if len(match) > 1 {
-			url := match[1]
+			urlStr := match[1]
 			// Add non-social media links to websites
-			if !strings.Contains(url, "twitter.com") &&
-				!strings.Contains(url, "github.com") &&
-				!strings.Contains(url, "linkedin.com") &&
-				!strings.Contains(url, "mastodon") &&
-				!strings.Contains(url, ".social") &&
-				!strings.Contains(url, "infosec.exchange") {
+			if !strings.Contains(urlStr, "twitter.com") &&
+				!strings.Contains(urlStr, "github.com") &&
+				!strings.Contains(urlStr, "linkedin.com") &&
+				!strings.Contains(urlStr, "mastodon") &&
+				!strings.Contains(urlStr, ".social") &&
+				!strings.Contains(urlStr, "infosec.exchange") {
 				// Check if not already in list
 				found := false
 				for _, w := range profileData.Websites {
-					if w == url {
+					if w == urlStr {
 						found = true
 						break
 					}
 				}
 				if !found {
-					profileData.Websites = append(profileData.Websites, url)
+					profileData.Websites = append(profileData.Websites, urlStr)
 				}
 			}
 		}
@@ -398,9 +398,9 @@ func extractURLsFromHTML(htmlContent string) []string {
 
 	for _, match := range matches {
 		if len(match) > 1 {
-			url := match[1]
-			if strings.HasPrefix(url, "http") {
-				urls = append(urls, url)
+			urlStr := match[1]
+			if strings.HasPrefix(urlStr, "http") {
+				urls = append(urls, urlStr)
 			}
 		}
 	}
@@ -409,7 +409,7 @@ func extractURLsFromHTML(htmlContent string) []string {
 }
 
 // containsMastodonDomain checks if a URL is a Mastodon instance.
-func containsMastodonDomain(url string) bool {
+func containsMastodonDomain(urlStr string) bool {
 	mastodonDomains := []string{
 		"mastodon",
 		".social",
@@ -420,7 +420,7 @@ func containsMastodonDomain(url string) bool {
 		"fediverse",
 	}
 
-	lowerURL := strings.ToLower(url)
+	lowerURL := strings.ToLower(urlStr)
 	for _, domain := range mastodonDomains {
 		if strings.Contains(lowerURL, domain) {
 			return true

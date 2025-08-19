@@ -46,7 +46,7 @@ func NewClient(apiKey, model, gcpProject string) *Client {
 }
 
 // CallWithSDK calls the Gemini API using the official SDK.
-func (c *Client) CallWithSDK(ctx context.Context, prompt string, verbose bool, cache CacheInterface, logger Logger) (*Response, error) {
+func (c *Client) CallWithSDK(ctx context.Context, prompt string, cache CacheInterface, logger Logger) (*Response, error) {
 	// Check cache first if available
 	cacheKey := fmt.Sprintf("genai:%s:%s", c.model, prompt)
 	if cache != nil {
@@ -135,10 +135,7 @@ func (c *Client) CallWithSDK(ctx context.Context, prompt string, verbose bool, c
 	}
 
 	// Configure generation
-	maxTokens := int32(2000) // Increased to prevent truncation for pro models
-	if verbose {
-		maxTokens = 2500
-	}
+	maxTokens := int32(2500) // Use consistent token limit regardless of verbose mode
 
 	temperature := float32(0.1)
 

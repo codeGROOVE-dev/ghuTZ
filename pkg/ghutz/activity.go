@@ -277,7 +277,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 
 	// We need to adjust assumed sleep midpoints based on patterns
 	var offsetFromUTC float64
-	var candidates []timezone.TimezoneCandidate // Store timezone candidates for Gemini
+	var candidates []timezone.Candidate // Store timezone candidates for Gemini
 
 	if float64(europeanActivity) > float64(americanActivity)*1.2 {
 		// European/Asian pattern - need to distinguish between them
@@ -446,7 +446,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	}
 
 	// Evaluate timezone candidates using the new timezone package
-	candidates = timezone.EvaluateTimezoneCandidates(username, hourCounts, halfHourCounts,
+	candidates = timezone.EvaluateCandidates(username, hourCounts, halfHourCounts,
 		totalActivity, quietHours, midQuiet, activeStart, timezone.GlobalLunchPattern{
 			StartUTC:    bestGlobalLunch.StartUTC,
 			EndUTC:      bestGlobalLunch.EndUTC,
@@ -572,8 +572,11 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	for name, count := range orgCounts {
 		orgs = append(orgs, orgActivity{name: name, count: count})
 	}
-	// Sort by count descending
+	// Sort by count descending, then by name for deterministic ordering
 	sort.Slice(orgs, func(i, j int) bool {
+		if orgs[i].count == orgs[j].count {
+			return orgs[i].name < orgs[j].name
+		}
 		return orgs[i].count > orgs[j].count
 	})
 	// Take top 5 organizations, but only those with more than 1 contribution
@@ -747,7 +750,13 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		}
 
 		// Also check for activity in European projects/organizations
+		// Sort org names for deterministic iteration
+		var orgNames []string
 		for orgName := range orgCounts {
+			orgNames = append(orgNames, orgName)
+		}
+		sort.Strings(orgNames)
+		for _, orgName := range orgNames {
 			orgLower := strings.ToLower(orgName)
 			if strings.Contains(orgLower, "canonical") || strings.Contains(orgLower, "ubuntu") {
 				// Canonical/Ubuntu has significant European presence

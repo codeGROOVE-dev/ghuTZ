@@ -229,14 +229,8 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 						// Automatically extend duration when lunch clearly continues
 						// This fixes the josebiro case where 30min lunch should be 60min
 						if duration == 0.5 && nextCount == 0 {
-							// Check if the next slot after that (1 hour total) also has low activity
-							nextNextBucket := math.Mod(startUTC+1.0+24, 24)
-							nextNextCount := halfHourCounts[nextNextBucket]
-							if nextNextCount == 0 || (beforeCount > 0 && float64(nextNextCount)/float64(beforeCount) < 0.3) {
-								actualDuration = 1.0 // Extend to full hour
-							} else {
-								actualDuration = 1.0 // Extend to full hour anyway since next slot is 0
-							}
+							// Extend to full hour since next slot is 0
+							actualDuration = 1.0
 						}
 					}
 				}
@@ -259,6 +253,9 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 					effectiveScore *= 0.8 // 20% penalty - lunch probably ended earlier
 				case duration == 0.5: // 30 minutes without strong recovery
 					effectiveScore *= 0.95 // Small penalty
+				default:
+					// Other duration values (e.g., 1.5 hours) - less typical lunch pattern
+					effectiveScore *= 0.9 // Small penalty for atypical duration
 				}
 
 				// MASSIVE bonus for 100% drops (perfect lunch signal)
@@ -301,6 +298,9 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 					effectiveScore *= 0.5 // 50% penalty for very early/late lunch
 				case effectiveDistance > 1.5: // More than 1.5 hours from standard times
 					effectiveScore *= 0.7 // 30% penalty for early/late lunch
+				default:
+					// Distance between 1.0 and 1.5 hours from standard times
+					effectiveScore *= 1.0 // No adjustment for moderate distance
 				}
 
 				// European timezone constraint: lunch should not be before 11:30am

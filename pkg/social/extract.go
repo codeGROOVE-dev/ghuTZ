@@ -28,8 +28,8 @@ func Extract(ctx context.Context, data map[string]string, logger *slog.Logger) [
 	var wg sync.WaitGroup
 
 	// Process each URL in parallel
-	for kind, url := range data {
-		if url == "" {
+	for kind, urlStr := range data {
+		if urlStr == "" {
 			continue
 		}
 
@@ -61,7 +61,7 @@ func Extract(ctx context.Context, data map[string]string, logger *slog.Logger) [
 				results = append(results, *content)
 				mu.Unlock()
 			}
-		}(kind, url)
+		}(kind, urlStr)
 	}
 
 	wg.Wait()

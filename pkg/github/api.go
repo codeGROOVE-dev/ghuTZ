@@ -331,7 +331,6 @@ func (c *Client) FetchUserWithGraphQL(ctx context.Context, username string) *Git
 			location
 			company
 			bio
-			email
 			websiteUrl
 			twitterUsername
 			createdAt
@@ -410,7 +409,10 @@ func (c *Client) FetchUserWithGraphQL(ctx context.Context, username string) *Git
 	}
 
 	if len(result.Errors) > 0 {
-		c.logger.Debug("GraphQL query returned errors", "error", result.Errors[0].Message)
+		c.logger.Debug("GraphQL user profile query failed", 
+			"username", username,
+			"error", result.Errors[0].Message,
+			"query_type", "user_profile_with_social_accounts")
 		return nil
 	}
 

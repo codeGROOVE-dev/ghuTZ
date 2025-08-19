@@ -93,18 +93,18 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 			}
 
 			// If there's any activity in the buffer bucket, move start forward
-			if count, exists := halfHourCounts[bufferStart]; exists && count > 1 {
-				period.start += 0.5
-				if period.start >= 24 {
-					period.start -= 24
-				}
-				period.length--
+			count, exists := halfHourCounts[bufferStart]
+			if !exists || count <= 1 {
+				break
+			}
+			period.start += 0.5
+			if period.start >= 24 {
+				period.start -= 24
+			}
+			period.length--
 
-				// Stop if we've adjusted too much
-				if period.length < 4 {
-					break
-				}
-			} else {
+			// Stop if we've adjusted too much
+			if period.length < 4 {
 				break
 			}
 		}
@@ -117,18 +117,18 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 			}
 
 			// If there's any activity in the buffer bucket, move end backward
-			if count, exists := halfHourCounts[bufferEnd]; exists && count > 1 {
-				period.end -= 0.5
-				if period.end < 0 {
-					period.end += 24
-				}
-				period.length--
+			count, exists := halfHourCounts[bufferEnd]
+			if !exists || count <= 1 {
+				break
+			}
+			period.end -= 0.5
+			if period.end < 0 {
+				period.end += 24
+			}
+			period.length--
 
-				// Stop if we've adjusted too much
-				if period.length < 4 {
-					break
-				}
-			} else {
+			// Stop if we've adjusted too much
+			if period.length < 4 {
 				break
 			}
 		}
@@ -286,11 +286,4 @@ func FindQuietHours(hourCounts map[int]int) []int {
 	// Sort hours for consistency
 	sort.Ints(quietHours)
 	return quietHours
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

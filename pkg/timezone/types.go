@@ -1,7 +1,7 @@
 package timezone
 
-// TimezoneCandidate represents a timezone detection result with evidence.
-type TimezoneCandidate struct {
+// Candidate represents a timezone detection result with evidence.
+type Candidate struct {
 	Timezone         string  `json:"timezone"`
 	Offset           float64 `json:"offset"` // UTC offset in hours (e.g., -5, 5.5, 5.75)
 	Confidence       float64 `json:"confidence"`

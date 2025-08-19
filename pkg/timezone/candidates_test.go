@@ -36,8 +36,8 @@ func TestDetectPeakProductivityWithHalfHours(t *testing.T) {
 	})
 }
 
-// TestEvaluateTimezoneCandidates tests the timezone candidate evaluation function
-func TestEvaluateTimezoneCandidates(t *testing.T) {
+// TestEvaluateCandidates tests the timezone candidate evaluation function
+func TestEvaluateCandidates(t *testing.T) {
 	// Test with realistic activity pattern - someone working 9am-5pm EST
 	hourCounts := map[int]int{
 		13: 20, // 9am EST
@@ -76,7 +76,7 @@ func TestEvaluateTimezoneCandidates(t *testing.T) {
 		DropPercent: 30.0,
 	}
 
-	candidates := EvaluateTimezoneCandidates("testuser", hourCounts, halfHourCounts, totalActivity, quietHours, midQuiet, activeStart, bestGlobalLunch)
+	candidates := EvaluateCandidates("testuser", hourCounts, halfHourCounts, totalActivity, quietHours, midQuiet, activeStart, bestGlobalLunch)
 
 	if len(candidates) == 0 {
 		t.Fatal("Expected at least one timezone candidate")

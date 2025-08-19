@@ -16,9 +16,9 @@ type GlobalLunchPattern struct {
 	DropPercent float64
 }
 
-// EvaluateTimezoneCandidates evaluates multiple timezone offsets to find the best candidates.
-func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHourCounts map[float64]int, totalActivity int, quietHours []int, midQuiet float64, activeStart int, bestGlobalLunch GlobalLunchPattern) []TimezoneCandidate {
-	var candidates []TimezoneCandidate // Store timezone candidates for Gemini
+// EvaluateCandidates evaluates multiple timezone offsets to find the best candidates.
+func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts map[float64]int, totalActivity int, quietHours []int, midQuiet float64, activeStart int, bestGlobalLunch GlobalLunchPattern) []Candidate {
+	var candidates []Candidate // Store timezone candidates for Gemini
 
 	// Evaluate multiple timezone offsets to find the best candidates
 	// CRITICAL: Always test both American AND European timezones
@@ -149,6 +149,10 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 			case sleepLocalMid >= 22 || sleepLocalMid <= 6:
 				testConfidence += 4 // Sleep detected but unusual timing
 				adjustments = append(adjustments, fmt.Sprintf("+4 (unusual sleep, mid=%.1f)", sleepLocalMid))
+			default:
+				// Sleep pattern exists but timing is very unusual
+				testConfidence++
+				adjustments = append(adjustments, fmt.Sprintf("+1 (unusual sleep timing, mid=%.1f)", sleepLocalMid))
 			}
 		} else {
 			adjustments = append(adjustments, "0 (no reasonable sleep pattern)")
@@ -768,7 +772,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 
 		// Add to candidates if confidence is reasonable (at least 10%)
 		if testConfidence >= 10 {
-			candidate := TimezoneCandidate{
+			candidate := Candidate{
 				Timezone:         fmt.Sprintf("UTC%+d", testOffset),
 				Offset:           float64(testOffset),
 				Confidence:       testConfidence,

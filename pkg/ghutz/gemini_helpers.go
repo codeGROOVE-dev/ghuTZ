@@ -140,7 +140,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	sb.WriteString("=== ACTIVITY TIMEZONE ANALYSIS ===\n\n")
 
 	// Timezone candidates are critical constraints that must be respected.
-	if candidates, ok := contextData["timezone_candidates"].([]timezone.TimezoneCandidate); ok && len(candidates) > 0 {
+	if candidates, ok := contextData["timezone_candidates"].([]timezone.Candidate); ok && len(candidates) > 0 {
 		// Summary line shows all viable candidates.
 		sb.WriteString("Top 5 candidates: ")
 		for i, candidate := range candidates {
@@ -331,7 +331,13 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	// Output hobby indicators if found.
 	if len(hobbyIndicators) > 0 {
 		sb.WriteString("Hobby/Interest indicators:\n")
+		// Sort hobbies for deterministic output
+		var hobbies []string
 		for hobby := range hobbyIndicators {
+			hobbies = append(hobbies, hobby)
+		}
+		sort.Strings(hobbies)
+		for _, hobby := range hobbies {
 			fmt.Fprintf(&sb, "- %s\n", hobby)
 		}
 		sb.WriteString("\n")
@@ -468,7 +474,14 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 
 	// Mastodon-linked website content.
 	if websiteContents, ok := contextData["mastodon_website_contents"].(map[string]string); ok && len(websiteContents) > 0 {
-		for website, content := range websiteContents {
+		// Sort websites for deterministic output
+		var websites []string
+		for website := range websiteContents {
+			websites = append(websites, website)
+		}
+		sort.Strings(websites)
+		for _, website := range websites {
+			content := websiteContents[website]
 			fmt.Fprintf(&sb, "Content from %s:\n", website)
 			contentPreview := content
 			if len(contentPreview) > mastodonContentMaxLen {
