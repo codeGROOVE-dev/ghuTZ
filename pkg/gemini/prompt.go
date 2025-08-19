@@ -63,8 +63,10 @@ DETECTION PRIORITIES (subject to above constraint):
 5. LINGUISTIC HINTS:
    - British vs American spelling
    - Spanish words would strongly suggest living in a Spanish-speaking country
+   - 🇲🇽 CRITICAL: .mx domains (like puerco.mx) = STRONG Mexico signal (Mexico City UTC-6)
+   - 🇲🇽 Spanish words + UTC-6 activity = Mexico City likely (not US Mountain time)
    - Date formats (DD/MM vs MM/DD)
-   - Country TLD domains (.ca, .fi, .de)
+   - Country TLD domains (.ca, .fi, .de, .mx, .br, .ar)
 
 6. Timezone Generation
    - Trust in the confidence levels we provide, though they may be one timezone off in
@@ -80,6 +82,10 @@ DETECTION PRIORITIES (subject to above constraint):
 7. Location Generation
 	- Guess a specific city in the timezone that would be the most likely with all evidence given:
 	  maybe it's just the biggest tech hub, or maybe you saw clues in the repository names or indicated hobbies
+	- 🚨 For UTC-6 disambiguation: Check for Mexico indicators FIRST:
+	  • .mx domains (like puerco.mx) = Mexico City very likely
+	  • Spanish content, Mexican cultural references = Mexico
+	  • If no Mexico evidence, then US Mountain/Central time
 	- 🚨 For UTC-3 disambiguation: ALWAYS check for Brazil-specific indicators FIRST:
 	  • BVSP/Bovespa in repos = Brazil (São Paulo likely)
 	  • Portuguese content, .br domains = Brazil

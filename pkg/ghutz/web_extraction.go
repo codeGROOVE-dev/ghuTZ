@@ -142,6 +142,13 @@ func extractSocialMediaURLs(user *github.GitHubUser) []string {
 		urls = append(urls, fmt.Sprintf("https://twitter.com/%s", user.TwitterHandle))
 	}
 
+	// Add URLs from GraphQL social accounts (critical for puerco.mx detection)
+	for _, account := range user.SocialAccounts {
+		if account.URL != "" {
+			urls = append(urls, account.URL)
+		}
+	}
+
 	return urls
 }
 
