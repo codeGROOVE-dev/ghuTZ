@@ -147,6 +147,8 @@ type Result struct {
 	LocationConfidence         float64                `json:"location_confidence,omitempty"`
 	TimezoneConfidence         float64                `json:"timezone_confidence,omitempty"`
 	Confidence                 float64                `json:"confidence"`
+	GeminiActivityMismatch     bool                   `json:"gemini_activity_mismatch,omitempty"`
+	GeminiActivityOffsetHours  float64                `json:"gemini_activity_offset_hours,omitempty"`
 }
 
 // Location represents geographic coordinates.

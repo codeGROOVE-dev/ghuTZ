@@ -666,8 +666,16 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 		return ""
 	}
 
+	// SECURITY: Only auto-prefix https:// for well-formed domain names
 	if !strings.HasPrefix(blogURL, "http://") && !strings.HasPrefix(blogURL, "https://") {
-		blogURL = "https://" + blogURL
+		// Validate it looks like a domain before auto-prefixing
+		if strings.Contains(blogURL, ".") && !strings.Contains(blogURL, " ") && 
+		   !strings.Contains(blogURL, "://") && !strings.HasPrefix(blogURL, "//") {
+			blogURL = "https://" + blogURL
+		} else {
+			d.logger.Debug("invalid URL format, not auto-prefixing", "url", blogURL)
+			return ""
+		}
 	}
 
 	// SECURITY: Parse URL to validate it's safe to fetch
@@ -688,7 +696,17 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 	}
 
 	// Block private IP ranges (RFC 1918)
-	if ip := net.ParseIP(host); ip != nil {
+	// SECURITY: Resolve hostname to IP first to prevent DNS rebinding attacks
+	ips, err := net.LookupIP(host)
+	if err == nil && len(ips) > 0 {
+		for _, ip := range ips {
+			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+				d.logger.Debug("blocked fetch to private IP", "ip", ip.String(), "host", host)
+				return ""
+			}
+		}
+	} else if ip := net.ParseIP(host); ip != nil {
+		// Direct IP address provided
 		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 			d.logger.Debug("blocked fetch to private IP", "ip", host)
 			return ""

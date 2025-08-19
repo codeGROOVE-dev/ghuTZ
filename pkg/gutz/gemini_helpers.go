@@ -21,8 +21,8 @@ const (
 	maxRecentCommits      = 10
 	maxTextSamples        = 8
 	maxLocationIndicators = 5
-	maxTopCandidates      = 5
-	maxDetailedCandidates = 5
+	maxTopCandidates      = 3
+	maxDetailedCandidates = 3
 	commitMessageMaxLen   = 132
 	websiteContentMaxLen  = 4000
 	mastodonContentMaxLen = 3000
@@ -233,7 +233,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	// Timezone candidates are critical constraints that must be respected.
 	if candidates, ok := contextData["timezone_candidates"].([]timezone.Candidate); ok && len(candidates) > 0 {
 		// Summary line shows all viable candidates.
-		sb.WriteString("Top 5 candidates: ")
+		sb.WriteString("Top 3 candidates: ")
 		for i, candidate := range candidates {
 			if i >= maxTopCandidates {
 				break
@@ -322,19 +322,50 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 				sb.WriteString("\n")
 			}
 
-			// Sleep hours
+			// Sleep hours - find the longest continuous sequence
 			if sleepHours, ok := contextData["sleep_hours"].([]int); ok && len(sleepHours) > 0 {
+				// Find the longest continuous sequence of sleep hours
+				longestStart := sleepHours[0]
+				longestEnd := sleepHours[0]
+				currentStart := sleepHours[0]
+				currentEnd := sleepHours[0]
+				maxLength := 1
+				currentLength := 1
+				
+				for i := 1; i < len(sleepHours); i++ {
+					// Check if this hour continues the sequence (considering wrap-around)
+					expectedNext := (currentEnd + 1) % 24
+					if sleepHours[i] == expectedNext {
+						currentEnd = sleepHours[i]
+						currentLength++
+						if currentLength > maxLength {
+							maxLength = currentLength
+							longestStart = currentStart
+							longestEnd = currentEnd
+						}
+					} else {
+						// Start new sequence
+						currentStart = sleepHours[i]
+						currentEnd = sleepHours[i]
+						currentLength = 1
+					}
+				}
+				
 				// Calculate local sleep hours
-				localSleepStart := (sleepHours[0] + offset + 24) % 24
-				localSleepEnd := (sleepHours[len(sleepHours)-1] + offset + 24) % 24
-				fmt.Fprintf(&sb, "   Sleep: %02d:00-%02d:00 local", localSleepStart, localSleepEnd)
+				localSleepStart := (longestStart + offset + 24) % 24
+				localSleepEnd := ((longestEnd + 1) % 24 + offset + 24) % 24 // Add 1 to get end of sleep period
+				
+				// Format the sleep display with more detail
+				fmt.Fprintf(&sb, "   Sleep: %02d:00-%02d:00 local (%d hrs)", 
+					localSleepStart, localSleepEnd, maxLength)
+				
 				// Check if sleep is at night - normal sleep starts 8pm-2am and ends 4am-10am
 				nighttimeStart := (localSleepStart >= 20 && localSleepStart <= 23) || (localSleepStart >= 0 && localSleepStart <= 2)
 				nighttimeEnd := (localSleepEnd >= 4 && localSleepEnd <= 10) || (localSleepEnd >= 0 && localSleepEnd <= 3)
 				if nighttimeStart && nighttimeEnd {
 					sb.WriteString(" ✓ nighttime")
 				} else {
-					sb.WriteString(" ⚠️ daytime sleep")
+					fmt.Fprintf(&sb, " ⚠️ unusual (start:%02d end:%02d)", localSleepStart, localSleepEnd)
 				}
 				sb.WriteString("\n")
 			}
@@ -371,7 +402,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 					issues = append(issues, "unusual lunch time")
 				}
 				if !candidate.SleepReasonable {
-					issues = append(issues, "unusual sleep time")
+					issues = append(issues, fmt.Sprintf("unusual sleep (mid: %.1f)", candidate.SleepMidLocal))
 				}
 				if !candidate.PeakTimeReasonable {
 					issues = append(issues, "unusual peak time")

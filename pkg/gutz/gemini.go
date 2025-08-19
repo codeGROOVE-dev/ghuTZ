@@ -74,14 +74,22 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	// Verbose response display removed - now handled in main CLI
 
 	// Adjust confidence based on data availability
-	if !hasActivityData && confidence > 0.7 {
-		// Without activity data, cap confidence at 70%
-		confidence = 0.7
+	if !hasActivityData && confidence > 0.5 {
+		// Without activity data, cap confidence at 50%
+		confidence = 0.5
+		d.logger.Debug("capped confidence due to no activity data", 
+			"original", confidence, "capped", 0.5)
 	}
 
-	// If we have strong activity patterns, boost confidence slightly
-	if hasActivityData && confidence < 0.9 {
-		confidence = math.Min(0.9, confidence*1.1)
+	// If we have strong activity patterns, apply a small boost (5% max)
+	if hasActivityData && confidence > 0.5 {
+		// Only boost if confidence is already decent
+		originalConfidence := confidence
+		confidence = math.Min(confidence + 0.05, 0.9) // Add max 5%, cap at 90%
+		if confidence != originalConfidence {
+			d.logger.Debug("applied activity data confidence boost",
+				"original", originalConfidence, "boosted", confidence)
+		}
 	}
 
 	// Return the result
@@ -553,9 +561,60 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		result.TopOrganizations = activityResult.TopOrganizations
 		result.HourlyOrganizationActivity = activityResult.HourlyOrganizationActivity
 		result.ActivityDateRange = activityResult.ActivityDateRange
+		
+		// Check if Gemini's timezone differs significantly from activity-based detection
+		if len(activityResult.TimezoneCandidates) > 0 {
+			// Get the UTC offset from Gemini's timezone
+			geminiOffset := getUTCOffsetFromTimezone(geminiResult.Timezone)
+			
+			// Get the top activity-based candidate offset
+			topActivityOffset := activityResult.TimezoneCandidates[0].Offset
+			
+			// Calculate the difference in hours
+			offsetDiff := math.Abs(geminiOffset - topActivityOffset)
+			
+			// Flag if difference is > 2 hours
+			if offsetDiff > 2.0 {
+				result.GeminiActivityMismatch = true
+				result.GeminiActivityOffsetHours = offsetDiff
+				
+				d.logger.Warn("Gemini timezone differs significantly from activity pattern",
+					"username", userCtx.Username,
+					"gemini_timezone", geminiResult.Timezone,
+					"gemini_offset", geminiOffset,
+					"activity_offset", topActivityOffset,
+					"difference_hours", offsetDiff)
+			}
+		}
 	}
 
 	return result
+}
+
+// getUTCOffsetFromTimezone returns the UTC offset in hours for a given timezone string.
+// It handles IANA timezone strings like "America/New_York" or "Europe/London".
+func getUTCOffsetFromTimezone(tzString string) float64 {
+	// Try to load the timezone
+	loc, err := time.LoadLocation(tzString)
+	if err != nil {
+		// If it fails, try to parse as UTC±N format
+		if strings.HasPrefix(tzString, "UTC") {
+			offsetStr := strings.TrimPrefix(tzString, "UTC")
+			if offset, err := strconv.ParseFloat(offsetStr, 64); err == nil {
+				return offset
+			}
+		}
+		// Default to 0 if we can't parse
+		return 0
+	}
+	
+	// Get the offset for the current time
+	// This handles DST correctly for the current date
+	now := time.Now().In(loc)
+	_, offset := now.Zone()
+	
+	// Convert seconds to hours
+	return float64(offset) / 3600.0
 }
 
 // extractRepositoryContributions aggregates repository contributions from all sources.

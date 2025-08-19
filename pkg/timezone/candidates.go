@@ -100,8 +100,9 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		// 2. Sleep timing analysis
 		// Calculate what local sleep time would be for this offset
 		sleepLocalMid := math.Mod(midQuiet+float64(testOffset)+24, 24)
-		// Sleep is reasonable if mid-sleep is between 10pm and 5am
-		sleepReasonable := (sleepLocalMid >= 0 && sleepLocalMid <= 5) || sleepLocalMid >= 22
+		// Sleep is reasonable if mid-sleep is between 10pm and 10am (allowing for various sleep schedules)
+		// Note: midQuiet might include all quiet hours, not just nighttime sleep
+		sleepReasonable := (sleepLocalMid >= 0 && sleepLocalMid <= 10) || sleepLocalMid >= 22
 
 		// 3. Work hours analysis
 		// testWorkStart already calculated above for lunch validation
@@ -161,8 +162,8 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 					}
 				}
 			case sleepLocalMid >= 0 && sleepLocalMid <= 5:
-				testConfidence += 8 // Good sleep timing
-				adjustments = append(adjustments, fmt.Sprintf("+8 (good sleep, mid=%.1f)", sleepLocalMid))
+				testConfidence += 10 // Good sleep timing
+				adjustments = append(adjustments, fmt.Sprintf("+10 (good sleep, mid=%.1f)", sleepLocalMid))
 				// Still give bonus for early sleep
 				if sleepStartUTC >= 0 {
 					sleepStartLocal := float64((sleepStartUTC + testOffset + 24) % 24)
@@ -171,14 +172,15 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 						adjustments = append(adjustments, fmt.Sprintf("+2 (early sleep, start=%.0fpm)", sleepStartLocal-12))
 					}
 				}
-			case sleepLocalMid >= 22 || sleepLocalMid <= 6:
-				// Sleep at unusual but possible times - small bonus
-				testConfidence += 2 // Reduced from 4 
-				adjustments = append(adjustments, fmt.Sprintf("+2 (late or early sleep pattern, mid=%.1f)", sleepLocalMid))
+			case sleepLocalMid >= 22 || sleepLocalMid <= 10:
+				// Sleep at late or early times - reasonable for many people
+				// Note: sleepLocalMid of 6-10 can occur when quiet hours include both night and morning
+				testConfidence += 5 // Normal sleep pattern (reduced slightly since it's broader)
+				adjustments = append(adjustments, fmt.Sprintf("+5 (acceptable sleep, mid=%.1f)", sleepLocalMid))
 			default:
-				// Sleep pattern exists but timing is very unusual - penalty
-				testConfidence -= 3 // Changed from +1 to -3
-				adjustments = append(adjustments, fmt.Sprintf("-3 (very unusual sleep timing, mid=%.1f)", sleepLocalMid))
+				// Sleep pattern exists but timing is very unusual (mid-day sleep)
+				testConfidence -= 5 // Increased penalty for truly unusual sleep
+				adjustments = append(adjustments, fmt.Sprintf("-5 (daytime sleep, mid=%.1f)", sleepLocalMid))
 			}
 		} else {
 			adjustments = append(adjustments, "0 (no reasonable sleep pattern)")
@@ -246,6 +248,22 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 				adjustments = append(adjustments, fmt.Sprintf("-%.1f (weak late lunch penalty)", oldScore-lunchScore))
 			}
 
+			// PENALTY: Lunch at the very end of work day makes no sense
+			// Calculate last activity hour for this timezone
+			activeEndLocal := 0.0
+			for hour := 23; hour >= 0; hour-- {
+				utcHour := (hour - testOffset + 24) % 24
+				if hourCounts[utcHour] > 0 {
+					activeEndLocal = float64(hour)
+					break
+				}
+			}
+			// Check if lunch is within last 1.5 hours of activity
+			if activeEndLocal > 0 && lunchLocalStart >= activeEndLocal-1.5 {
+				lunchScore -= 10
+				adjustments = append(adjustments, fmt.Sprintf("-10 (lunch at end of work day %.1f vs work end %.0f)", lunchLocalStart, activeEndLocal))
+			}
+			
 			finalLunchScore := math.Min(15, lunchScore)
 			testConfidence += finalLunchScore
 		} else if testLunchStart < 0 {
@@ -261,18 +279,18 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			actualWorkStart := int(firstActivityLocal)
 			
 			// ALWAYS penalize very early starts, regardless of workReasonable flag
-			if actualWorkStart < 5 {
-				// Pre-5am is absurd - massive penalty
-				testConfidence -= 30
-				adjustments = append(adjustments, fmt.Sprintf("-30 (absurd pre-5am start %dam)", actualWorkStart))
+			if actualWorkStart <= 4 {
+				// 4am or earlier is completely absurd - MASSIVE penalty
+				testConfidence -= 50
+				adjustments = append(adjustments, fmt.Sprintf("-50 (impossible %dam work start)", actualWorkStart))
 				if actualWorkStart < 2 {
-					testConfidence -= 20 // Additional penalty for midnight starts
-					adjustments = append(adjustments, fmt.Sprintf("-20 (extra penalty for midnight-%dam)", actualWorkStart))
+					testConfidence -= 30 // Additional penalty for midnight starts
+					adjustments = append(adjustments, fmt.Sprintf("-30 (extra penalty for midnight-%dam)", actualWorkStart))
 				}
 			} else if actualWorkStart == 5 {
-				// 5am is very early - STRONG penalty (increased from 8 to 15)
-				testConfidence -= 15
-				adjustments = append(adjustments, "-15 (very early 5am start)")
+				// 5am is extremely early - STRONG penalty
+				testConfidence -= 25
+				adjustments = append(adjustments, "-25 (extremely early 5am start)")
 			} else if workReasonable {
 				// Only give bonuses for reasonable starts (6am+)
 				switch {
@@ -742,16 +760,40 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		case -2, -1: // Atlantic ocean timezones (Azores, Cape Verde, etc.)
 			testConfidence -= 10 // Significant penalty - very few developers
 			adjustments = append(adjustments, "-10 (Atlantic ocean low population)")
-		case 0: // UTC/GMT (UK, Portugal, Iceland, West Africa)
-			// No penalty - significant population
-			// Check for European commute pattern (quiet hour at 17-18 UTC = 17-18 local)
-			if hourCounts[17] < 5 && hourCounts[18] > 10 {
-				testConfidence += 5.0 // Bonus for commute pattern
-				adjustments = append(adjustments, "+5 (European commute pattern 17:00)")
+		case 0, 1: // UTC+0/UTC+1 (UK/Ireland/Portugal in GMT/BST, Western/Central Europe)
+			// Significant boost for UTC+0/+1 - major developer population
+			// UK uses UTC+0 in winter (GMT) and UTC+1 in summer (BST)
+			// Central Europe uses UTC+1 in winter and UTC+2 in summer
+			testConfidence += 12.0 // Significant boost for UK/Western Europe population
+			if testOffset == 0 {
+				adjustments = append(adjustments, "+12 (UK/Western Europe GMT/winter time)")
+			} else {
+				adjustments = append(adjustments, "+12 (UK BST/Central Europe winter time)")
 			}
-		case 1, 2: // European timezones
-			testConfidence += 0.5 // Small boost for European developers
-			adjustments = append(adjustments, "+0.5 (European population boost)")
+			
+			// Check for European commute pattern (quiet hour at 17-18 local)
+			commuteHourUTC := 17 - testOffset // 17:00 local in UTC
+			if commuteHourUTC >= 0 && commuteHourUTC < 24 {
+				nextHourUTC := (commuteHourUTC + 1) % 24
+				if hourCounts[commuteHourUTC] < 5 && hourCounts[nextHourUTC] > 10 {
+					testConfidence += 5.0 // Bonus for commute pattern
+					adjustments = append(adjustments, fmt.Sprintf("+5 (European commute at %d:00 UTC)", commuteHourUTC))
+				}
+			}
+			
+			// Check for UK tea time pattern (15:00-16:00 local)
+			teaTimeUTC := 15 - testOffset
+			if teaTimeUTC >= 0 && teaTimeUTC < 24 {
+				beforeTeaUTC := (teaTimeUTC - 1 + 24) % 24
+				afterTeaUTC := (teaTimeUTC + 1) % 24
+				if hourCounts[teaTimeUTC] < hourCounts[beforeTeaUTC] && hourCounts[teaTimeUTC] < hourCounts[afterTeaUTC] {
+					testConfidence += 3.0 // Tea time pattern
+					adjustments = append(adjustments, "+3 (UK tea time pattern)")
+				}
+			}
+		case 2: // Central/Eastern European timezone
+			testConfidence += 2.0 // Small boost for Central/Eastern European developers
+			adjustments = append(adjustments, "+2 (Central/Eastern Europe population boost)")
 			// Check for European commute pattern
 			commuteHourUTC := 17 - testOffset // 17:00 local in UTC
 			if commuteHourUTC >= 0 && commuteHourUTC < 24 {
@@ -791,8 +833,10 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			adjustments = append(adjustments, "-15 (European timezone but no morning activity)")
 		}
 
-		// Ensure confidence stays above 0 (no upper cap - let real scores determine ranking)
+		// Ensure confidence stays above 0 and scale up for better dynamic range
 		testConfidence = math.Max(0, testConfidence)
+		// Scale confidence by 1.5x for better dynamic range (50% -> 75%)
+		testConfidence = testConfidence * 1.5
 
 		// Debug: Log scoring details for all candidates
 		// For egibs debugging specifically

@@ -27,7 +27,19 @@ func (d *Detector) collectActivityTimestamps(ctx context.Context, username strin
 	// Add events
 	eventOldest := time.Now()
 	eventNewest := time.Time{}
+	zeroTimeCount := 0
 	for _, event := range events {
+		// SECURITY: Filter out zero timestamps (0001-01-01)
+		if event.CreatedAt.IsZero() || event.CreatedAt.Year() < 2000 {
+			zeroTimeCount++
+			d.logger.Warn("skipping event with invalid timestamp",
+				"username", username,
+				"timestamp", event.CreatedAt,
+				"repo", event.Repo.Name,
+				"type", event.Type)
+			continue
+		}
+		
 		org := extractOrganization(event.Repo.Name)
 		allTimestamps = append(allTimestamps, timestampEntry{
 			time:   event.CreatedAt,
@@ -41,6 +53,13 @@ func (d *Detector) collectActivityTimestamps(ctx context.Context, username strin
 			eventNewest = event.CreatedAt
 		}
 	}
+	
+	if zeroTimeCount > 0 {
+		d.logger.Warn("filtered out events with zero/invalid timestamps",
+			"username", username,
+			"count", zeroTimeCount,
+			"total_events", len(events))
+	}
 
 	if len(events) > 0 {
 		d.logger.Debug("GitHub Events data", "username", username,
@@ -52,7 +71,16 @@ func (d *Detector) collectActivityTimestamps(ctx context.Context, username strin
 
 	// Also fetch gist timestamps
 	if gistTimestamps, err := d.githubClient.FetchUserGists(ctx, username); err == nil && len(gistTimestamps) > 0 {
+		gistZeroCount := 0
 		for _, ts := range gistTimestamps {
+			// Filter out zero timestamps
+			if ts.IsZero() || ts.Year() < 2000 {
+				gistZeroCount++
+				d.logger.Warn("skipping gist with invalid timestamp",
+					"username", username,
+					"timestamp", ts)
+				continue
+			}
 			allTimestamps = append(allTimestamps, timestampEntry{
 				time:   ts,
 				source: "gist",
@@ -187,8 +215,19 @@ func extractOrganization(repository string) string {
 func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additionalData *ActivityData, username string) []timestampEntry {
 	prOldest := time.Now()
 	prNewest := time.Time{}
+	prZeroCount := 0
 	for i := range additionalData.PullRequests {
 		pr := &additionalData.PullRequests[i]
+		// Filter out zero timestamps
+		if pr.CreatedAt.IsZero() || pr.CreatedAt.Year() < 2000 {
+			prZeroCount++
+			d.logger.Warn("skipping PR with invalid timestamp",
+				"username", username,
+				"timestamp", pr.CreatedAt,
+				"repo", pr.RepoName,
+				"title", pr.Title)
+			continue
+		}
 		org := extractOrganization(pr.RepoName)
 		allTimestamps = append(allTimestamps, timestampEntry{
 			time:   pr.CreatedAt,
@@ -202,6 +241,13 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 			prNewest = pr.CreatedAt
 		}
 	}
+	
+	if prZeroCount > 0 {
+		d.logger.Warn("filtered out PRs with zero/invalid timestamps",
+			"username", username,
+			"count", prZeroCount,
+			"total_prs", len(additionalData.PullRequests))
+	}
 
 	if len(additionalData.PullRequests) > 0 {
 		d.logger.Debug("Pull Requests data", "username", username,
@@ -213,8 +259,19 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 
 	issueOldest := time.Now()
 	issueNewest := time.Time{}
+	issueZeroCount := 0
 	for i := range additionalData.Issues {
 		issue := &additionalData.Issues[i]
+		// Filter out zero timestamps
+		if issue.CreatedAt.IsZero() || issue.CreatedAt.Year() < 2000 {
+			issueZeroCount++
+			d.logger.Warn("skipping issue with invalid timestamp",
+				"username", username,
+				"timestamp", issue.CreatedAt,
+				"repo", issue.RepoName,
+				"title", issue.Title)
+			continue
+		}
 		org := extractOrganization(issue.RepoName)
 		allTimestamps = append(allTimestamps, timestampEntry{
 			time:   issue.CreatedAt,
@@ -228,6 +285,13 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 			issueNewest = issue.CreatedAt
 		}
 	}
+	
+	if issueZeroCount > 0 {
+		d.logger.Warn("filtered out issues with zero/invalid timestamps",
+			"username", username,
+			"count", issueZeroCount,
+			"total_issues", len(additionalData.Issues))
+	}
 
 	if len(additionalData.Issues) > 0 {
 		d.logger.Debug("Issues data", "username", username,
@@ -239,7 +303,16 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 
 	commentOldest := time.Now()
 	commentNewest := time.Time{}
+	commentZeroCount := 0
 	for _, comment := range additionalData.Comments {
+		// Filter out zero timestamps
+		if comment.CreatedAt.IsZero() || comment.CreatedAt.Year() < 2000 {
+			commentZeroCount++
+			d.logger.Warn("skipping comment with invalid timestamp",
+				"username", username,
+				"timestamp", comment.CreatedAt)
+			continue
+		}
 		// Comments don't have repository info directly
 		allTimestamps = append(allTimestamps, timestampEntry{
 			time:   comment.CreatedAt,

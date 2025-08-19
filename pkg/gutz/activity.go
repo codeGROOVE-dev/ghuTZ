@@ -157,6 +157,19 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			newestActivity = timestamp
 		}
 	}
+	
+	// If we have no valid timestamps, use the event dates as fallback
+	if oldestActivity.IsZero() && len(events) > 0 {
+		// Find oldest and newest from the raw events
+		for _, event := range events {
+			if oldestActivity.IsZero() || event.CreatedAt.Before(oldestActivity) {
+				oldestActivity = event.CreatedAt
+			}
+			if newestActivity.IsZero() || event.CreatedAt.After(newestActivity) {
+				newestActivity = event.CreatedAt
+			}
+		}
+	}
 
 	// Calculate total days covered
 	var totalDays int

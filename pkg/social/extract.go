@@ -26,16 +26,31 @@ func Extract(ctx context.Context, data map[string]string, logger *slog.Logger) [
 	var results []Content
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	
+	// SECURITY: Limit concurrent requests to prevent amplification attacks
+	const maxConcurrent = 3
+	const maxURLsToProcess = 10 // SECURITY: Cap total URLs to prevent abuse
+	semaphore := make(chan struct{}, maxConcurrent)
 
-	// Process each URL in parallel
+	// Process each URL with concurrency limit
+	urlCount := 0
 	for kind, urlStr := range data {
+		if urlCount >= maxURLsToProcess {
+			logger.Debug("reached maximum URL processing limit", "limit", maxURLsToProcess)
+			break
+		}
 		if urlStr == "" {
 			continue
 		}
-
+		
+		urlCount++
 		wg.Add(1)
 		go func(k, u string) {
 			defer wg.Done()
+			
+			// Acquire semaphore
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
 
 			var content *Content
 
