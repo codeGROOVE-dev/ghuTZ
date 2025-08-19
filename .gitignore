@@ -1,3 +1,8 @@
+bin/
+/gutz
+/gutz-server
+
 
 # added by lint-install
 out/
+
