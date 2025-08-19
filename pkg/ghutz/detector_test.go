@@ -41,6 +41,8 @@ func TestPolishNameDetection(t *testing.T) {
 
 // TestEveningActivityDetection tests the improved evening activity logic
 // for distinguishing US timezones, specifically dlorenc (EST) and IdlePhysicist (MST)
+//
+//nolint:gocognit // Complex test scenarios require detailed validation
 func TestEveningActivityDetection(t *testing.T) {
 	tests := []struct {
 		name                    string
@@ -237,6 +239,8 @@ func TestEveningActivityDetection(t *testing.T) {
 }
 
 // TestWorkScheduleCorrection tests the timezone correction based on work schedule patterns
+//
+//nolint:gocognit // Complex test scenarios require detailed validation
 func TestWorkScheduleCorrection(t *testing.T) {
 	t.Skip("Skipping work schedule correction test - needs updating for new UTC data handling")
 	tests := []struct {

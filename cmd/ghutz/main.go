@@ -254,6 +254,7 @@ func printTimezone(result *ghutz.Result) {
 // Removed - no longer needed since we use UTC throughout.
 
 func printWorkSchedule(result *ghutz.Result) {
+	//nolint:nestif // Complex output formatting requires conditional logic
 	if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
 		fmt.Printf("🏃 Active Time:   %s → %s (%s)",
 			formatHour(convertUTCToLocal(result.ActiveHoursLocal.Start, result.Timezone)),

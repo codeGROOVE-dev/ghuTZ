@@ -13,6 +13,15 @@ type GlobalLunchPattern struct {
 	DropPercent float64
 }
 
+// extendLunchDuration determines if lunch duration should be extended.
+func extendLunchDuration(duration float64, nextCount int) float64 {
+	if duration == 0.5 && nextCount == 0 {
+		// Extend to full hour since next slot is 0
+		return 1.0
+	}
+	return duration
+}
+
 // DetectLunchBreakNoonCentered looks for lunch breaks in the 10am-2:30pm window
 // SIMPLIFIED VERSION - just find ANY drop in activity.
 func DetectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int) (lunchStart, lunchEnd, confidence float64) {
@@ -21,6 +30,8 @@ func DetectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 
 // detectLunchBreakNoonCentered looks for lunch breaks in the 10am-2:30pm window
 // SIMPLIFIED VERSION - just find ANY drop in activity.
+//
+//nolint:gocognit,revive,maintidx // Lunch pattern detection requires comprehensive temporal analysis
 func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int) (lunchStart, lunchEnd, confidence float64) {
 	// Debug output disabled to reduce clutter
 	// Enable with --verbose flag if needed
@@ -231,10 +242,7 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 						lunchContinues = true
 						// Automatically extend duration when lunch clearly continues
 						// This fixes the josebiro case where 30min lunch should be 60min
-						if duration == 0.5 && nextCount == 0 {
-							// Extend to full hour since next slot is 0
-							actualDuration = 1.0
-						}
+						actualDuration = extendLunchDuration(duration, nextCount)
 					}
 				}
 

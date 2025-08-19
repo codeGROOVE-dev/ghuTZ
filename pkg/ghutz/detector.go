@@ -35,7 +35,7 @@ var (
 
 // UserContext holds all fetched data for a user to avoid redundant API calls.
 type UserContext struct {
-	User          *github.GitHubUser
+	User          *github.User
 	FromCache     map[string]bool
 	Username      string
 	ProfileHTML   string

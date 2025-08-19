@@ -93,6 +93,7 @@ DETECTION PRIORITIES (subject to above constraint):
 	  • If no evidence for Brazil or Argentina exists, assume UTC-3 users are actually in the United States
 	- You must make a guess. It's OK if your guess is incorrect, close is good enough.
 
-Response example: { "detected_timezone": "America/New_York", "detected_location": "New York, NY, USA", "confidence_level": "75%%", "detection_reasoning": "Strong evidence summary in 1-2 sentences." }
+Response example: { "detected_timezone": "America/New_York", "detected_location": "New York, NY, USA",
+  "confidence_level": "75%%", "detection_reasoning": "Strong evidence summary in 1-2 sentences." }
 `
 }

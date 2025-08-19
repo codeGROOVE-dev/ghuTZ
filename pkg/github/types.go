@@ -1,3 +1,4 @@
+//nolint:revive // GitHub API types require multiple public structs
 package github
 
 import (
@@ -5,10 +6,8 @@ import (
 	"time"
 )
 
-//nolint:revive // The name GitHubUser is intentional for clarity in API context
-
-// GitHubUser represents a GitHub user profile.
-type GitHubUser struct {
+// User represents a GitHub user profile.
+type User struct {
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	Email          string    `json:"email"`

@@ -336,6 +336,7 @@ func (c *CachedHTTPClient) Do(ctx context.Context, req *http.Request) (*http.Res
 	url := req.URL.String()
 
 	// Handle POST requests (like GraphQL) with request body as part of cache key
+	//nolint:nestif // POST request handling requires specific logic
 	if req.Method == http.MethodPost {
 		// Read the request body for cache key generation
 		var requestBody []byte

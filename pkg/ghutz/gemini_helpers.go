@@ -38,6 +38,8 @@ type repoContribution struct {
 // It organizes the evidence by signal strength: direct location signals,
 // activity-based timezone constraints, repository geography, recent activity,
 // work patterns, and website content for hobby detection.
+//
+//nolint:gocognit,revive,maintidx // Comprehensive evidence formatting requires detailed analysis
 func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	var sb strings.Builder
 
@@ -45,7 +47,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	sb.WriteString("=== PRIMARY LOCATION SIGNALS ===\n\n")
 
 	// User profile is the most direct signal.
-	if user, ok := contextData["user"].(*github.GitHubUser); ok && user != nil {
+	if user, ok := contextData["user"].(*github.User); ok && user != nil {
 		sb.WriteString("GitHub Profile:\n")
 		if user.Name != "" {
 			fmt.Fprintf(&sb, "- Name: %s\n", user.Name)

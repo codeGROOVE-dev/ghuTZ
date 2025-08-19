@@ -3,9 +3,11 @@ package gemini
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"math/rand/v2"
+	"math/big"
 	"os"
 	"strings"
 	"time"
@@ -177,7 +179,7 @@ func (c *Client) configureRequest(prompt string, logger Logger) (string, []*gena
 }
 
 // createResponseSchema creates the JSON schema for structured responses.
-func (c *Client) createResponseSchema() *genai.Schema {
+func (*Client) createResponseSchema() *genai.Schema {
 	return &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
@@ -191,8 +193,9 @@ func (c *Client) createResponseSchema() *genai.Schema {
 				Description: "Confidence level in the timezone detection: high (strong evidence), medium (reasonable evidence), low (weak evidence)",
 			},
 			"detected_location": {
-				Type:        genai.TypeString,
-				Description: "The detected location/region that supports the timezone conclusion (e.g., 'New York, United States', 'London, United Kingdom')",
+				Type: genai.TypeString,
+				Description: "The detected location/region that supports the timezone conclusion " +
+					"(e.g., 'New York, United States', 'London, United Kingdom')",
 			},
 			"detection_reasoning": {
 				Type:        genai.TypeString,
@@ -205,14 +208,16 @@ func (c *Client) createResponseSchema() *genai.Schema {
 }
 
 // makeAPICallWithRetry executes the API call with retry logic.
-func (c *Client) makeAPICallWithRetry(ctx context.Context, client *genai.Client, modelName string, contents []*genai.Content, config *genai.GenerateContentConfig, logger Logger) (*genai.GenerateContentResponse, error) {
+func (c *Client) makeAPICallWithRetry(ctx context.Context, client *genai.Client, modelName string,
+	contents []*genai.Content, config *genai.GenerateContentConfig, logger Logger,
+) (*genai.GenerateContentResponse, error) {
 	maxRetries := 3
 	baseDelay := 100 * time.Millisecond
 	jitter := 50 * time.Millisecond
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		resp, err := client.Models.GenerateContent(ctx, modelName, contents, config)
-		
+
 		if err == nil {
 			return resp, nil
 		}
@@ -227,24 +232,28 @@ func (c *Client) makeAPICallWithRetry(ctx context.Context, client *genai.Client,
 		}
 
 		delay := baseDelay * time.Duration(1<<uint(attempt))
-		jitterDelay := time.Duration(rand.Int64N(int64(jitter)))
+		jitterBig, err := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(jitter)))
+		if err != nil {
+			jitterBig = big.NewInt(0) // Fall back to no jitter on error
+		}
+		jitterDelay := time.Duration(jitterBig.Int64())
 		totalDelay := delay + jitterDelay
 
 		logger.Debug("Retrying Gemini API call", "attempt", attempt+1, "delay_ms", totalDelay.Milliseconds(), "error", err.Error())
 		time.Sleep(totalDelay)
 	}
 
-	return nil, fmt.Errorf("unexpected end of retry loop")
+	return nil, errors.New("unexpected end of retry loop")
 }
 
 // isTransientError determines if an error should trigger a retry.
-func (c *Client) isTransientError(err error) bool {
+func (*Client) isTransientError(err error) bool {
 	errStr := strings.ToLower(err.Error())
 	transientIndicators := []string{
 		"rate limit", "quota", "timeout", "deadline", "unavailable",
 		"internal server error", "502", "503", "504",
 	}
-	
+
 	for _, indicator := range transientIndicators {
 		if strings.Contains(errStr, indicator) {
 			return true
@@ -256,17 +265,17 @@ func (c *Client) isTransientError(err error) bool {
 // processResponseAndCache validates response, extracts content, and caches result.
 func (c *Client) processResponseAndCache(resp *genai.GenerateContentResponse, prompt string, cache CacheInterface, logger Logger) (*Response, error) {
 	if resp == nil || len(resp.Candidates) == 0 {
-		return nil, fmt.Errorf("empty response from Gemini API")
+		return nil, errors.New("empty response from Gemini API")
 	}
 
 	candidate := resp.Candidates[0]
 	if candidate.Content == nil || len(candidate.Content.Parts) == 0 {
-		return nil, fmt.Errorf("no content in Gemini response")
+		return nil, errors.New("no content in Gemini response")
 	}
 
 	text := candidate.Content.Parts[0].Text
 	if text == "" {
-		return nil, fmt.Errorf("empty text in Gemini response")
+		return nil, errors.New("empty text in Gemini response")
 	}
 
 	logger.Debug("Raw Gemini response", "response_text", text)
@@ -291,11 +300,11 @@ func (c *Client) processResponseAndCache(resp *genai.GenerateContentResponse, pr
 	// Validate the response has required fields
 	if geminiResp.DetectedTimezone == "" && geminiResp.Timezone == "" {
 		logger.Warn("Gemini response missing timezone field", "response", geminiResp)
-		return nil, fmt.Errorf("Gemini response missing timezone information")
+		return nil, errors.New("gemini response missing timezone information")
 	}
 
-	logger.Debug("Gemini response validated successfully", 
-		"timezone", geminiResp.DetectedTimezone, 
+	logger.Debug("Gemini response validated successfully",
+		"timezone", geminiResp.DetectedTimezone,
 		"location", geminiResp.DetectedLocation,
 		"confidence", geminiResp.ConfidenceLevel)
 
@@ -319,7 +328,7 @@ func (c *Client) processResponseAndCache(resp *genai.GenerateContentResponse, pr
 }
 
 // extractJSON extracts JSON content from a response that may contain explanatory text.
-func (c *Client) extractJSON(text string) (string, error) {
+func (*Client) extractJSON(text string) (string, error) {
 	// First try to parse as direct JSON
 	if isValidJSON(text) {
 		return text, nil
@@ -357,17 +366,17 @@ func (c *Client) extractJSON(text string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("no valid JSON found in response")
+	return "", errors.New("no valid JSON found in response")
 }
 
 // isValidJSON checks if a string is valid JSON by attempting to parse it.
 func isValidJSON(s string) bool {
-	var js map[string]interface{}
+	var js map[string]any
 	return json.Unmarshal([]byte(s), &js) == nil
 }
 
 // cleanResponse cleans up response data by removing newlines and extra spaces.
-func (c *Client) cleanResponse(resp *Response) {
+func (*Client) cleanResponse(resp *Response) {
 	resp.DetectedTimezone = strings.TrimSpace(strings.ReplaceAll(resp.DetectedTimezone, "\n", " "))
 	resp.DetectedLocation = strings.TrimSpace(strings.ReplaceAll(resp.DetectedLocation, "\n", " "))
 	resp.DetectionReasoning = strings.TrimSpace(strings.ReplaceAll(resp.DetectionReasoning, "\n", " "))

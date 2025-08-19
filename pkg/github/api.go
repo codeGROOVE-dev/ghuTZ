@@ -157,6 +157,7 @@ func (c *Client) FetchPullRequestsWithLimit(ctx context.Context, username string
 			c.logger.Debug("failed to fetch PR page", "page", page, "error", err)
 			break // Return what we have so far
 		}
+		//nolint:revive,gocritic // defer in loop is acceptable for proper resource cleanup
 		defer func() {
 			if err := resp.Body.Close(); err != nil {
 				c.logger.Debug("failed to close response body", "error", err)
@@ -256,6 +257,7 @@ func (c *Client) FetchIssuesWithLimit(ctx context.Context, username string, maxP
 			c.logger.Debug("failed to fetch issue page", "page", page, "error", err)
 			break // Return what we have so far
 		}
+		//nolint:revive,gocritic // defer in loop is acceptable for proper resource cleanup
 		defer func() {
 			if err := resp.Body.Close(); err != nil {
 				c.logger.Debug("failed to close response body", "error", err)
@@ -322,7 +324,7 @@ func (c *Client) FetchIssuesWithLimit(ctx context.Context, username string, maxP
 }
 
 // FetchUserWithGraphQL fetches user data including social accounts via GraphQL.
-func (c *Client) FetchUserWithGraphQL(ctx context.Context, username string) *GitHubUser {
+func (c *Client) FetchUserWithGraphQL(ctx context.Context, username string) *User {
 	c.logger.Debug("attempting GraphQL user fetch", "username", username)
 	query := fmt.Sprintf(`{
 		user(login: "%s") {
@@ -416,7 +418,7 @@ func (c *Client) FetchUserWithGraphQL(ctx context.Context, username string) *Git
 		return nil
 	}
 
-	user := &GitHubUser{
+	user := &User{
 		Login:         result.Data.User.Login,
 		Name:          result.Data.User.Name,
 		Location:      result.Data.User.Location,
@@ -669,7 +671,7 @@ func (c *Client) FetchOrganizations(ctx context.Context, username string) ([]Org
 }
 
 // FetchUser fetches comprehensive user data, trying GraphQL first then REST API.
-func (c *Client) FetchUser(ctx context.Context, username string) *GitHubUser {
+func (c *Client) FetchUser(ctx context.Context, username string) *User {
 	// First try to get enhanced data via GraphQL if we have a token
 	if c.githubToken != "" && c.isValidGitHubToken(c.githubToken) {
 		if user := c.FetchUserWithGraphQL(ctx, username); user != nil {
@@ -718,7 +720,7 @@ func (c *Client) FetchUser(ctx context.Context, username string) *GitHubUser {
 		}
 	}()
 
-	var user GitHubUser
+	var user User
 	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
 		c.logger.Debug("failed to decode user", "username", username, "error", err)
 		return nil

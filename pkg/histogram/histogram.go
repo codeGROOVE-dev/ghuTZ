@@ -101,12 +101,12 @@ func convertUTCToLocal(utcHour float64, timezone string) float64 {
 
 // histogramData holds the data needed to generate a histogram.
 type histogramData struct {
-	result       *Result
-	hourCounts   map[int]int
-	timezone     string
-	hasOrgData   bool
-	totalEvents  int
-	maxActivity  int
+	result      *Result
+	hourCounts  map[int]int
+	timezone    string
+	hasOrgData  bool
+	totalEvents int
+	maxActivity int
 }
 
 // GenerateHistogram creates a visual representation of user activity.

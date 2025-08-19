@@ -153,7 +153,7 @@ type Location struct {
 	Longitude float64 `json:"longitude"`
 }
 
-// Note: GitHub-related types (GitHubUser, PullRequest, Issue, Comment, Organization, Repository)
+// Note: GitHub-related types (User, PullRequest, Issue, Comment, Organization, Repository)
 // have been moved to the github package.
 
 // ActivityData holds all activity data for timezone detection.

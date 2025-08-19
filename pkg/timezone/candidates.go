@@ -16,7 +16,23 @@ type GlobalLunchPattern struct {
 	DropPercent float64
 }
 
+// calculateEasternLunchBonus calculates bonus points for Eastern timezone lunch patterns.
+func calculateEasternLunchBonus(dropRatio, lunchLocalStart float64) (bonus float64, adjustment string) {
+	// Strong early lunch signal
+	if dropRatio > 0.7 && lunchLocalStart >= 11.0 && lunchLocalStart <= 12.0 {
+		// 70%+ drop at 11:30am AND lunch detected in that range
+		return 8.0, fmt.Sprintf("+8 (Eastern 11:30am lunch %.1f%% drop)", dropRatio*100)
+	}
+	if dropRatio > 0.5 && lunchLocalStart >= 11.0 && lunchLocalStart <= 12.5 {
+		// 50%+ drop around 11:30am-12:30pm
+		return 5.0, fmt.Sprintf("+5 (Eastern lunch %.1f%% drop)", dropRatio*100)
+	}
+	return 0, ""
+}
+
 // EvaluateCandidates evaluates multiple timezone offsets to find the best candidates.
+//
+//nolint:gocognit,nestif,revive,maintidx // Timezone evaluation requires comprehensive multi-factor analysis
 func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts map[float64]int, totalActivity int, quietHours []int, midQuiet float64, activeStart int, bestGlobalLunch GlobalLunchPattern) []Candidate {
 	var candidates []Candidate // Store timezone candidates for Gemini
 
@@ -508,15 +524,10 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			if beforeCount, exists := halfHourCounts[beforeEarlyLunchBucket]; exists && beforeCount > 20 {
 				if lunchCount, exists := halfHourCounts[earlyLunchBucket]; exists {
 					dropRatio := float64(beforeCount-lunchCount) / float64(beforeCount)
-					// Strong early lunch signal
-					if dropRatio > 0.7 && lunchLocalStart >= 11.0 && lunchLocalStart <= 12.0 {
-						// 70%+ drop at 11:30am AND lunch detected in that range
-						easternBonus += 8.0 // Strong Eastern early lunch pattern
-						adjustments = append(adjustments, fmt.Sprintf("+8 (Eastern 11:30am lunch %.1f%% drop)", dropRatio*100))
-					} else if dropRatio > 0.5 && lunchLocalStart >= 11.0 && lunchLocalStart <= 12.5 {
-						// 50%+ drop around 11:30am-12:30pm
-						easternBonus += 5.0 // Moderate Eastern lunch pattern
-						adjustments = append(adjustments, fmt.Sprintf("+5 (Eastern lunch %.1f%% drop)", dropRatio*100))
+					easternLunchBonus, adjustment := calculateEasternLunchBonus(dropRatio, lunchLocalStart)
+					easternBonus += easternLunchBonus
+					if adjustment != "" {
+						adjustments = append(adjustments, adjustment)
 					}
 				}
 			}

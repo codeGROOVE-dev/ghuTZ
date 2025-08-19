@@ -98,7 +98,7 @@ type MastodonProfileData struct {
 }
 
 // extractSocialMediaURLs extracts social media profile URLs from GitHub user data.
-func extractSocialMediaURLs(user *github.GitHubUser) []string {
+func extractSocialMediaURLs(user *github.User) []string {
 	if user == nil {
 		return nil
 	}

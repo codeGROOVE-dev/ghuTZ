@@ -123,6 +123,8 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 }
 
 // tryUnifiedGeminiAnalysisWithContext attempts timezone detection using Gemini AI with UserContext.
+//
+//nolint:gocognit,nestif,revive,maintidx // Complex AI-based analysis requires comprehensive data processing
 func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, userCtx *UserContext, activityResult *Result) *Result {
 	if userCtx.User == nil {
 		d.logger.Debug("could not fetch user for Gemini analysis", "username", userCtx.Username)
@@ -246,7 +248,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	sort.Slice(sortedIssues, func(i, j int) bool {
 		return sortedIssues[i].CreatedAt.After(sortedIssues[j].CreatedAt) // Most recent first
 	})
-	
+
 	for i := range sortedIssues {
 		if sortedIssues[i].CreatedAt.After(cutoff) {
 			recentIssues = append(recentIssues, sortedIssues[i])
@@ -339,6 +341,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 			}
 		}
 	}
+	//nolint:nestif // Social media URL processing requires conditional logic
 	if len(socialURLs) > 0 {
 		contextData["social_media_urls"] = socialURLs
 

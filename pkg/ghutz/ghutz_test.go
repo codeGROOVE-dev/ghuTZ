@@ -111,7 +111,7 @@ func TestFetchGitHubUser(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// fetchGitHubUser is not exposed - skip this test
+	// fetchgithub.User is not exposed - skip this test
 	t.Skip("Skipping GitHub API test - internal method")
 }
 

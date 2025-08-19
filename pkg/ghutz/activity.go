@@ -34,6 +34,7 @@ func (d *Detector) tryActivityPatternsWithContext(ctx context.Context, userCtx *
 	return d.tryActivityPatternsWithEvents(ctx, userCtx.Username, userCtx.Events)
 }
 
+//nolint:gocognit,revive,maintidx // Complex timezone detection logic requires detailed analysis
 func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username string, events []github.PublicEvent) *Result {
 	// Collect all timestamps from various sources
 	allTimestamps, orgCounts := d.collectActivityTimestamps(ctx, username, events)
@@ -632,6 +633,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 
 	// Lunch timing confidence validation
 	// Use lunch patterns as an additional signal to validate timezone detection
+	//nolint:nestif // Lunch pattern validation requires conditional logic
 	if lunchConfidence > 0 {
 		lunchStartLocal := lunchStart
 		lunchEndLocal := lunchEnd
