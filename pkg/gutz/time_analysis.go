@@ -101,7 +101,7 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 		}
 	}
 	
-	if hasEarlyHours && hasLateHours && earlyScore > int(minEarlyThreshold) && maxEarlyHour >= 10 {
+	if hasEarlyHours && hasLateHours && earlyScore > minEarlyThreshold && maxEarlyHour >= 10 {
 		// Wraparound pattern: find the main work block and extend to include evening hours
 		var mainBlock []int
 		var earlyBlock []int

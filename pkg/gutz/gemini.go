@@ -776,7 +776,7 @@ func isValidEmail(email string) bool {
 	}
 	
 	parts := strings.Split(email, "@")
-	if len(parts) != 2 || len(parts[0]) == 0 || len(parts[1]) == 0 {
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return false
 	}
 	

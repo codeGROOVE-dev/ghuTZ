@@ -372,6 +372,16 @@ func runServer(detector *gutz.Detector, logger *slog.Logger) error {
 
 func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Check User-Agent for Precache bypass
+		userAgent := r.Header.Get("User-Agent")
+		if userAgent == "Precache" {
+			// Bypass rate limiting for precaching operations
+			// Log this for monitoring (could be used to track precache usage)
+			slog.Debug("Rate limit bypassed for Precache User-Agent", "path", r.URL.Path, "remote_addr", r.RemoteAddr)
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		// Get client IP - SECURITY: Only trust proxy headers in known proxy environments
 		clientIP := r.RemoteAddr
 
