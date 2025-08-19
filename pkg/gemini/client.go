@@ -22,11 +22,11 @@ type Response struct {
 	DetectionReasoning string `json:"detection_reasoning"`
 
 	// Fallback fields for old format (deprecated)
-	Timezone       string      `json:"timezone,omitempty"`
-	Location       string      `json:"location,omitempty"`
-	LocationSource string      `json:"location_source,omitempty"`
-	Confidence     interface{} `json:"confidence,omitempty"`
-	Reasoning      string      `json:"reasoning,omitempty"`
+	Timezone       string `json:"timezone,omitempty"`
+	Location       string `json:"location,omitempty"`
+	LocationSource string `json:"location_source,omitempty"`
+	Confidence     any    `json:"confidence,omitempty"`
+	Reasoning      string `json:"reasoning,omitempty"`
 }
 
 // Client represents a Gemini API client.

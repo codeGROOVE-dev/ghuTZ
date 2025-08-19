@@ -96,6 +96,9 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 				confidence = 0.6
 			case "low":
 				confidence = 0.3
+			default:
+				// Unknown confidence level, use medium as default
+				confidence = 0.6
 			}
 		}
 	}

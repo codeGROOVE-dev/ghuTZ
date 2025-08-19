@@ -229,6 +229,8 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				dipBonus = 3.0 // Good bonus for 60%+ drops
 			case lunchDipStrength >= 0.4:
 				dipBonus = 1.5 // Small bonus for 40%+ drops
+			default:
+				// No bonus for dip strength below 40%
 			}
 			if dipBonus > 0 {
 				adjustments = append(adjustments, fmt.Sprintf("+%.1f (lunch dip strength %.1f%%)", dipBonus, lunchDipStrength*100))
@@ -267,7 +269,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 				testConfidence += 2 // Acceptable but unusual
 				adjustments = append(adjustments, fmt.Sprintf("+2 (unusual work start %dam)", actualWorkStart))
 			default:
-				testConfidence += 1 // Work hours detected but very unusual
+				testConfidence++ // Work hours detected but very unusual
 				adjustments = append(adjustments, fmt.Sprintf("+1 (very unusual work start %dam)", actualWorkStart))
 			}
 		} else if firstActivityLocal < 24 {
@@ -348,7 +350,7 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 			// Bonus for peak activity during ideal work hours (10am-4pm = 10-16 local)
 			if peakLocalHour >= 10 && peakLocalHour <= 16 {
 				// Perfect timing: 5 points for peak during 1-3pm, 3 points for 12-2pm or 3-4pm
-				peakBonus := 3.0
+				var peakBonus float64
 				switch {
 				case peakLocalHour >= 13 && peakLocalHour <= 15:
 					// 1-3pm is ideal afternoon work time
@@ -617,17 +619,17 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 			}
 
 			// Check for evening activity (7-10pm) - common in South America
-			eveningActivity := 0
+			southAmericaEveningActivity := 0
 			for h := 22; h <= 24; h++ { // 7-9pm local
 				if h < 24 {
-					eveningActivity += hourCounts[h]
+					southAmericaEveningActivity += hourCounts[h]
 				}
 			}
-			eveningActivity += hourCounts[0] + hourCounts[1] // 9-11pm local
+			southAmericaEveningActivity += hourCounts[0] + hourCounts[1] // 9-11pm local
 
-			if eveningActivity > 40 {
+			if southAmericaEveningActivity > 40 {
 				southAmericaBonus += 2.0
-				adjustments = append(adjustments, fmt.Sprintf("+2 (South America evening activity %d events)", eveningActivity))
+				adjustments = append(adjustments, fmt.Sprintf("+2 (South America evening activity %d events)", southAmericaEveningActivity))
 			}
 
 			// Population center bonus - Brazil/Argentina are major tech hubs
@@ -743,6 +745,8 @@ func EvaluateTimezoneCandidates(username string, hourCounts map[int]int, halfHou
 		case -11, -12: // Pacific ocean (almost no land)
 			testConfidence -= 12 // Large penalty - almost no population
 			adjustments = append(adjustments, "-12 (Pacific ocean almost no land)")
+		default:
+			// No specific adjustment for other timezones
 		}
 
 		// Special bonus for UTC+10 when there are clear evening activity patterns

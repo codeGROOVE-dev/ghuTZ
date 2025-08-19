@@ -17,18 +17,21 @@ func WithGitHubToken(token string) Option {
 	}
 }
 
+// WithMapsAPIKey sets the Google Maps API key for geocoding services.
 func WithMapsAPIKey(key string) Option {
 	return func(o *OptionHolder) {
 		o.mapsAPIKey = key
 	}
 }
 
+// WithGeminiAPIKey sets the Gemini API key for AI-based timezone detection.
 func WithGeminiAPIKey(key string) Option {
 	return func(o *OptionHolder) {
 		o.geminiAPIKey = key
 	}
 }
 
+// WithGeminiModel sets the Gemini model to use for AI-based detection.
 func WithGeminiModel(model string) Option {
 	return func(o *OptionHolder) {
 		o.geminiModel = model

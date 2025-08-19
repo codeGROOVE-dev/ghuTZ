@@ -9,6 +9,11 @@ import (
 	"strings"
 )
 
+// contextKey is a custom type for context keys to avoid collisions.
+type contextKey string
+
+const cspNonceKey contextKey = "csp-nonce"
+
 // CSPConfig holds Content Security Policy configuration.
 type CSPConfig struct {
 	Mode               string
@@ -153,6 +158,7 @@ func CSPMiddleware(config *CSPConfig) func(http.HandlerFunc) http.HandlerFunc {
 			if err := config.GenerateNonce(); err != nil {
 				// Log error but continue - CSP will work without nonce
 				// In production, you'd want to log this properly
+				_ = err // Suppress unused variable warning
 			}
 
 			// Build and set the CSP header
@@ -162,7 +168,7 @@ func CSPMiddleware(config *CSPConfig) func(http.HandlerFunc) http.HandlerFunc {
 			// Pass the nonce to the handler via context if needed
 			// This allows templates to use the nonce for inline scripts
 			if config.Nonce != "" {
-				ctx := context.WithValue(r.Context(), "csp-nonce", config.Nonce)
+				ctx := context.WithValue(r.Context(), cspNonceKey, config.Nonce)
 				r = r.WithContext(ctx)
 			}
 
@@ -173,7 +179,7 @@ func CSPMiddleware(config *CSPConfig) func(http.HandlerFunc) http.HandlerFunc {
 
 // NonceFromContext extracts the CSP nonce from the request context.
 func NonceFromContext(ctx context.Context) string {
-	if nonce, ok := ctx.Value("csp-nonce").(string); ok {
+	if nonce, ok := ctx.Value(cspNonceKey).(string); ok {
 		return nonce
 	}
 	return ""

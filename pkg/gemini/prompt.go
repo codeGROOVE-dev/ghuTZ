@@ -21,7 +21,8 @@ DETECTION PRIORITIES (subject to above constraint):
    - Government/civic repos suggest location IF compatible with activity patterns
    - US state names/codes in repos = US location (but must match activity timezone)
    - 🇧🇷 CRITICAL: BVSP/Bovespa repositories = Brazilian Stock Exchange = STRONG Brazil signal (prefer over Argentina)
-   - If someone with a Russian name isn't contributing to Russian projects, chances are they are in another country in the same timezone, like Australia.
+   - If someone with a Russian name isn't contributing to Russian projects, chances are they are in another country 
+     in the same timezone, like Australia.
 
 2. NAME CLUES (ONLY to disambiguate between viable candidates):
    - Name etymology helps choose between similar timezones
@@ -37,7 +38,8 @@ DETECTION PRIORITIES (subject to above constraint):
 
 3. COMPANY CLUES (weak signal):
    - ⚠️ CAUTION: Don't assume employees work at company HQ - remote work is very common
-   - ⚠️ CRITICAL: If activity strongly suggests Eastern Time (UTC-4/5), don't default to Seattle/SF just because of tech company
+   - ⚠️ CRITICAL: If activity strongly suggests Eastern Time (UTC-4/5), don't default to Seattle/SF 
+     just because of tech company
    - Only use company location if it matches activity patterns
    - Being a Ukrainian company, GitLab employees are more likely to live in Ukraine than Russia
    - Company names may be GitHub org names, like "@gitlabhq" being a reference for GitLab
@@ -64,11 +66,15 @@ DETECTION PRIORITIES (subject to above constraint):
    - Country TLD domains (.ca, .fi, .de)
 
 6. Timezone Generation
-   - Trust in the confidence levels we provide, though they may be one timezone off in either direction.
-   - Return the most appropriate and specific tz database entry for this user. For example, use Europe/Warsaw if we think they are in Poland, and Europe/Berlin if we think they are in Germany.
+   - Trust in the confidence levels we provide, though they may be one timezone off in 
+     either direction.
+   - Return the most appropriate and specific tz database entry for this user. For example, use 
+     Europe/Warsaw if we think they are in Poland, and Europe/Berlin if we think they are in Germany.
    - For US Mountain timezone, use America/Denver (or America/Phoenix for Arizona)
-   - Look carefully at the activity period, as it may cross a daylight savings time boundary. Give the appropriate timezone for the current moment (now).
-   - If the timezone overlaps with the United States of America, and you don't see any clues that lean toward another country, default to the USA
+   - Look carefully at the activity period, as it may cross a daylight savings time boundary. 
+     Give the appropriate timezone for the current moment (now).
+   - If the timezone overlaps with the United States of America, and you don't see any clues that 
+     lean toward another country, default to the USA
 
 7. Location Generation
 	- Guess a specific city in the timezone that would be the most likely with all evidence given: maybe it's just the biggest tech hub, or maybe you saw clues in the repository names or indicated hobbies

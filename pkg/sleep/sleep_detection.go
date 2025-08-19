@@ -202,7 +202,7 @@ func FindSleepHours(hourCounts map[int]int) []int {
 		// Find the quietest consecutive 12-hour period
 		bestSum := totalActivity
 		bestStart := 0
-		for start := range len(quietHours) {
+		for start := range quietHours {
 			sum := 0
 			count := 0
 			for i := start; i < start+12 && i < len(quietHours); i++ {

@@ -61,7 +61,9 @@ func main() {
 		*githubToken = os.Getenv("GITHUB_TOKEN")
 		// If still empty, try to get from gh CLI
 		if *githubToken == "" {
-			if token, err := exec.Command("gh", "auth", "token").Output(); err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if token, err := exec.CommandContext(ctx, "gh", "auth", "token").Output(); err == nil {
 				*githubToken = strings.TrimSpace(string(token))
 			}
 		}
@@ -168,7 +170,7 @@ func main() {
 			if !foundCandidate {
 				// Not in our candidates - clear all markers as they would be misleading
 				fmt.Printf("\n🔧 Using forced offset %s for visualization\n", displayTimezone)
-				fmt.Printf("    (Note: No lunch/peak markers - offset not in analyzed candidates)\n")
+				fmt.Println("    (Note: No lunch/peak markers - offset not in analyzed candidates)")
 
 				modifiedResult := *result
 				modifiedResult.LunchHoursUTC = ghutz.LunchBreak{}  // Clear lunch markers
@@ -213,6 +215,8 @@ func printLocation(result *ghutz.Result) {
 		locationStr = result.LocationName
 	case result.Location != nil:
 		locationStr = fmt.Sprintf("%.3f, %.3f", result.Location.Latitude, result.Location.Longitude)
+	default:
+		// No location information available
 	}
 
 	if locationStr != "" {
@@ -262,7 +266,7 @@ func printWorkSchedule(result *ghutz.Result) {
 				formatHour(convertUTCToLocal(result.LunchHoursUTC.End, result.Timezone)),
 				result.Timezone)
 			if result.LunchHoursUTC.Confidence < 0.7 {
-				fmt.Printf(" (uncertain)")
+				fmt.Print(" (uncertain)")
 			}
 		}
 
@@ -481,8 +485,8 @@ func convertUTCToLocal(utcHour float64, timezone string) float64 {
 		// We use a reference date in the middle of the year to get consistent DST behavior
 		refDate := time.Date(2024, 8, 15, 0, 0, 0, 0, time.UTC)
 		hour := int(utcHour)
-		min := int((utcHour - float64(hour)) * 60)
-		utcTime := refDate.Add(time.Duration(hour)*time.Hour + time.Duration(min)*time.Minute)
+		minutes := int((utcHour - float64(hour)) * 60)
+		utcTime := refDate.Add(time.Duration(hour)*time.Hour + time.Duration(minutes)*time.Minute)
 		localTime := utcTime.In(loc)
 		return float64(localTime.Hour()) + float64(localTime.Minute())/60.0
 	}

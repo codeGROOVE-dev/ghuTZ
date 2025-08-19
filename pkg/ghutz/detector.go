@@ -27,11 +27,6 @@ import (
 
 // SECURITY: Compiled regex patterns for validation and extraction.
 var (
-	// GitHub token patterns for validation (compiled once for performance).
-	githubPATRegex         = regexp.MustCompile(`^ghp_[a-zA-Z0-9]{36}$`)
-	githubAppTokenRegex    = regexp.MustCompile(`^ghs_[a-zA-Z0-9]{36}$`)
-	githubFineGrainedRegex = regexp.MustCompile(`^github_pat_[a-zA-Z0-9_]{82}$`)
-
 	// Timezone extraction patterns.
 	timezoneDataAttrRegex = regexp.MustCompile(`data-timezone="([^"]+)"`)
 	timezoneJSONRegex     = regexp.MustCompile(`"timezone":"([^"]+)"`)
@@ -182,17 +177,6 @@ func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*htt
 	return resp, nil
 }
 
-// isValidGitHubToken validates GitHub token format for security.
-func (_ *Detector) isValidGitHubToken(token string) bool {
-	// SECURITY: Validate token format to prevent injection attacks
-	token = strings.TrimSpace(token)
-
-	// Check against known GitHub token patterns (compiled regex for performance)
-	return githubPATRegex.MatchString(token) ||
-		githubAppTokenRegex.MatchString(token) ||
-		githubFineGrainedRegex.MatchString(token)
-}
-
 // isValidGitHubUsername validates GitHub username format for security.
 func isValidGitHubUsername(username string) bool {
 	// SECURITY: Validate username to prevent injection attacks
@@ -302,6 +286,8 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 		case "America/Denver":
 			// Currently August, so MDT (-6) is active
 			possibleOffsets = []int{-6, -7}
+		default:
+			// For other timezones, stick with the calculated offset
 		}
 
 		// Look through all candidates for a matching offset

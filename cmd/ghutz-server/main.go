@@ -255,20 +255,26 @@ func main() {
 	ctx := context.Background()
 	detector := ghutz.NewWithLogger(ctx, logger, detectorOpts...)
 
-	runServer(detector, logger)
+	if err := runServer(detector, logger); err != nil {
+		logger.Error("Server error", "error", err)
+		os.Exit(1)
+	}
 }
 
-func runServer(detector *ghutz.Detector, logger *slog.Logger) {
+func runServer(detector *ghutz.Detector, logger *slog.Logger) error {
 	// Create ServeMux for routing
 	mux := http.NewServeMux()
 
 	// Register handlers with security middleware
-	mux.HandleFunc("POST /api/v1/detect", panicRecoveryMiddleware(logger, securityHeadersMiddleware(rateLimitMiddleware(handleAPIDetect(detector, logger)))))
+	mux.HandleFunc("POST /api/v1/detect",
+		panicRecoveryMiddleware(logger,
+			securityHeadersMiddleware(
+				rateLimitMiddleware(
+					handleAPIDetect(detector, logger)))))
 	// Static file server using embedded files
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
-		logger.Error("failed to create static file system", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to create static file system: %w", err)
 	}
 	fileServer := http.FileServer(http.FS(staticFS))
 	staticHandler := http.StripPrefix("/static/", fileServer)
@@ -283,6 +289,8 @@ func runServer(detector *ghutz.Detector, logger *slog.Logger) {
 			w.Header().Set("Content-Type", "image/png")
 		case strings.HasSuffix(r.URL.Path, ".jpg"), strings.HasSuffix(r.URL.Path, ".jpeg"):
 			w.Header().Set("Content-Type", "image/jpeg")
+		default:
+			// No special Content-Type needed for other files
 		}
 
 		// Additional security for static files
@@ -325,8 +333,7 @@ func runServer(detector *ghutz.Detector, logger *slog.Logger) {
 	select {
 	case err := <-serverErrors:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("Server error", "error", err)
-			os.Exit(1)
+			return fmt.Errorf("server error: %w", err)
 		}
 	case sig := <-shutdown:
 		logger.Info("Shutdown signal received", "signal", sig.String())
@@ -351,6 +358,7 @@ func runServer(detector *ghutz.Detector, logger *slog.Logger) {
 
 		logger.Info("Server shutdown complete")
 	}
+	return nil
 }
 
 func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {

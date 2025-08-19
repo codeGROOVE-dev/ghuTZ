@@ -27,7 +27,7 @@ func NewClient(logger *slog.Logger, httpClient *http.Client, githubToken string,
 }
 
 // isValidGitHubToken checks if a token looks valid (basic check).
-func (_ *Client) isValidGitHubToken(token string) bool {
+func (*Client) isValidGitHubToken(token string) bool {
 	// GitHub tokens have specific prefixes
 	// Classic: 40 chars hex
 	// Fine-grained: github_pat_ prefix
