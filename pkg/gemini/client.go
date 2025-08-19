@@ -16,18 +16,17 @@ import (
 )
 
 // Response represents the Gemini API response structure.
+//
+//nolint:govet // fieldalignment is a minor optimization, struct clarity is preferred
 type Response struct {
+	// Place larger alignment fields first (float64 = 8 bytes)
+	Latitude  float64 `json:"latitude"`  // GPS latitude coordinate
+	Longitude float64 `json:"longitude"` // GPS longitude coordinate
+	// Strings are pointers (8 bytes each on 64-bit), group them together
 	DetectedTimezone   string `json:"detected_timezone"`
 	DetectedLocation   string `json:"detected_location"`
 	ConfidenceLevel    string `json:"confidence_level"` // "high", "medium", or "low"
 	DetectionReasoning string `json:"detection_reasoning"`
-
-	// Fallback fields for old format (deprecated)
-	Timezone       string `json:"timezone,omitempty"`
-	Location       string `json:"location,omitempty"`
-	LocationSource string `json:"location_source,omitempty"`
-	Confidence     any    `json:"confidence,omitempty"`
-	Reasoning      string `json:"reasoning,omitempty"`
 }
 
 // Client represents a Gemini API client.
@@ -91,17 +90,13 @@ func (c *Client) checkCache(prompt string, cache CacheInterface, logger Logger) 
 		return nil
 	}
 
-	if result.DetectedTimezone == "" && result.Timezone == "" {
+	if result.DetectedTimezone == "" {
 		logger.Warn("Cached Gemini response is invalid/empty, fetching fresh")
 		return nil
 	}
 
 	// Validate the cached result has actual data
-	tz := result.DetectedTimezone
-	if tz == "" {
-		tz = result.Timezone
-	}
-	logger.Debug("Using cached Gemini response", "timezone", tz, "confidence", result.ConfidenceLevel)
+	logger.Debug("Using cached Gemini response", "timezone", result.DetectedTimezone, "confidence", result.ConfidenceLevel)
 	return &result
 }
 
@@ -197,13 +192,21 @@ func (*Client) createResponseSchema() *genai.Schema {
 				Description: "The detected location/region that supports the timezone conclusion " +
 					"(e.g., 'New York, United States', 'London, United Kingdom')",
 			},
+			"latitude": {
+				Type:        genai.TypeNumber,
+				Description: "The latitude coordinate of the most exact location guess you can determine (e.g., 40.7128 for New York). ",
+			},
+			"longitude": {
+				Type:        genai.TypeNumber,
+				Description: "The longitude coordinate of the most exact location guess you can determine.",
+			},
 			"detection_reasoning": {
 				Type:        genai.TypeString,
 				Description: "Explanation of the key evidence and reasoning that led to this timezone conclusion",
 			},
 		},
-		PropertyOrdering: []string{"detected_timezone", "confidence_level", "detected_location", "detection_reasoning"},
-		Required:         []string{"detected_timezone", "confidence_level", "detected_location", "detection_reasoning"},
+		PropertyOrdering: []string{"detected_timezone", "confidence_level", "detected_location", "latitude", "longitude", "detection_reasoning"},
+		Required:         []string{"detected_timezone", "confidence_level", "detected_location", "latitude", "longitude", "detection_reasoning"},
 	}
 }
 
@@ -297,8 +300,17 @@ func (c *Client) processResponseAndCache(resp *genai.GenerateContentResponse, pr
 
 	c.cleanResponse(&geminiResp)
 
+	// Log the parsed struct values for debugging
+	logger.Debug("Parsed Gemini response struct",
+		"detected_timezone", geminiResp.DetectedTimezone,
+		"detected_location", geminiResp.DetectedLocation,
+		"latitude", geminiResp.Latitude,
+		"longitude", geminiResp.Longitude,
+		"confidence_level", geminiResp.ConfidenceLevel,
+		"detection_reasoning", geminiResp.DetectionReasoning)
+
 	// Validate the response has required fields
-	if geminiResp.DetectedTimezone == "" && geminiResp.Timezone == "" {
+	if geminiResp.DetectedTimezone == "" {
 		logger.Warn("Gemini response missing timezone field", "response", geminiResp)
 		return nil, errors.New("gemini response missing timezone information")
 	}
@@ -315,11 +327,7 @@ func (c *Client) processResponseAndCache(resp *genai.GenerateContentResponse, pr
 			if err := cache.SetAPICall(cacheKey, []byte(prompt), respData); err != nil {
 				logger.Debug("Failed to cache Gemini response", "error", err)
 			} else {
-				tz := geminiResp.DetectedTimezone
-				if tz == "" {
-					tz = geminiResp.Timezone
-				}
-				logger.Debug("Cached Gemini response", "timezone", tz)
+				logger.Debug("Cached Gemini response", "timezone", geminiResp.DetectedTimezone)
 			}
 		}
 	}

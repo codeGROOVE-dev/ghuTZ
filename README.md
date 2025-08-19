@@ -95,7 +95,7 @@ fmt.Printf("%s probably lives in %s (confidence: %.0f%%)\n",
 
 - **Accuracy:** Frighteningly good! Our ML-powered multi-source approach nails it 85%+ of the time
 - **Privacy:** We only use public GitHub data + social media links (but yeah, still kinda creepy)
-- **Caching:** Results cached for 20 days with HTTP caching for API calls (people don't move *that* often)
+- **Caching:** Results cached for 30 days with HTTP caching for API calls (people don't move *that* often)
 - **Speed:** 2-5 seconds per detection (detective work takes time, but we're getting faster)
 - **Data Sources:** GitHub API, GraphQL, Google Maps, Gemini AI, social platforms, and good old web scraping
 - **Confidence Scoring:** Every detection includes confidence metrics based on signal strength

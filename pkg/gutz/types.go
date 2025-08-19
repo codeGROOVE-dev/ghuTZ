@@ -125,27 +125,27 @@ type Result struct {
 	HourlyOrganizationActivity map[int]map[string]int `json:"hourly_organization_activity,omitempty"`
 	HourlyActivityUTC          map[int]int            `json:"hourly_activity_utc"`
 	HalfHourlyActivityUTC      map[float64]int        `json:"-"`
-	ActivityTimezone           string                 `json:"activity_timezone,omitempty"`
+	Method                     string                 `json:"method"`
 	LocationName               string                 `json:"location_name,omitempty"`
 	GeminiSuggestedLocation    string                 `json:"gemini_suggested_location,omitempty"`
 	Name                       string                 `json:"name,omitempty"`
 	Timezone                   string                 `json:"timezone"`
 	GeminiReasoning            string                 `json:"gemini_reasoning,omitempty"`
 	Username                   string                 `json:"username"`
-	Method                     string                 `json:"method"`
+	ActivityTimezone           string                 `json:"activity_timezone,omitempty"`
 	GeminiPrompt               string                 `json:"gemini_prompt,omitempty"`
 	ActivityDateRange          DateRange              `json:"activity_date_range,omitempty"`
-	TopOrganizations           []OrgActivity          `json:"top_organizations"`
 	SleepHoursUTC              []int                  `json:"sleep_hours_utc,omitempty"`
+	TopOrganizations           []OrgActivity          `json:"top_organizations"`
 	SleepBucketsUTC            []float64              `json:"sleep_buckets_utc,omitempty"`
 	TimezoneCandidates         []timezone.Candidate   `json:"timezone_candidates,omitempty"`
+	DataSources                []string               `json:"data_sources,omitempty"`
 	LunchHoursUTC              LunchBreak             `json:"lunch_hours_utc,omitempty"`
 	PeakProductivity           PeakTime               `json:"peak_productivity"`
 	ActiveHoursLocal           ActiveHours            `json:"active_hours_local,omitempty"`
 	LocationConfidence         float64                `json:"location_confidence,omitempty"`
 	TimezoneConfidence         float64                `json:"timezone_confidence,omitempty"`
 	Confidence                 float64                `json:"confidence"`
-	DataSources                []string               `json:"data_sources,omitempty"`
 }
 
 // Location represents geographic coordinates.

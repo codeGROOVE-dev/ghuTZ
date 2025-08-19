@@ -15,12 +15,18 @@ import (
 )
 
 // geminiQueryResult holds the result from a Gemini API query.
+//
+//nolint:govet // fieldalignment is a minor optimization, struct clarity is preferred
 type geminiQueryResult struct {
-	Timezone   string
-	Reasoning  string
-	Location   string
-	Prompt     string
+	// Place float64 first for alignment (8 bytes)
 	Confidence float64
+	// Place pointer next (8 bytes on 64-bit)
+	Response *gemini.Response // Full response from Gemini including GPS coords
+	// Strings are pointers (8 bytes each), group together
+	Timezone  string
+	Reasoning string
+	Location  string
+	Prompt    string
 }
 
 // queryUnifiedGeminiForTimezone queries Gemini AI for timezone detection.
@@ -47,56 +53,22 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 		return nil, fmt.Errorf("gemini API call failed: %w", err)
 	}
 
-	// Handle both new and old response formats
+	// Extract response fields
 	timezone := resp.DetectedTimezone
-	if timezone == "" {
-		timezone = resp.Timezone // Fallback to old field
-	}
-
 	location := resp.DetectedLocation
-	if location == "" {
-		location = resp.LocationSource // Fallback to old field
-		if location == "" {
-			location = resp.Location // Another fallback
-		}
-	}
-
 	reasoning := resp.DetectionReasoning
-	if reasoning == "" {
-		reasoning = resp.Reasoning // Fallback to old field
-	}
 
-	// Parse confidence from string or number
-	confidence := 0.5
-	if resp.ConfidenceLevel != "" {
-		switch strings.ToLower(resp.ConfidenceLevel) {
-		case "high":
-			confidence = 0.85
-		case "medium":
-			confidence = 0.6
-		case "low":
-			confidence = 0.3
-		default:
-			confidence = 0.5
-		}
-	} else if resp.Confidence != nil {
-		// Handle old format with numeric confidence
-		switch v := resp.Confidence.(type) {
-		case float64:
-			confidence = v
-		case string:
-			switch strings.ToLower(v) {
-			case "high":
-				confidence = 0.85
-			case "medium":
-				confidence = 0.6
-			case "low":
-				confidence = 0.3
-			default:
-				// Unknown confidence level, use medium as default
-				confidence = 0.6
-			}
-		}
+	// Parse confidence from string
+	var confidence float64
+	switch strings.ToLower(resp.ConfidenceLevel) {
+	case "high":
+		confidence = 0.85
+	case "medium":
+		confidence = 0.6
+	case "low":
+		confidence = 0.3
+	default:
+		confidence = 0.5
 	}
 
 	// Verbose response display removed - now handled in main CLI
@@ -119,6 +91,7 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 		Confidence: confidence,
 		Location:   location,
 		Prompt:     prompt,
+		Response:   resp,
 	}, nil
 }
 
@@ -518,12 +491,30 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		DataSources:             dataSources,
 	}
 
+	// Use location in priority order:
+	// 1. User's profile location (if available and geocodable)
+	// 2. Gemini GPS coordinates (if valid)
+	// 3. Gemini location string via geocoding API
+	//nolint:gocritic // if-else chain is appropriate here for priority-based location selection
 	if detectedLocation != nil {
 		result.Location = detectedLocation
+	} else if geminiResult.Response != nil && geminiResult.Response.Latitude != 0 && geminiResult.Response.Longitude != 0 {
+		// Use GPS coordinates directly from Gemini, skipping geocoding API
+		result.Location = &Location{
+			Latitude:  geminiResult.Response.Latitude,
+			Longitude: geminiResult.Response.Longitude,
+		}
+		result.LocationName = geminiResult.Response.DetectedLocation
+		d.logger.Debug("Using GPS coordinates from Gemini",
+			"lat", geminiResult.Response.Latitude,
+			"lng", geminiResult.Response.Longitude,
+			"location", geminiResult.Response.DetectedLocation)
 	} else if geminiResult.Location != "" && geminiResult.Location != "unknown" {
+		// Fall back to geocoding API if no GPS coordinates
 		if coords, err := d.geocodeLocation(ctx, geminiResult.Location); err == nil {
 			result.Location = coords
 			result.LocationName = geminiResult.Location
+			d.logger.Debug("Used geocoding API for location", "location", geminiResult.Location)
 		}
 	}
 

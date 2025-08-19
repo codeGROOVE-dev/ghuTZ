@@ -23,10 +23,10 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 
 	// Second pass: find continuous periods, allowing bridging of small gaps
 	periods := findContinuousPeriodsWithBridging(quietBuckets, halfHourCounts)
-	
+
 	// Third pass: adjust boundaries to avoid activity
 	adjustedPeriods := applyActivityBuffers(periods, halfHourCounts)
-	
+
 	return convertPeriodsToSleepBuckets(adjustedPeriods)
 }
 
@@ -35,7 +35,7 @@ func findQuietBuckets(halfHourCounts map[float64]int) []float64 {
 	var quietBuckets []float64
 	for bucket := 0.0; bucket < 24.0; bucket += 0.5 {
 		count, exists := halfHourCounts[bucket]
-		// Include buckets with 0-1 events as "quiet" 
+		// Include buckets with 0-1 events as "quiet"
 		// We'll handle minor blips (2 events) separately in period detection
 		if !exists || count <= 1 {
 			quietBuckets = append(quietBuckets, bucket)
@@ -56,67 +56,7 @@ func findContinuousPeriodsWithBridging(quietBuckets []float64, halfHourCounts ma
 
 	for i := 1; i < len(quietBuckets); i++ {
 		bucket := quietBuckets[i]
-		
-		if isConsecutiveBucket(currentPeriod.end, bucket) {
-			// Directly consecutive
-			currentPeriod.end = bucket
-			currentPeriod.length++
-		} else {
-			// Check if we can bridge a gap
-			gapStart := currentPeriod.end + 0.5
-			if gapStart >= 24.0 {
-				gapStart -= 24.0
-			}
-			
-			canBridge := true
-			gapSize := 0
-			
-			// Calculate actual gap size considering wraparound
-			var actualGap float64
-			if bucket > currentPeriod.end {
-				actualGap = bucket - currentPeriod.end - 0.5
-			} else {
-				// Wraparound case
-				actualGap = (24.0 - currentPeriod.end) + bucket - 0.5
-			}
-			
-			// Only try to bridge if gap is reasonable (up to 1 hour = 2 buckets)
-			if actualGap > 0 && actualGap <= 1.0 {
-				// Check all buckets in the gap
-				for gb := gapStart; float64(gapSize)*0.5 < actualGap; gb += 0.5 {
-					if gb >= 24.0 {
-						gb -= 24.0
-					}
-					count := halfHourCounts[gb]
-					// Allow bridging if gap has ≤2 events per bucket
-					if count > 2 {
-						canBridge = false
-						break
-					}
-					gapSize++
-				}
-				
-				// Bridge if conditions are met and we have substantial sleep already
-				if canBridge && currentPeriod.length >= 4 {
-					currentPeriod.end = bucket
-					currentPeriod.length += gapSize + 1
-				} else {
-					// Save current period if long enough
-					if currentPeriod.length >= 6 { // At least 3 hours
-						periods = append(periods, currentPeriod)
-					}
-					// Start new period
-					currentPeriod = quietPeriod{start: bucket, end: bucket, length: 1}
-				}
-			} else {
-				// Gap is too large, save current period if long enough
-				if currentPeriod.length >= 6 { // At least 3 hours
-					periods = append(periods, currentPeriod)
-				}
-				// Start new period
-				currentPeriod = quietPeriod{start: bucket, end: bucket, length: 1}
-			}
-		}
+		currentPeriod = processBucket(currentPeriod, bucket, halfHourCounts, &periods)
 	}
 
 	// Add the last period (even if short, will be filtered later)
@@ -130,6 +70,81 @@ func findContinuousPeriodsWithBridging(quietBuckets []float64, halfHourCounts ma
 // isConsecutiveBucket checks if two buckets are consecutive, including wraparound.
 func isConsecutiveBucket(current, next float64) bool {
 	return next == current+0.5 || (current == 23.5 && next == 0.0)
+}
+
+// processBucket processes a single bucket and determines whether to extend current period or start new one.
+func processBucket(currentPeriod quietPeriod, bucket float64, halfHourCounts map[float64]int, periods *[]quietPeriod) quietPeriod {
+	if isConsecutiveBucket(currentPeriod.end, bucket) {
+		// Directly consecutive
+		currentPeriod.end = bucket
+		currentPeriod.length++
+		return currentPeriod
+	}
+
+	// Try to bridge gap
+	if canBridgeGap := tryBridgeGap(currentPeriod, bucket, halfHourCounts); canBridgeGap.shouldBridge {
+		currentPeriod.end = bucket
+		currentPeriod.length += canBridgeGap.gapSize + 1
+		return currentPeriod
+	}
+
+	// Save current period if long enough and start new one
+	return startNewPeriod(currentPeriod, bucket, periods)
+}
+
+type bridgeResult struct {
+	shouldBridge bool
+	gapSize      int
+}
+
+// tryBridgeGap determines if a gap between periods can be bridged.
+func tryBridgeGap(currentPeriod quietPeriod, bucket float64, halfHourCounts map[float64]int) bridgeResult {
+	gapStart := currentPeriod.end + 0.5
+	if gapStart >= 24.0 {
+		gapStart -= 24.0
+	}
+
+	// Calculate actual gap size considering wraparound
+	var actualGap float64
+	if bucket > currentPeriod.end {
+		actualGap = bucket - currentPeriod.end - 0.5
+	} else {
+		// Wraparound case
+		actualGap = (24.0 - currentPeriod.end) + bucket - 0.5
+	}
+
+	// Only try to bridge if gap is reasonable (up to 1 hour = 2 buckets)
+	if actualGap <= 0 || actualGap > 1.0 {
+		return bridgeResult{shouldBridge: false}
+	}
+
+	// Check all buckets in the gap
+	gapSize := 0
+	for gb := gapStart; float64(gapSize)*0.5 < actualGap; gb += 0.5 {
+		if gb >= 24.0 {
+			gb -= 24.0
+		}
+		count := halfHourCounts[gb]
+		// Allow bridging if gap has ≤2 events per bucket
+		if count > 2 {
+			return bridgeResult{shouldBridge: false}
+		}
+		gapSize++
+	}
+
+	// Bridge if conditions are met and we have substantial sleep already
+	shouldBridge := currentPeriod.length >= 4
+	return bridgeResult{shouldBridge: shouldBridge, gapSize: gapSize}
+}
+
+// startNewPeriod saves current period if long enough and starts a new period.
+func startNewPeriod(currentPeriod quietPeriod, bucket float64, periods *[]quietPeriod) quietPeriod {
+	// Save current period if long enough
+	if currentPeriod.length >= 6 { // At least 3 hours
+		*periods = append(*periods, currentPeriod)
+	}
+	// Start new period
+	return quietPeriod{start: bucket, end: bucket, length: 1}
 }
 
 // mergeWraparoundPeriods merges periods that connect across midnight.
@@ -211,7 +226,7 @@ func adjustPeriodStart(period quietPeriod, halfHourCounts map[float64]int) quiet
 func adjustPeriodEnd(period quietPeriod, halfHourCounts map[float64]int) quietPeriod {
 	// Trim back if we're approaching sustained activity
 	// Look for the start of the "wake up" period where activity doesn't drop back to 0
-	
+
 	for period.length >= 4 {
 		nextBucket := period.end + 0.5
 		if nextBucket >= 24 {
@@ -224,21 +239,20 @@ func adjustPeriodEnd(period quietPeriod, halfHourCounts map[float64]int) quietPe
 
 		nextCount := halfHourCounts[nextBucket]
 		nextNextCount := halfHourCounts[nextNextBucket]
-		
+
 		// If we see sustained activity (both buckets have events), trim back
-		// This catches the pattern at 7:00 (2 events) followed by 7:30 (1 event) 
+		// This catches the pattern at 7:00 (2 events) followed by 7:30 (1 event)
 		// which leads into the day's activity
-		if nextCount > 0 && nextNextCount > 0 {
-			period.end -= 0.5
-			if period.end < 0 {
-				period.end += 24
-			}
-			period.length--
-		} else {
+		if nextCount <= 0 || nextNextCount <= 0 {
 			break
 		}
+		period.end -= 0.5
+		if period.end < 0 {
+			period.end += 24
+		}
+		period.length--
 	}
-	
+
 	return period
 }
 
@@ -249,7 +263,7 @@ func convertPeriodsToSleepBuckets(periods []quietPeriod) []float64 {
 		// Cap at 9 hours (18 half-hour buckets)
 		maxBuckets := 18
 		bucketCount := period.length
-		
+
 		// If period is too long, trim from the start (keep the morning end)
 		// People are more likely to check GitHub first thing in the morning
 		adjustedStart := period.start
@@ -261,7 +275,7 @@ func convertPeriodsToSleepBuckets(periods []quietPeriod) []float64 {
 				adjustedStart -= 24.0
 			}
 		}
-		
+
 		if adjustedStart <= period.end {
 			// Normal case
 			count := 0

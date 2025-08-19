@@ -9,9 +9,8 @@ EVIDENCE:
 
 🔴 MANDATORY CONSTRAINT - THIS OVERRIDES ALL OTHER SIGNALS:
 If activity_timezone candidates are provided (e.g., "Top 5 candidates: UTC+12, UTC+9, UTC+11, UTC+10, UTC+8"):
-- You MUST select a timezone within ±2 hours of one of the top 5 candidates
+- You MUST select a timezone within ±1 hours of one of the top 5 candidates
 - The TOP CANDIDATE has the highest confidence based on evening activity, lunch timing, and sleep patterns
-- If candidate #1 has 42% confidence and is UTC-4, DO NOT pick UTC-7 unless you have OVERWHELMING evidence
 - Activity patterns represent ACTUAL behavior and cannot be ignored
 - Name etymology, company location, and other signals can only influence WHICH candidate to pick, not override them entirely
 - Example: If candidates are UTC+10/+11/+12, you CANNOT pick Europe/Moscow (UTC+3) even for a Russian name
@@ -29,7 +28,7 @@ DETECTION PRIORITIES (subject to above constraint):
 
 2. NAME CLUES (ONLY to disambiguate between viable candidates):
    - Name etymology helps choose between similar timezones
-   - Polish names (-ski, -wicz) + EU timezone activity = Poland (Warsaw)
+   - Polish names + EU timezone activity = Poland (Warsaw)
    - Chinese names + Asian timezone activity = China (Beijing, Shanghai)
    - Russian names + Pacific activity (UTC+10/+11) = Vladivostok/Far East Russia, NOT Moscow
    - Belgian/Flemish names + UTC+0/+1 activity = Belgium
@@ -74,8 +73,7 @@ DETECTION PRIORITIES (subject to above constraint):
    - Country TLD domains (.ca, .fi, .de, .mx, .br, .ar)
 
 6. Timezone Generation
-   - Trust in the confidence levels we provide, though they may be one timezone off in
-     either direction.
+   - Trust in the confidence levels we provide
    - Return the most appropriate and specific tz database entry for this user. For example, use
      Europe/Warsaw if we think they are in Poland, and Europe/Berlin if we think they are in Germany.
    - For US Mountain timezone, use America/Denver (or America/Phoenix for Arizona)
@@ -84,7 +82,7 @@ DETECTION PRIORITIES (subject to above constraint):
    - If the timezone overlaps with the United States of America, and you don't see any clues that
      lean toward another country, default to the USA
 
-7. Location Generation
+7. Location & GPS Coordinate Generation
 	- Guess a specific city in the timezone that would be the most likely with all evidence given:
 	  maybe it's just the biggest tech hub, or maybe you saw clues in the repository names or indicated hobbies
 	- 🚨 For UTC-6 disambiguation: Check for Mexico indicators FIRST:
@@ -97,6 +95,11 @@ DETECTION PRIORITIES (subject to above constraint):
 	  • German surname + UTC-3 = Often Southern Brazil (Florianópolis, Porto Alegre, Curitiba)
 	  • If no evidence for Brazil or Argentina exists, assume UTC-3 users are actually in the United States
 	- You must make a guess. It's OK if your guess is incorrect, close is good enough.
+	- 📍 ALWAYS provide exact GPS coordinates for your detected location:
+	  • If uncertain, use the largest city in the detected timezone/region
+	  • NEVER return 0,0 - always make your best guess based on available evidence
+	- If you have private knowledge of what town someone lives in that we did not provide,
+	  feel free to use that information if it's a good match with the evidence.
 
 Response example: { "detected_timezone": "America/New_York", "detected_location": "New York, NY, USA",
   "confidence_level": "75%%", "detection_reasoning": "Strong evidence summary in 1-2 sentences." }

@@ -87,7 +87,7 @@ func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *De
 
 	if cacheDir != "" {
 		var err error
-		cache, err = httpcache.NewOtterCache(ctx, cacheDir, 20*24*time.Hour, logger)
+		cache, err = httpcache.NewOtterCache(ctx, cacheDir, 30*24*time.Hour, logger)
 		if err != nil {
 			logger.Warn("cache initialization failed", "error", err, "cache_dir", cacheDir)
 			// Cache is optional, continue without it
