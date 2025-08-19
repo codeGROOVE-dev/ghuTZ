@@ -9,6 +9,25 @@ import (
 	"github.com/codeGROOVE-dev/ghuTZ/pkg/timezone"
 )
 
+// Constants for data limits and thresholds.
+const (
+	maxUserRepos         = 20
+	maxStarredRepos      = 15
+	maxExternalContribs  = 15
+	maxRecentPRs         = 10
+	maxRecentIssues      = 10
+	maxRecentCommits     = 10
+	maxTextSamples       = 8
+	maxLocationIndicators = 5
+	maxTopCandidates     = 5
+	maxDetailedCandidates = 3
+	commitMessageMaxLen  = 100
+	websiteContentMaxLen = 4000
+	mastodonContentMaxLen = 3000
+	workStartEarliest    = 5
+	workStartLatest      = 10
+)
+
 // repoContribution tracks contributions to a repository.
 type repoContribution struct {
 	Name  string
@@ -125,7 +144,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		// Summary line shows all viable candidates.
 		sb.WriteString("Top 5 candidates: ")
 		for i, candidate := range candidates {
-			if i >= 5 {
+			if i >= maxTopCandidates {
 				break
 			}
 			if i > 0 {
@@ -137,7 +156,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 
 		// Show detailed signals for top 3 candidates.
 		for i, candidate := range candidates {
-			if i >= 3 {
+			if i >= maxDetailedCandidates {
 				break
 			}
 			sb.WriteString(fmt.Sprintf("%d. UTC%+.1f (%.0f%% confidence)\n",
@@ -145,7 +164,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 
 			// Format key signals compactly.
 			signals := []string{}
-			if candidate.WorkStartLocal >= 5 && candidate.WorkStartLocal <= 10 {
+			if candidate.WorkStartLocal >= workStartEarliest && candidate.WorkStartLocal <= workStartLatest {
 				signals = append(signals, fmt.Sprintf("work %dam", candidate.WorkStartLocal))
 			}
 			if candidate.LunchReasonable && candidate.LunchLocalTime > 0 {
@@ -197,7 +216,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		sb.WriteString("User's repositories:\n")
 		count := 0
 		for i := range repos {
-			if !repos[i].Fork && count < 20 { // Show up to 20 non-fork repos.
+			if !repos[i].Fork && count < maxUserRepos { // Show up to 20 non-fork repos.
 				if repos[i].Description != "" {
 					sb.WriteString(fmt.Sprintf("- %s: %s\n", repos[i].Name, repos[i].Description))
 				} else {
@@ -213,7 +232,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	if starredRepos, ok := contextData["starred_repositories"].([]github.Repository); ok && len(starredRepos) > 0 {
 		sb.WriteString("Starred repositories (interests/location clues):\n")
 		for i := range starredRepos {
-			if i >= 15 { // Limit to 15 starred repos.
+			if i >= maxStarredRepos { // Limit to 15 starred repos.
 				break
 			}
 			if starredRepos[i].Description != "" {
@@ -300,7 +319,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		sort.Strings(repoNames)
 		count := 0
 		for _, name := range repoNames {
-			if count >= 5 { // Limit to 5 location indicators.
+			if count >= maxLocationIndicators { // Limit to 5 location indicators.
 				break
 			}
 			sb.WriteString(fmt.Sprintf("- %s → %s\n", name, locationRepos[name]))
@@ -322,7 +341,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	if contribs, ok := contextData["contributed_repositories"].([]repoContribution); ok && len(contribs) > 0 {
 		sb.WriteString("External contributions (repos not owned by user):\n")
 		for i, contrib := range contribs {
-			if i >= 15 { // Show up to 15 external contributions.
+			if i >= maxExternalContribs { // Show up to 15 external contributions.
 				break
 			}
 			sb.WriteString(fmt.Sprintf("- %s (%d contributions)\n", contrib.Name, contrib.Count))
@@ -337,7 +356,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	if prs, ok := contextData["pull_requests"].([]github.PullRequest); ok && len(prs) > 0 {
 		sb.WriteString("Recent Pull Requests:\n")
 		for i := range prs {
-			if i >= 10 {
+			if i >= maxRecentPRs {
 				break
 			}
 			sb.WriteString(fmt.Sprintf("- %s\n", prs[i].Title))
@@ -349,7 +368,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	if issues, ok := contextData["issues"].([]github.Issue); ok && len(issues) > 0 {
 		sb.WriteString("Recent Issues:\n")
 		for i := range issues {
-			if i >= 10 {
+			if i >= maxRecentIssues {
 				break
 			}
 			sb.WriteString(fmt.Sprintf("- %s\n", issues[i].Title))
@@ -361,12 +380,12 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	if commitSamples, ok := contextData["commit_message_samples"].([]CommitMessageSample); ok && len(commitSamples) > 0 {
 		sb.WriteString("Recent Commit Messages:\n")
 		for i, sample := range commitSamples {
-			if i >= 10 {
+			if i >= maxRecentCommits {
 				break
 			}
 			msg := sample.Message
-			if len(msg) > 100 {
-				msg = msg[:100] + "..."
+			if len(msg) > commitMessageMaxLen {
+				msg = msg[:commitMessageMaxLen] + "..."
 			}
 			sb.WriteString(fmt.Sprintf("- %s\n", msg))
 		}
@@ -377,7 +396,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	if textSamples, ok := contextData["text_samples"].([]string); ok && len(textSamples) > 0 {
 		sb.WriteString("Text samples from PRs/issues/comments:\n")
 		for i, sample := range textSamples {
-			if i >= 8 {
+			if i >= maxTextSamples {
 				break
 			}
 			sb.WriteString(fmt.Sprintf("- %s\n", sample))
@@ -440,8 +459,8 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	if websiteContent, ok := contextData["website_content"].(string); ok && websiteContent != "" {
 		sb.WriteString("=== WEBSITE CONTENT ===\n\n")
 		contentPreview := websiteContent
-		if len(contentPreview) > 4000 {
-			contentPreview = contentPreview[:4000] + "...\n[TRUNCATED]"
+		if len(contentPreview) > websiteContentMaxLen {
+			contentPreview = contentPreview[:websiteContentMaxLen] + "...\n[TRUNCATED]"
 		}
 		sb.WriteString(contentPreview)
 		sb.WriteString("\n\n")
@@ -452,8 +471,8 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		for website, content := range websiteContents {
 			sb.WriteString(fmt.Sprintf("Content from %s:\n", website))
 			contentPreview := content
-			if len(contentPreview) > 3000 {
-				contentPreview = contentPreview[:3000] + "...\n[TRUNCATED]"
+			if len(contentPreview) > mastodonContentMaxLen {
+				contentPreview = contentPreview[:mastodonContentMaxLen] + "...\n[TRUNCATED]"
 			}
 			sb.WriteString(contentPreview)
 			sb.WriteString("\n\n")
