@@ -96,7 +96,7 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 				totalEvents += count
 			}
 
-			minActivityThreshold := 20
+			var minActivityThreshold int
 			switch {
 			case totalEvents < 50:
 				// VERY sparse data (like josebiro with 37 events)
@@ -114,6 +114,9 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 				minActivityThreshold = 10 // Lower threshold for sparse data
 			case totalEvents < 500:
 				minActivityThreshold = 15 // Lower threshold for moderate data
+			default:
+				// Use default threshold for high activity data
+				minActivityThreshold = 20
 			}
 
 			// For lunch times very close to noon (12:00-12:30), be extra lenient

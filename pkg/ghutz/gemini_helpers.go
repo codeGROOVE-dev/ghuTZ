@@ -21,7 +21,7 @@ const (
 	maxLocationIndicators = 5
 	maxTopCandidates      = 5
 	maxDetailedCandidates = 3
-	commitMessageMaxLen   = 100
+	commitMessageMaxLen   = 132
 	websiteContentMaxLen  = 4000
 	mastodonContentMaxLen = 3000
 	workStartEarliest     = 5

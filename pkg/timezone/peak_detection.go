@@ -17,7 +17,7 @@ func DetectPeakProductivityWithHalfHours(halfHourCounts map[float64]int, _ int) 
 	for bucket := range halfHourCounts {
 		buckets = append(buckets, bucket)
 	}
-	
+
 	// Sort buckets numerically for deterministic ordering
 	for i := 0; i < len(buckets); i++ {
 		for j := i + 1; j < len(buckets); j++ {

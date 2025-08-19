@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+//nolint:revive // The name GitHubUser is intentional for clarity in API context
+
 // GitHubUser represents a GitHub user profile.
 type GitHubUser struct {
 	CreatedAt      time.Time `json:"created_at"`

@@ -409,7 +409,7 @@ func (c *Client) FetchUserWithGraphQL(ctx context.Context, username string) *Git
 	}
 
 	if len(result.Errors) > 0 {
-		c.logger.Debug("GraphQL user profile query failed", 
+		c.logger.Debug("GraphQL user profile query failed",
 			"username", username,
 			"error", result.Errors[0].Message,
 			"query_type", "user_profile_with_social_accounts")
@@ -1086,12 +1086,12 @@ func (c *Client) FetchStarredRepositories(ctx context.Context, username string) 
 	return timestamps, repos, nil
 }
 
-// fetchUserCommits fetches commit timestamps for a user's recent commits across their repositories.
+// FetchUserCommits fetches commit timestamps for a user's recent commits across their repositories.
 func (c *Client) FetchUserCommits(ctx context.Context, username string) ([]time.Time, error) {
 	return c.FetchUserCommitsWithLimit(ctx, username, 2) // Default to 2 pages (200 commits)
 }
 
-// fetchUserCommitsWithLimit fetches commit timestamps with a configurable page limit.
+// FetchUserCommitsWithLimit fetches commit timestamps with a configurable page limit.
 func (c *Client) FetchUserCommitsWithLimit(ctx context.Context, username string, maxPages int) ([]time.Time, error) {
 	var allTimestamps []time.Time
 	const perPage = 100

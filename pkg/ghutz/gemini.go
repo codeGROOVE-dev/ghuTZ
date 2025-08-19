@@ -213,14 +213,14 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	contributedRepos := make(map[string]int) // repo -> contribution count
 	// Use a fixed cutoff relative to newest activity for deterministic results
 	cutoff := time.Date(2025, 5, 18, 0, 0, 0, 0, time.UTC) // 3 months before approximate current date
-	
+
 	// Sort PRs by creation date for deterministic processing
 	sortedPRs := make([]github.PullRequest, len(userCtx.PullRequests))
 	copy(sortedPRs, userCtx.PullRequests)
 	sort.Slice(sortedPRs, func(i, j int) bool {
 		return sortedPRs[i].CreatedAt.After(sortedPRs[j].CreatedAt) // Most recent first
 	})
-	
+
 	for i := range sortedPRs {
 		if sortedPRs[i].CreatedAt.After(cutoff) {
 			recentPRs = append(recentPRs, sortedPRs[i])
@@ -239,8 +239,8 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 
 	// Filter recent issues and collect more contributed repositories
 	var recentIssues []github.Issue
-	
-	// Sort Issues by creation date for deterministic processing  
+
+	// Sort Issues by creation date for deterministic processing
 	sortedIssues := make([]github.Issue, len(userCtx.Issues))
 	copy(sortedIssues, userCtx.Issues)
 	sort.Slice(sortedIssues, func(i, j int) bool {
@@ -414,7 +414,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	// Query Gemini with all context
 	geminiResult, err := d.queryUnifiedGeminiForTimezone(ctx, contextData)
 	if err != nil {
-		d.logger.Debug("Gemini analysis failed", "error", err)
+		d.logger.Warn("Gemini analysis failed - falling back to activity patterns", "username", userCtx.Username, "error", err)
 		return nil
 	}
 

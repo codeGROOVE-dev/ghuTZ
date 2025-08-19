@@ -598,7 +598,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		}
 		return result, nil
 	}
-	d.logger.Debug("Gemini analysis failed", "username", username)
+	d.logger.Warn("Gemini location detection failed - using activity-only fallback", "username", username)
 
 	if activityResult != nil {
 		d.logger.Info("using activity-only result as fallback", "username", username, "timezone", activityResult.Timezone)

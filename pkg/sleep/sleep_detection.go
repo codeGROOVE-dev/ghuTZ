@@ -5,49 +5,52 @@ import (
 	"sort"
 )
 
+// quietPeriod represents a continuous period of low activity.
+type quietPeriod struct {
+	start  float64
+	end    float64
+	length int // number of buckets
+}
+
 // DetectSleepPeriodsWithHalfHours identifies sleep periods using 30-minute resolution data.
 // It requires at least 30 minutes of buffer between activity and sleep.
 func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
-	// Find all quiet buckets (truly quiet - 0 activity only)
-	type quietPeriod struct {
-		start  float64
-		end    float64
-		length int // number of buckets
-	}
-
-	var quietBuckets []float64
-	for bucket := 0.0; bucket < 24.0; bucket += 0.5 {
-		if count, exists := halfHourCounts[bucket]; exists && count == 0 {
-			quietBuckets = append(quietBuckets, bucket)
-		} else if !exists {
-			// No data means no activity
-			quietBuckets = append(quietBuckets, bucket)
-		}
-	}
-
+	quietBuckets := findQuietBuckets(halfHourCounts)
 	if len(quietBuckets) == 0 {
 		return []float64{}
 	}
 
-	// Sort buckets
-	sort.Float64s(quietBuckets)
+	periods := findContinuousQuietPeriods(quietBuckets)
+	adjustedPeriods := applyActivityBuffers(periods, halfHourCounts)
+	return convertPeriodsToSleepBuckets(adjustedPeriods)
+}
 
-	// Find continuous quiet periods (with wraparound handling)
+// findQuietBuckets identifies all 30-minute slots with zero activity.
+func findQuietBuckets(halfHourCounts map[float64]int) []float64 {
+	var quietBuckets []float64
+	for bucket := 0.0; bucket < 24.0; bucket += 0.5 {
+		if count, exists := halfHourCounts[bucket]; !exists || count == 0 {
+			quietBuckets = append(quietBuckets, bucket)
+		}
+	}
+	sort.Float64s(quietBuckets)
+	return quietBuckets
+}
+
+// findContinuousQuietPeriods groups quiet buckets into continuous periods.
+func findContinuousQuietPeriods(quietBuckets []float64) []quietPeriod {
+	if len(quietBuckets) == 0 {
+		return nil
+	}
+
 	var periods []quietPeriod
 	currentPeriod := quietPeriod{start: quietBuckets[0], end: quietBuckets[0], length: 1}
 
 	for i := 1; i < len(quietBuckets); i++ {
-		// Check if consecutive (0.5 apart) or wraparound (23.5 to 0.0)
-		switch {
-		case quietBuckets[i] == currentPeriod.end+0.5:
+		if isConsecutiveBucket(currentPeriod.end, quietBuckets[i]) {
 			currentPeriod.end = quietBuckets[i]
 			currentPeriod.length++
-		case currentPeriod.end == 23.5 && quietBuckets[i] == 0.0:
-			// Wraparound case
-			currentPeriod.end = quietBuckets[i]
-			currentPeriod.length++
-		default:
-			// End of current period
+		} else {
 			if currentPeriod.length >= 6 { // At least 3 hours
 				periods = append(periods, currentPeriod)
 			}
@@ -55,93 +58,109 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 		}
 	}
 
-	// Don't forget the last period
+	// Add the last period
 	if currentPeriod.length >= 6 {
 		periods = append(periods, currentPeriod)
 	}
 
-	// Check for wraparound merge (if first and last periods connect)
-	if len(periods) >= 2 {
-		first := periods[0]
-		last := periods[len(periods)-1]
+	return mergeWraparoundPeriods(periods)
+}
 
-		// If last ends at 23.5 and first starts at 0.0, merge them
-		if last.end == 23.5 && first.start == 0.0 {
-			merged := quietPeriod{
-				start:  last.start,
-				end:    first.end,
-				length: last.length + first.length,
-			}
-			// Replace with merged period
-			newPeriods := []quietPeriod{merged}
-			if len(periods) > 2 {
-				newPeriods = append(newPeriods, periods[1:len(periods)-1]...)
-			}
-			periods = newPeriods
-		}
+// isConsecutiveBucket checks if two buckets are consecutive, including wraparound.
+func isConsecutiveBucket(current, next float64) bool {
+	return next == current+0.5 || (current == 23.5 && next == 0.0)
+}
+
+// mergeWraparoundPeriods merges periods that connect across midnight.
+func mergeWraparoundPeriods(periods []quietPeriod) []quietPeriod {
+	if len(periods) < 2 {
+		return periods
 	}
 
-	// Apply 30-minute buffer to all periods: sleep doesn't start until 30 minutes after last activity
-	// and ends 30 minutes before first activity
+	first := periods[0]
+	last := periods[len(periods)-1]
+
+	// If last ends at 23.5 and first starts at 0.0, merge them
+	if last.end == 23.5 && first.start == 0.0 {
+		merged := quietPeriod{
+			start:  last.start,
+			end:    first.end,
+			length: last.length + first.length,
+		}
+		// Replace with merged period
+		newPeriods := []quietPeriod{merged}
+		if len(periods) > 2 {
+			newPeriods = append(newPeriods, periods[1:len(periods)-1]...)
+		}
+		return newPeriods
+	}
+
+	return periods
+}
+
+// applyActivityBuffers adjusts period boundaries to avoid nearby activity.
+func applyActivityBuffers(periods []quietPeriod, halfHourCounts map[float64]int) []quietPeriod {
 	var adjustedPeriods []quietPeriod
 	for _, period := range periods {
-		// Adjust start: keep moving forward while there's activity in the previous bucket
-		for {
-			bufferStart := period.start - 0.5
-			if bufferStart < 0 {
-				bufferStart += 24
-			}
-
-			// If there's any activity in the buffer bucket, move start forward
-			count, exists := halfHourCounts[bufferStart]
-			if !exists || count <= 1 {
-				break
-			}
-			period.start += 0.5
-			if period.start >= 24 {
-				period.start -= 24
-			}
-			period.length--
-
-			// Stop if we've adjusted too much
-			if period.length < 4 {
-				break
-			}
-		}
-
-		// Adjust end: keep moving backward while there's activity in the next bucket
-		for {
-			bufferEnd := period.end + 0.5
-			if bufferEnd >= 24 {
-				bufferEnd -= 24
-			}
-
-			// If there's any activity in the buffer bucket, move end backward
-			count, exists := halfHourCounts[bufferEnd]
-			if !exists || count <= 1 {
-				break
-			}
-			period.end -= 0.5
-			if period.end < 0 {
-				period.end += 24
-			}
-			period.length--
-
-			// Stop if we've adjusted too much
-			if period.length < 4 {
-				break
-			}
-		}
+		adjusted := adjustPeriodStart(period, halfHourCounts)
+		adjusted = adjustPeriodEnd(adjusted, halfHourCounts)
 
 		// Only keep periods that are still at least 2 hours after buffer adjustment
-		if period.length >= 4 {
-			adjustedPeriods = append(adjustedPeriods, period)
+		if adjusted.length >= 4 {
+			adjustedPeriods = append(adjustedPeriods, adjusted)
 		}
 	}
+	return adjustedPeriods
+}
 
-	// Convert all quiet periods to list of buckets
+// adjustPeriodStart moves start forward if there's activity in preceding buckets.
+func adjustPeriodStart(period quietPeriod, halfHourCounts map[float64]int) quietPeriod {
+	for period.length >= 4 {
+		bufferStart := period.start - 0.5
+		if bufferStart < 0 {
+			bufferStart += 24
+		}
+
+		count, exists := halfHourCounts[bufferStart]
+		if !exists || count <= 1 {
+			break
+		}
+
+		period.start += 0.5
+		if period.start >= 24 {
+			period.start -= 24
+		}
+		period.length--
+	}
+	return period
+}
+
+// adjustPeriodEnd moves end backward if there's activity in following buckets.
+func adjustPeriodEnd(period quietPeriod, halfHourCounts map[float64]int) quietPeriod {
+	for period.length >= 4 {
+		bufferEnd := period.end + 0.5
+		if bufferEnd >= 24 {
+			bufferEnd -= 24
+		}
+
+		count, exists := halfHourCounts[bufferEnd]
+		if !exists || count <= 1 {
+			break
+		}
+
+		period.end -= 0.5
+		if period.end < 0 {
+			period.end += 24
+		}
+		period.length--
+	}
+	return period
+}
+
+// convertPeriodsToSleepBuckets converts quiet periods to a list of sleep buckets.
+func convertPeriodsToSleepBuckets(periods []quietPeriod) []float64 {
 	var sleepBuckets []float64
-	for _, period := range adjustedPeriods {
+	for _, period := range periods {
 		if period.start <= period.end {
 			// Normal case
 			for b := period.start; b <= period.end; b += 0.5 {
@@ -157,7 +176,6 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 			}
 		}
 	}
-
 	return sleepBuckets
 }
 

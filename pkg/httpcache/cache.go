@@ -37,6 +37,7 @@ type OtterCache struct {
 	mu         sync.RWMutex
 }
 
+// NewOtterCache creates a new OtterCache instance with the specified directory, TTL, and logger.
 func NewOtterCache(ctx context.Context, dir string, ttl time.Duration, logger *slog.Logger) (*OtterCache, error) {
 	// Create cache directory if it doesn't exist
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -70,7 +71,8 @@ func NewOtterCache(ctx context.Context, dir string, ttl time.Duration, logger *s
 	return c, nil
 }
 
-func (c *OtterCache) Get(url string) ([]byte, string, bool) {
+// Get retrieves cached data for the given URL, returning data, etag, and found status.
+func (c *OtterCache) Get(url string) (data []byte, etag string, found bool) {
 	// Generate cache key from URL
 	h := sha256.New()
 	h.Write([]byte(url))
@@ -92,6 +94,7 @@ func (c *OtterCache) Get(url string) ([]byte, string, bool) {
 	return entry.Data, entry.ETag, true
 }
 
+// Set stores data in the cache with the given URL and etag.
 func (c *OtterCache) Set(url string, data []byte, etag string) error {
 	// Generate cache key from URL
 	h := sha256.New()
@@ -109,6 +112,7 @@ func (c *OtterCache) Set(url string, data []byte, etag string) error {
 	return nil
 }
 
+// SetAPICall stores API call data in the cache with URL and request body as key.
 func (c *OtterCache) SetAPICall(url string, requestBody []byte, data []byte) error {
 	// Generate cache key from URL and request body
 	h := sha256.New()
@@ -127,6 +131,7 @@ func (c *OtterCache) SetAPICall(url string, requestBody []byte, data []byte) err
 	return nil
 }
 
+// APICall retrieves cached API call data for the given URL and request body.
 func (c *OtterCache) APICall(url string, requestBody []byte) ([]byte, bool) {
 	// Generate cache key from URL and request body
 	h := sha256.New()
@@ -272,6 +277,7 @@ func (c *OtterCache) startPeriodicSave(ctx context.Context) {
 	}()
 }
 
+// Close shuts down the cache and saves all pending data.
 func (c *OtterCache) Close() error {
 	// Stop periodic saving
 	if c.saveCancel != nil {
@@ -291,9 +297,10 @@ func (c *OtterCache) Close() error {
 	return nil
 }
 
-func (c *OtterCache) Stats() map[string]interface{} {
+// Stats returns cache statistics.
+func (c *OtterCache) Stats() map[string]any {
 	// Return basic stats since otter v2 doesn't expose detailed stats in the same way
-	return map[string]interface{}{
+	return map[string]any{
 		"size": c.cache.EstimatedSize(),
 	}
 }
