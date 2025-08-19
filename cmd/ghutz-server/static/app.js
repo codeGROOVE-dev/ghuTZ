@@ -247,7 +247,7 @@ function displayResults(data) {
     methodElement.innerHTML = '';
     
     // Calculate display confidence (matching CLI logic)
-    const confidencePct = Math.round((data.timezone_confidence || data.confidence || 0) * 100);
+    const methodConfidencePct = Math.round((data.timezone_confidence || data.confidence || 0) * 100);
     
     // Check if we have data sources and it's gemini_analysis
     if (data.data_sources && data.data_sources.length > 0 && data.method === 'gemini_analysis') {
@@ -256,7 +256,7 @@ function displayResults(data) {
         
         // Create the main method line with confidence
         const methodLine = document.createElement('div');
-        methodLine.textContent = `${methodName} (${confidencePct}% confidence) using:`;
+        methodLine.textContent = `${methodName} (${methodConfidencePct}% confidence) using:`;
         container.appendChild(methodLine);
         
         // Create bulleted list of data sources
@@ -280,7 +280,7 @@ function displayResults(data) {
             
             const methodSpan = document.createElement('span');
             methodSpan.className = 'method-with-reasoning';
-            methodSpan.textContent = `${methodName} (${confidencePct}% confidence) using:`;
+            methodSpan.textContent = `${methodName} (${methodConfidencePct}% confidence) using:`;
             
             const tooltip = document.createElement('span');
             tooltip.className = 'tooltip';
