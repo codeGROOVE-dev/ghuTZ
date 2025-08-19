@@ -446,12 +446,13 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	}
 
 	// Evaluate timezone candidates using the new timezone package
-	candidates = timezone.EvaluateTimezoneCandidates(username, hourCounts, halfHourCounts, totalActivity, quietHours, midQuiet, activeStart, timezone.GlobalLunchPattern{
-		StartUTC:    bestGlobalLunch.StartUTC,
-		EndUTC:      bestGlobalLunch.EndUTC,
-		Confidence:  bestGlobalLunch.Confidence,
-		DropPercent: bestGlobalLunch.DropPercent,
-	})
+	candidates = timezone.EvaluateTimezoneCandidates(username, hourCounts, halfHourCounts,
+		totalActivity, quietHours, midQuiet, activeStart, timezone.GlobalLunchPattern{
+			StartUTC:    bestGlobalLunch.StartUTC,
+			EndUTC:      bestGlobalLunch.EndUTC,
+			Confidence:  bestGlobalLunch.Confidence,
+			DropPercent: bestGlobalLunch.DropPercent,
+		})
 
 	// Keep ALL candidates for --force-offset support
 	// We've already analyzed all 27 possible offsets (-12 to +14)

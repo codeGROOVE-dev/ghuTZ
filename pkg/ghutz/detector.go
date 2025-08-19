@@ -134,7 +134,8 @@ func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*htt
 			}
 
 			// Check for rate limiting or server errors
-			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden || resp.StatusCode >= http.StatusInternalServerError {
+			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden ||
+				resp.StatusCode >= http.StatusInternalServerError {
 				body, readErr := io.ReadAll(resp.Body)
 				closeErr := resp.Body.Close()
 				if readErr != nil {

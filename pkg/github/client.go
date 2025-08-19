@@ -17,7 +17,9 @@ type Client struct {
 }
 
 // NewClient creates a new GitHub API client.
-func NewClient(logger *slog.Logger, httpClient *http.Client, githubToken string, cachedHTTPDo func(context.Context, *http.Request) (*http.Response, error)) *Client {
+func NewClient(logger *slog.Logger, httpClient *http.Client, githubToken string,
+	cachedHTTPDo func(context.Context, *http.Request) (*http.Response, error),
+) *Client {
 	return &Client{
 		logger:       logger,
 		httpClient:   httpClient,

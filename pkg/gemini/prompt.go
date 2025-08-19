@@ -43,7 +43,8 @@ DETECTION PRIORITIES (subject to above constraint):
    - Only use company location if it matches activity patterns
    - Being a Ukrainian company, GitLab employees are more likely to live in Ukraine than Russia
    - Company names may be GitHub org names, like "@gitlabhq" being a reference for GitLab
-   - References to country-specific organizations in commit messages or repositories indicate a country strongly (for example, BVSP for Brazil, FTC for USA)
+   - References to country-specific organizations in commit messages or repositories indicate a country 
+     strongly (for example, BVSP for Brazil, FTC for USA)
 
 4. ACTIVITY PATTERNS (HARD CONSTRAINTS):
    - Work before 5am local = wrong timezone (5-6am acceptable for some)
@@ -77,7 +78,8 @@ DETECTION PRIORITIES (subject to above constraint):
      lean toward another country, default to the USA
 
 7. Location Generation
-	- Guess a specific city in the timezone that would be the most likely with all evidence given: maybe it's just the biggest tech hub, or maybe you saw clues in the repository names or indicated hobbies
+	- Guess a specific city in the timezone that would be the most likely with all evidence given: 
+	  maybe it's just the biggest tech hub, or maybe you saw clues in the repository names or indicated hobbies
 	- 🚨 For UTC-3 disambiguation: ALWAYS check for Brazil-specific indicators FIRST:
 	  • BVSP/Bovespa in repos = Brazil (São Paulo likely)
 	  • Portuguese content, .br domains = Brazil

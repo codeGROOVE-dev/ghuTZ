@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// fetchPublicEvents fetches public events (limited to last 30 days by GitHub API).
+// FetchPublicEvents fetches public events (limited to last 30 days by GitHub API).
 func (c *Client) FetchPublicEvents(ctx context.Context, username string) ([]PublicEvent, error) {
 	const maxPages = 3 // 100 events per page * 3 = 300 (GitHub's max)
 	const perPage = 100
@@ -39,32 +39,37 @@ func (c *Client) FetchPublicEvents(ctx context.Context, username string) ([]Publ
 			c.logger.Debug("failed to fetch events page", "page", page, "error", err)
 			break // Return what we have so far
 		}
-		defer func() {
-			if err := resp.Body.Close(); err != nil {
-				c.logger.Debug("failed to close response body", "error", err)
+
+		processEvents := func() bool {
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					c.logger.Debug("failed to close response body", "error", err)
+				}
+			}()
+
+			if resp.StatusCode != http.StatusOK {
+				c.logger.Debug("GitHub API returned non-200 status", "status", resp.StatusCode, "page", page)
+				return false // Stop processing
 			}
-		}()
 
-		if resp.StatusCode != http.StatusOK {
-			c.logger.Debug("GitHub API returned non-200 status", "status", resp.StatusCode, "page", page)
-			break // Return what we have so far
+			var events []PublicEvent
+			if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
+				c.logger.Debug("failed to decode events", "page", page, "error", err)
+				return false // Stop processing
+			}
+
+			if len(events) == 0 {
+				return false // No more events
+			}
+
+			// Add all events (GitHub API already limits to 30 days)
+			allEvents = append(allEvents, events...)
+
+			// If we got fewer events than requested, we've reached the end
+			return len(events) >= perPage
 		}
 
-		var events []PublicEvent
-		if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
-			c.logger.Debug("failed to decode events", "page", page, "error", err)
-			break // Return what we have so far
-		}
-
-		if len(events) == 0 {
-			break // No more events
-		}
-
-		// Add all events (GitHub API already limits to 30 days)
-		allEvents = append(allEvents, events...)
-
-		// If we got fewer events than requested, we've reached the end
-		if len(events) < perPage {
+		if !processEvents() {
 			break
 		}
 	}
@@ -73,7 +78,7 @@ func (c *Client) FetchPublicEvents(ctx context.Context, username string) ([]Publ
 	return allEvents, nil
 }
 
-// fetchUserGists fetches gist timestamps for a user.
+// FetchUserGists fetches gist timestamps for a user.
 func (c *Client) FetchUserGists(ctx context.Context, username string) ([]time.Time, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/users/%s/gists?per_page=100", url.PathEscape(username))
 
@@ -92,7 +97,7 @@ func (c *Client) FetchUserGists(ctx context.Context, username string) ([]time.Ti
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			// Log error but don't fail the request
+			c.logger.Debug("failed to close response body", "error", err)
 		}
 	}()
 
@@ -119,10 +124,12 @@ func (c *Client) FetchUserGists(ctx context.Context, username string) ([]time.Ti
 	return timestamps, nil
 }
 
+// FetchPullRequests fetches pull requests for a user with default page limit.
 func (c *Client) FetchPullRequests(ctx context.Context, username string) ([]PullRequest, error) {
 	return c.FetchPullRequestsWithLimit(ctx, username, 2)
 }
 
+// FetchPullRequestsWithLimit fetches pull requests for a user with custom page limit.
 func (c *Client) FetchPullRequestsWithLimit(ctx context.Context, username string, maxPages int) ([]PullRequest, error) {
 	var allPRs []PullRequest
 	const perPage = 100
@@ -216,10 +223,12 @@ func (c *Client) FetchPullRequestsWithLimit(ctx context.Context, username string
 	return allPRs, nil
 }
 
+// FetchIssues fetches issues for a user with default page limit.
 func (c *Client) FetchIssues(ctx context.Context, username string) ([]Issue, error) {
 	return c.FetchIssuesWithLimit(ctx, username, 2)
 }
 
+// FetchIssuesWithLimit fetches issues for a user with custom page limit.
 func (c *Client) FetchIssuesWithLimit(ctx context.Context, username string, maxPages int) ([]Issue, error) {
 	var allIssues []Issue
 	const perPage = 100
@@ -312,7 +321,7 @@ func (c *Client) FetchIssuesWithLimit(ctx context.Context, username string, maxP
 	return allIssues, nil
 }
 
-// fetchUserWithGraphQL fetches user data including social accounts via GraphQL.
+// FetchUserWithGraphQL fetches user data including social accounts via GraphQL.
 func (c *Client) FetchUserWithGraphQL(ctx context.Context, username string) *GitHubUser {
 	c.logger.Debug("attempting GraphQL user fetch", "username", username)
 	query := fmt.Sprintf(`{
@@ -378,7 +387,7 @@ func (c *Client) FetchUserWithGraphQL(ctx context.Context, username string) *Git
 				Company         string `json:"company"`
 				Bio             string `json:"bio"`
 				Email           string `json:"email"`
-				WebsiteUrl      string `json:"websiteUrl"`
+				WebsiteURL      string `json:"websiteUrl"`
 				TwitterUsername string `json:"twitterUsername"`
 				CreatedAt       string `json:"createdAt"`
 				SocialAccounts  struct {
@@ -412,7 +421,7 @@ func (c *Client) FetchUserWithGraphQL(ctx context.Context, username string) *Git
 		Company:       result.Data.User.Company,
 		Bio:           result.Data.User.Bio,
 		Email:         result.Data.User.Email,
-		Blog:          result.Data.User.WebsiteUrl,
+		Blog:          result.Data.User.WebsiteURL,
 		TwitterHandle: result.Data.User.TwitterUsername,
 	}
 
@@ -447,6 +456,7 @@ func (c *Client) FetchUserWithGraphQL(ctx context.Context, username string) *Git
 	return user
 }
 
+// FetchUserComments fetches recent comments made by a user via GraphQL.
 func (c *Client) FetchUserComments(ctx context.Context, username string) ([]Comment, error) {
 	if c.githubToken == "" {
 		c.logger.Debug("GitHub token required for GraphQL API", "username", username)
@@ -595,6 +605,7 @@ func (c *Client) FetchUserComments(ctx context.Context, username string) ([]Comm
 	return comments, nil
 }
 
+// FetchOrganizations fetches organizations that a user belongs to.
 func (c *Client) FetchOrganizations(ctx context.Context, username string) ([]Organization, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/users/%s/orgs", url.PathEscape(username))
 	c.logger.Debug("fetching organizations from API", "url", apiURL)
@@ -655,6 +666,7 @@ func (c *Client) FetchOrganizations(ctx context.Context, username string) ([]Org
 	return orgs, nil
 }
 
+// FetchUser fetches comprehensive user data, trying GraphQL first then REST API.
 func (c *Client) FetchUser(ctx context.Context, username string) *GitHubUser {
 	// First try to get enhanced data via GraphQL if we have a token
 	if c.githubToken != "" && c.isValidGitHubToken(c.githubToken) {
@@ -715,6 +727,7 @@ func (c *Client) FetchUser(ctx context.Context, username string) *GitHubUser {
 	return &user
 }
 
+// FetchUserRepositories fetches public repositories owned by a user.
 func (c *Client) FetchUserRepositories(ctx context.Context, username string) ([]Repository, error) {
 	// First try to get pinned repositories using GraphQL
 	pinnedRepos, err := c.FetchPinnedRepositories(ctx, username)
@@ -739,6 +752,7 @@ func (c *Client) FetchUserRepositories(ctx context.Context, username string) ([]
 	return popularRepos, nil
 }
 
+// FetchPinnedRepositories fetches repositories pinned by a user via GraphQL.
 func (c *Client) FetchPinnedRepositories(ctx context.Context, username string) ([]Repository, error) {
 	if c.githubToken == "" {
 		c.logger.Debug("GitHub token required for GraphQL API", "username", username)
@@ -850,6 +864,7 @@ func (c *Client) FetchPinnedRepositories(ctx context.Context, username string) (
 	return repositories, nil
 }
 
+// FetchPopularRepositories fetches user's most popular repositories sorted by stars.
 func (c *Client) FetchPopularRepositories(ctx context.Context, username string) ([]Repository, error) {
 	// Fetch all repos (up to 100) to ensure we don't miss important ones
 	apiURL := fmt.Sprintf("https://api.github.com/users/%s/repos?sort=updated&per_page=100", url.PathEscape(username))
@@ -954,11 +969,11 @@ func (c *Client) FetchProfileHTML(ctx context.Context, username string) string {
 	return string(body)
 }
 
-// fetchSocialFromHTML scrapes GitHub profile HTML for social media links.
+// FetchSocialFromHTML scrapes GitHub profile HTML for social media links.
 func (c *Client) FetchSocialFromHTML(ctx context.Context, username string) []string {
-	url := fmt.Sprintf("https://github.com/%s", username)
+	profileURL := fmt.Sprintf("https://github.com/%s", username)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, profileURL, http.NoBody)
 	if err != nil {
 		c.logger.Debug("failed to create HTML request", "username", username, "error", err)
 		return nil
@@ -995,7 +1010,7 @@ func (c *Client) FetchSocialFromHTML(ctx context.Context, username string) []str
 	return ExtractSocialMediaFromHTML(html)
 }
 
-// fetchStarredRepositories fetches repositories the user has starred for additional timestamp data and repository details.
+// FetchStarredRepositories fetches repositories the user has starred for additional timestamp data and repository details.
 func (c *Client) FetchStarredRepositories(ctx context.Context, username string) ([]time.Time, []Repository, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/users/%s/starred?per_page=100", url.PathEscape(username))
 

@@ -18,7 +18,9 @@ type timestampEntry struct {
 }
 
 // collectActivityTimestamps gathers all activity timestamps from various sources.
-func (d *Detector) collectActivityTimestamps(ctx context.Context, username string, events []github.PublicEvent) (timestamps []timestampEntry, orgCounts map[string]int) {
+func (d *Detector) collectActivityTimestamps(ctx context.Context, username string,
+	events []github.PublicEvent,
+) (timestamps []timestampEntry, orgCounts map[string]int) {
 	allTimestamps := []timestampEntry{}
 	orgCounts = make(map[string]int)
 
@@ -64,7 +66,9 @@ func (d *Detector) collectActivityTimestamps(ctx context.Context, username strin
 }
 
 // collectSupplementalTimestamps fetches additional activity data when needed.
-func (d *Detector) collectSupplementalTimestamps(ctx context.Context, username string, allTimestamps []timestampEntry, targetDataPoints int) []timestampEntry {
+func (d *Detector) collectSupplementalTimestamps(ctx context.Context, username string,
+	allTimestamps []timestampEntry, targetDataPoints int,
+) []timestampEntry {
 	const minDaysSpan = 14 // Need at least 2 weeks for good pattern detection
 
 	// Calculate current time span
@@ -118,7 +122,9 @@ func (d *Detector) collectSupplementalTimestamps(ctx context.Context, username s
 }
 
 // fetchAdditionalPages fetches additional pages of data when needed.
-func (d *Detector) fetchAdditionalPages(ctx context.Context, username string, allTimestamps []timestampEntry, targetDataPoints int, additionalData *ActivityData) []timestampEntry {
+func (d *Detector) fetchAdditionalPages(ctx context.Context, username string,
+	allTimestamps []timestampEntry, targetDataPoints int, additionalData *ActivityData,
+) []timestampEntry {
 	remaining := targetDataPoints - len(allTimestamps)
 	d.logger.Info("📊 Still need more data, fetching additional pages", "username", username,
 		"current_count", len(allTimestamps),

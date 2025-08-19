@@ -26,9 +26,9 @@ type HTTPClient interface {
 
 // Client handles Google Maps API operations.
 type Client struct {
-	apiKey     string
-	httpClient HTTPClient
 	logger     *slog.Logger
+	httpClient HTTPClient
+	apiKey     string
 }
 
 // NewClient creates a new Google Maps API client.
@@ -73,18 +73,18 @@ func (c *Client) GeocodeLocation(ctx context.Context, location string) (*Locatio
 	}()
 
 	var result struct {
+		Status  string `json:"status"`
 		Results []struct {
 			FormattedAddress string   `json:"formatted_address"`
 			Types            []string `json:"types"`
 			Geometry         struct {
 				LocationType string `json:"location_type"`
 				Location     struct {
-					Lat float64 `json:"lat"`
 					Lng float64 `json:"lng"`
+					Lat float64 `json:"lat"`
 				} `json:"location"`
 			} `json:"geometry"`
 		} `json:"results"`
-		Status string `json:"status"`
 	}
 
 	body, err := io.ReadAll(resp.Body)

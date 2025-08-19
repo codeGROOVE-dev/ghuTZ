@@ -38,30 +38,35 @@ func WithGeminiModel(model string) Option {
 	}
 }
 
+// WithGCPProject sets the GCP project ID for Gemini API access.
 func WithGCPProject(projectID string) Option {
 	return func(o *OptionHolder) {
 		o.gcpProject = projectID
 	}
 }
 
-func WithHTTPClient(client interface{}) Option {
+// WithHTTPClient sets the HTTP client (kept for compatibility, not implemented).
+func WithHTTPClient(_ any) Option {
 	return func(_ *OptionHolder) {
 		// Not implemented, keeping for compatibility
 	}
 }
 
-func WithLogger(logger interface{}) Option {
+// WithLogger sets the logger (kept for compatibility, handled differently).
+func WithLogger(_ any) Option {
 	return func(_ *OptionHolder) {
 		// Logger is handled differently
 	}
 }
 
+// WithActivityAnalysis enables or disables activity analysis.
 func WithActivityAnalysis(enabled bool) Option {
 	return func(o *OptionHolder) {
 		o.forceActivity = enabled
 	}
 }
 
+// WithCacheDir sets the cache directory for HTTP requests.
 func WithCacheDir(dir string) Option {
 	return func(o *OptionHolder) {
 		o.cacheDir = dir
