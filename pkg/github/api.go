@@ -390,7 +390,6 @@ func (c *Client) FetchIssuesWithLimit(ctx context.Context, username string, maxP
 	return allIssues, nil
 }
 
-
 // FetchUserComments fetches recent comments made by a user via GraphQL.
 func (c *Client) FetchUserComments(ctx context.Context, username string) ([]Comment, error) {
 	if c.githubToken == "" {
@@ -602,7 +601,6 @@ func (c *Client) FetchOrganizations(ctx context.Context, username string) ([]Org
 
 	return orgs, nil
 }
-
 
 // FetchUserRepositories fetches public repositories owned by a user.
 func (c *Client) FetchUserRepositories(ctx context.Context, username string) ([]Repository, error) {
@@ -1100,37 +1098,37 @@ func (c *Client) FetchUserCommitActivitiesGraphQL(ctx context.Context, username 
 	// GitHub's GraphQL search API doesn't support searching commits directly
 	// Fall back to using the search API to find commits
 	c.logger.Debug("using REST API for commit activities (GraphQL doesn't support commit search)", "username", username)
-	
+
 	if maxCommits <= 0 {
 		maxCommits = 100
 	}
-	
+
 	// Calculate pages needed (100 commits per page max from search API)
 	maxPages := (maxCommits + 99) / 100 // Round up
 	if maxPages > 10 {
 		maxPages = 10 // Reasonable limit
 	}
-	
+
 	var allActivities []CommitActivity
-	
+
 	// Use GitHub search API to find commits by the user
 	for page := 1; page <= maxPages; page++ {
 		apiURL := fmt.Sprintf("https://api.github.com/search/commits?q=author:%s&sort=committer-date&order=desc&per_page=100&page=%d",
 			url.QueryEscape(username), page)
-			
+
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 		if err != nil {
 			return allActivities, fmt.Errorf("creating commit search request: %w", err)
 		}
-		
+
 		// SECURITY: Validate and sanitize GitHub token before use
 		if c.githubToken != "" && c.isValidGitHubToken(c.githubToken) {
 			req.Header.Set("Authorization", "token "+c.githubToken)
 		}
-		
+
 		// Required for commit search API
 		req.Header.Set("Accept", "application/vnd.github.cloak-preview")
-		
+
 		resp, err := c.cachedHTTPDo(ctx, req)
 		if err != nil {
 			c.logger.Debug("commit search API request failed", "page", page, "error", err)
@@ -1141,7 +1139,7 @@ func (c *Client) FetchUserCommitActivitiesGraphQL(ctx context.Context, username 
 				c.logger.Debug("failed to close response body", "error", err)
 			}
 		}()
-		
+
 		if resp.StatusCode != http.StatusOK {
 			body, readErr := io.ReadAll(resp.Body)
 			if readErr != nil {
@@ -1151,7 +1149,7 @@ func (c *Client) FetchUserCommitActivitiesGraphQL(ctx context.Context, username 
 			}
 			break
 		}
-		
+
 		var searchResult struct {
 			Items []struct {
 				Repository struct {
@@ -1160,25 +1158,25 @@ func (c *Client) FetchUserCommitActivitiesGraphQL(ctx context.Context, username 
 				} `json:"repository"`
 				Commit struct {
 					Author struct {
-						Name  string `json:"name"`
-						Email string `json:"email"`
+						Name  string    `json:"name"`
+						Email string    `json:"email"`
 						Date  time.Time `json:"date"`
 					} `json:"author"`
 					Committer struct {
-						Name  string `json:"name"`
-						Email string `json:"email"`
+						Name  string    `json:"name"`
+						Email string    `json:"email"`
 						Date  time.Time `json:"date"`
 					} `json:"committer"`
 				} `json:"commit"`
 			} `json:"items"`
 			TotalCount int `json:"total_count"`
 		}
-		
+
 		if err := json.NewDecoder(resp.Body).Decode(&searchResult); err != nil {
 			c.logger.Debug("failed to decode commit search response", "page", page, "error", err)
 			break
 		}
-		
+
 		// Convert to CommitActivity objects
 		for _, item := range searchResult.Items {
 			if item.Repository.FullName != "" && !item.Commit.Committer.Date.IsZero() {
@@ -1193,19 +1191,19 @@ func (c *Client) FetchUserCommitActivitiesGraphQL(ctx context.Context, username 
 				})
 			}
 		}
-		
+
 		// If this page had fewer than 100 results, we're done
 		if len(searchResult.Items) < 100 {
 			break
 		}
-		
+
 		// Respect maxCommits limit
 		if len(allActivities) >= maxCommits {
 			allActivities = allActivities[:maxCommits]
 			break
 		}
 	}
-	
+
 	c.logger.Debug("fetched commit activities via REST API", "username", username, "count", len(allActivities))
 	return allActivities, nil
 }
@@ -1225,9 +1223,9 @@ func (c *Client) FetchUserCommitActivitiesWithLimit(ctx context.Context, usernam
 			}
 			return nil, fmt.Errorf("failed to fetch commit activities for user %s: %w", username, err)
 		}
-		
+
 		allCommits = append(allCommits, commits...)
-		
+
 		// If we got fewer results than perPage, we've reached the end
 		if len(commits) < perPage {
 			break

@@ -78,6 +78,7 @@ document.getElementById('detectForm').addEventListener('submit', async (e) => {
 function displayResults(data) {
     // Reset all optional fields first
     document.getElementById('nameRow').style.display = 'none';
+    document.getElementById('dataSourcesRow').style.display = 'none';
     document.getElementById('activityRow').style.display = 'none';
     document.getElementById('hoursRow').style.display = 'none';
     document.getElementById('lunchRow').style.display = 'none';
@@ -91,29 +92,22 @@ function displayResults(data) {
     
     // Set required fields
     document.getElementById('displayUsername').textContent = data.username;
-    document.getElementById('timezone').textContent = data.timezone;
+    
+    // Show timezone with current local time and UTC offset
+    const currentTime = getCurrentTimeInTimezone(data.timezone);
+    const utcOffsetStr = getUTCOffsetString(data.timezone);
+    document.getElementById('timezone').textContent = `${data.timezone} (${currentTime}, ${utcOffsetStr})`;
 
     // Display full name if available
     if (data.name) {
         document.getElementById('displayName').textContent = data.name;
-        document.getElementById('nameRow').style.display = 'block';
+        document.getElementById('nameRow').style.display = 'table-row';
     }
 
-    // Update confidence meter
-    const confidencePct = Math.round((data.timezone_confidence || data.confidence || 0) * 100);
-    const confidenceBar = document.getElementById('confidenceBar');
-    const confidenceText = document.getElementById('confidenceText');
-    
-    if (confidenceBar) {
-        confidenceBar.style.width = confidencePct + '%';
-    }
-    if (confidenceText) {
-        confidenceText.textContent = confidencePct + '%';
-    }
 
     if (data.activity_timezone) {
         document.getElementById('activityTz').textContent = data.activity_timezone;
-        document.getElementById('activityRow').style.display = 'block';
+        document.getElementById('activityRow').style.display = 'table-row';
     }
 
     // Get UTC offset for timezone conversion
@@ -121,11 +115,21 @@ function displayResults(data) {
     
     if (data.active_hours_local && (data.active_hours_local.start || data.active_hours_local.end)) {
         // Note: Despite the field name "local", these are actually UTC values that need conversion
+        // For UTC-4 timezone: UTC 21:00 -> Local 17:00 (5pm), UTC 09:00 -> Local 05:00 (5am)
         const localStart = (data.active_hours_local.start + utcOffset + 24) % 24;
         const localEnd = (data.active_hours_local.end + utcOffset + 24) % 24;
-        const activeHoursText = formatActiveHours(localStart, localEnd);
-        document.getElementById('activeHours').textContent = activeHoursText;
-        document.getElementById('hoursRow').style.display = 'block';
+        
+        // Get relative time deltas using the converted local times
+        const startDelta = getRelativeTimeDelta(localStart, data.timezone);
+        const endDelta = getRelativeTimeDelta(localEnd, data.timezone);
+        
+        // Format active hours with relative time deltas
+        const startTime = formatHour(localStart);
+        const endTime = formatHour(localEnd);
+        const activeHoursText = `${startTime} <span style="color: #666; font-size: 0.9em;">(${startDelta})</span> - ${endTime} <span style="color: #666; font-size: 0.9em;">(${endDelta})</span>`;
+        
+        document.getElementById('activeHours').innerHTML = activeHoursText;
+        document.getElementById('hoursRow').style.display = 'table-row';
     }
 
     if (data.lunch_hours_local && data.lunch_hours_local.confidence > 0) {
@@ -135,7 +139,7 @@ function displayResults(data) {
         const lunchText = formatLunchHours(localLunchStart, localLunchEnd);
         const confidenceText = Math.round(data.lunch_hours_local.confidence * 100) + '% confidence';
         document.getElementById('lunchHours').textContent = lunchText + ' (' + confidenceText + ')';
-        document.getElementById('lunchRow').style.display = 'block';
+        document.getElementById('lunchRow').style.display = 'table-row';
     }
 
     if (data.peak_productivity && data.peak_productivity.count > 0) {
@@ -144,15 +148,16 @@ function displayResults(data) {
         const localPeakEnd = (data.peak_productivity.end + utcOffset + 24) % 24;
         const peakText = formatHour(localPeakStart) + '-' + formatHour(localPeakEnd);
         document.getElementById('peakHours').textContent = peakText;
-        document.getElementById('peakRow').style.display = 'block';
+        document.getElementById('peakRow').style.display = 'table-row';
     }
 
-    if (data.sleep_hours_utc && data.sleep_hours_utc.length > 0) {
-        // Convert UTC sleep hours to local based on timezone (utcOffset already calculated above)
-        const sleepStart = (data.sleep_hours_utc[0] + utcOffset + 24) % 24;
-        const sleepEnd = ((data.sleep_hours_utc[data.sleep_hours_utc.length - 1] + 1 + utcOffset) + 24) % 24;
-        document.getElementById('sleepHours').textContent = formatHour(sleepStart) + '-' + formatHour(sleepEnd);
-        document.getElementById('sleepRow').style.display = 'block';
+    // Use pre-calculated sleep ranges from the server (much better than doing it in JS!)
+    if (data.sleep_ranges && data.sleep_ranges.length > 0) {
+        const sleepText = data.sleep_ranges.map(range => 
+            formatHour(range.start) + '-' + formatHour(range.end)
+        ).join(', ');
+        document.getElementById('sleepHours').textContent = sleepText;
+        document.getElementById('sleepRow').style.display = 'table-row';
     }
 
     if (data.top_organizations && data.top_organizations.length > 0) {
@@ -188,22 +193,28 @@ function displayResults(data) {
             orgsContainer.appendChild(orgSpan);
         });
         
-        document.getElementById('orgsRow').style.display = 'block';
+        document.getElementById('orgsRow').style.display = 'table-row';
     }
 
     // Show activity data summary if available
     if (data.activity_date_range && data.activity_date_range.oldest_activity && data.activity_date_range.newest_activity) {
-        // Calculate total events from hourly activity
-        let totalEvents = 0;
-        if (data.hourly_activity_utc) {
-            Object.values(data.hourly_activity_utc).forEach(count => {
-                totalEvents += count;
-            });
-        }
+        // Validate that dates are not zero/invalid (like "0001-01-01T00:00:00Z")
+        const oldestDateObj = new Date(data.activity_date_range.oldest_activity);
+        const newestDateObj = new Date(data.activity_date_range.newest_activity);
+        
+        // Check if dates are valid and not from year 1 (which indicates zero time values)
+        if (oldestDateObj.getFullYear() > 1900 && newestDateObj.getFullYear() > 1900) {
+            // Calculate total events from hourly activity
+            let totalEvents = 0;
+            if (data.hourly_activity_utc) {
+                Object.values(data.hourly_activity_utc).forEach(count => {
+                    totalEvents += count;
+                });
+            }
 
-        // Format dates
-        const oldestDate = new Date(data.activity_date_range.oldest_activity).toISOString().split('T')[0];
-        const newestDate = new Date(data.activity_date_range.newest_activity).toISOString().split('T')[0];
+            // Format dates
+            const oldestDate = oldestDateObj.toISOString().split('T')[0];
+            const newestDate = newestDateObj.toISOString().split('T')[0];
         
         let summaryText = '';
         if (totalEvents > 0) {
@@ -235,8 +246,9 @@ function displayResults(data) {
             summaryText += '\n' + warnings.join('\n');
         }
 
-        document.getElementById('activitySummary').textContent = summaryText;
-        document.getElementById('activitySummaryRow').style.display = 'block';
+            document.getElementById('activitySummary').textContent = summaryText;
+            document.getElementById('activitySummaryRow').style.display = 'table-row';
+        }
     }
 
     // Draw histogram if activity data is available
@@ -256,7 +268,7 @@ function displayResults(data) {
     
     if (locationText) {
         document.getElementById('location').textContent = locationText;
-        document.getElementById('locationRow').style.display = 'block';
+        document.getElementById('locationRow').style.display = 'table-row';
     }
 
     const methodName = formatMethodName(data.method);
@@ -265,57 +277,9 @@ function displayResults(data) {
     // Clear any existing content
     methodElement.innerHTML = '';
     
-    // Calculate display confidence (matching CLI logic)
-    const methodConfidencePct = Math.round((data.timezone_confidence || data.confidence || 0) * 100);
-    
-    // Check if we have data sources and it's gemini_analysis
-    if (data.data_sources && data.data_sources.length > 0 && data.method === 'gemini_analysis') {
-        // Create container for method with data sources
-        const container = document.createElement('div');
-        
-        // Create the main method line with confidence
-        const methodLine = document.createElement('div');
-        methodLine.textContent = `${methodName} (${methodConfidencePct}% confidence) using:`;
-        container.appendChild(methodLine);
-        
-        // Create bulleted list of data sources
-        const sourcesList = document.createElement('ul');
-        sourcesList.style.marginTop = '5px';
-        sourcesList.style.marginBottom = '0';
-        sourcesList.style.paddingLeft = '20px';
-        
-        data.data_sources.forEach(source => {
-            const listItem = document.createElement('li');
-            listItem.textContent = source;
-            sourcesList.appendChild(listItem);
-        });
-        
-        container.appendChild(sourcesList);
-        
-        // If there's reasoning, add it as a tooltip to the method line
-        if (data.gemini_reasoning && data.gemini_reasoning.trim()) {
-            const tooltipContainer = document.createElement('span');
-            tooltipContainer.className = 'tooltip-container';
-            
-            const methodSpan = document.createElement('span');
-            methodSpan.className = 'method-with-reasoning';
-            methodSpan.textContent = `${methodName} (${methodConfidencePct}% confidence) using:`;
-            
-            const tooltip = document.createElement('span');
-            tooltip.className = 'tooltip';
-            tooltip.textContent = data.gemini_reasoning;
-            
-            tooltipContainer.appendChild(methodSpan);
-            tooltipContainer.appendChild(tooltip);
-            
-            // Replace the plain text with tooltip version
-            methodLine.textContent = '';
-            methodLine.appendChild(tooltipContainer);
-        }
-        
-        methodElement.appendChild(container);
-    } else if (data.gemini_reasoning && data.gemini_reasoning.trim()) {
-        // Create tooltip container for method with reasoning (no data sources)
+    // Handle reasoning tooltip if available
+    if (data.gemini_reasoning && data.gemini_reasoning.trim()) {
+        // Create tooltip container for method with reasoning
         const tooltipContainer = document.createElement('span');
         tooltipContainer.className = 'tooltip-container';
         
@@ -331,8 +295,15 @@ function displayResults(data) {
         tooltipContainer.appendChild(tooltip);
         methodElement.appendChild(tooltipContainer);
     } else {
-        // No reasoning or data sources available, just show method name
+        // No reasoning available, just show method name
         methodElement.textContent = methodName;
+    }
+    
+    // Handle data sources separately (should be sorted on the server side)
+    if (data.data_sources && data.data_sources.length > 0) {
+        const sourcesElement = document.getElementById('dataSources');
+        sourcesElement.textContent = data.data_sources.join(', ');
+        document.getElementById('dataSourcesRow').style.display = 'table-row';
     }
 
     // Show results first so map container has proper dimensions
@@ -343,8 +314,10 @@ function displayResults(data) {
         if (mapRow) {
             mapRow.style.display = 'block';
         }
+        // Determine location name to display
+        let displayLocation = locationText || 'Unknown Location';
         // Initialize map after ensuring all DOM updates are complete and Leaflet is ready
-        initMapWhenReady(data.location.latitude, data.location.longitude, data.username);
+        initMapWhenReady(data.location.latitude, data.location.longitude, data.username, displayLocation);
     }
 }
 
@@ -405,6 +378,134 @@ function getUTCOffsetFromTimezone(timezone, activityTimezone) {
     }
     
     return 0;
+}
+
+function getCurrentTimeInTimezone(timezone) {
+    try {
+        // Handle both IANA timezone names (America/Denver) and UTC offset formats (UTC-6)
+        let timezoneName = timezone;
+        
+        // Convert UTC offset format to a valid timezone identifier for Intl.DateTimeFormat
+        if (timezone.startsWith('UTC')) {
+            // For UTC offset formats, we'll manually calculate the time
+            const offsetStr = timezone.replace('UTC', '');
+            const offset = parseInt(offsetStr) || 0;
+            
+            const now = new Date();
+            const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+            const localTime = new Date(utcTime + (offset * 3600000));
+            
+            return localTime.toLocaleTimeString('en-US', { 
+                hour12: true, 
+                hour: 'numeric', 
+                minute: '2-digit'
+            });
+        } else {
+            // For IANA timezone names, use Intl.DateTimeFormat
+            const now = new Date();
+            return now.toLocaleTimeString('en-US', {
+                timeZone: timezoneName,
+                hour12: true,
+                hour: 'numeric',
+                minute: '2-digit'
+            });
+        }
+    } catch (error) {
+        // Fallback: just show UTC time if timezone parsing fails
+        return new Date().toLocaleTimeString('en-US', { 
+            timeZone: 'UTC',
+            hour12: true, 
+            hour: 'numeric', 
+            minute: '2-digit'
+        }) + ' UTC';
+    }
+}
+
+function getUTCOffsetString(timezone) {
+    try {
+        if (timezone.startsWith('UTC')) {
+            // Already in UTC format
+            return timezone;
+        } else {
+            // For IANA timezone names, calculate the current UTC offset
+            const now = new Date();
+            const utcTime = new Date(now.toLocaleString("en-US", {timeZone: "UTC"}));
+            const localTime = new Date(now.toLocaleString("en-US", {timeZone: timezone}));
+            const offsetMs = localTime.getTime() - utcTime.getTime();
+            const offsetHours = Math.round(offsetMs / (1000 * 60 * 60));
+            
+            if (offsetHours >= 0) {
+                return `UTC+${offsetHours}`;
+            } else {
+                return `UTC${offsetHours}`;
+            }
+        }
+    } catch (error) {
+        return 'UTC+0';
+    }
+}
+
+function getRelativeTimeDelta(targetHour, timezone) {
+    try {
+        // Get current time in the target timezone
+        const now = new Date();
+        let currentLocalTime;
+        
+        if (timezone.startsWith('UTC')) {
+            const offsetStr = timezone.replace('UTC', '');
+            const offset = parseInt(offsetStr) || 0;
+            const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+            currentLocalTime = new Date(utcTime + (offset * 3600000));
+        } else {
+            currentLocalTime = new Date(now.toLocaleString("en-US", {timeZone: timezone}));
+        }
+        
+        const currentHour = currentLocalTime.getHours() + (currentLocalTime.getMinutes() / 60);
+        
+        // Calculate the difference
+        let delta = targetHour - currentHour;
+        
+        // Handle day wraparound (e.g., if current time is 23:00 and target is 1:00)
+        if (delta > 12) {
+            delta -= 24;
+        } else if (delta < -12) {
+            delta += 24;
+        }
+        
+        // Calculate absolute delta for determining units
+        const absDelta = Math.abs(delta);
+        
+        // Format the delta with smart units
+        if (absDelta < 0.1) {
+            return 'now';
+        } else if (absDelta < 1) {
+            // Less than 1 hour - show minutes
+            const minutes = Math.round(absDelta * 60);
+            if (delta > 0) {
+                return minutes === 1 ? '1m from now' : `${minutes}m from now`;
+            } else {
+                return minutes === 1 ? '1m ago' : `${minutes}m ago`;
+            }
+        } else if (absDelta < 24) {
+            // Less than 24 hours - show hours
+            const hours = Math.round(absDelta);
+            if (delta > 0) {
+                return hours === 1 ? '1h from now' : `${hours}h from now`;
+            } else {
+                return hours === 1 ? '1h ago' : `${hours}h ago`;
+            }
+        } else {
+            // 24+ hours - show days
+            const days = Math.round(absDelta / 24);
+            if (delta > 0) {
+                return days === 1 ? '1d from now' : `${days}d from now`;
+            } else {
+                return days === 1 ? '1d ago' : `${days}d ago`;
+            }
+        }
+    } catch (error) {
+        return '';
+    }
 }
 
 let activityChart = null; // Global chart instance
@@ -575,7 +676,7 @@ function drawHistogram(data) {
 }
 
 
-function initMapWhenReady(lat, lng, username) {
+function initMapWhenReady(lat, lng, username, locationName) {
     // Ensure DOM updates are complete and Leaflet is ready
     function attemptMapInit() {
         const mapDiv = document.getElementById('map');
@@ -608,7 +709,7 @@ function initMapWhenReady(lat, lng, username) {
         }
         
         // All conditions met, initialize the map
-        initMap(lat, lng, username);
+        initMap(lat, lng, username, locationName);
     }
     
     // Start with a small delay to ensure DOM updates are complete
@@ -617,7 +718,7 @@ function initMapWhenReady(lat, lng, username) {
 
 function createMapFallback(lat, lng, username, mapDiv) {
     const mapLink = document.createElement('a');
-    mapLink.href = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}&zoom=6#map=6/${lat}/${lng}`;
+    mapLink.href = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}&zoom=2#map=2/${lat}/${lng}`;
     mapLink.target = '_blank';
     mapLink.textContent = `View ${username} on OpenStreetMap (${lat.toFixed(2)}, ${lng.toFixed(2)})`;
     mapLink.style.cssText = 'color: #000; text-decoration: underline;';
@@ -625,7 +726,7 @@ function createMapFallback(lat, lng, username, mapDiv) {
     mapDiv.appendChild(mapLink);
 }
 
-function initMap(lat, lng, username) {
+function initMap(lat, lng, username, locationName) {
     const mapDiv = document.getElementById('map');
     if (!mapDiv) return;
     
@@ -642,7 +743,7 @@ function initMap(lat, lng, username) {
         // Create the map with explicit options
         const map = L.map(mapDiv, {
             center: [lat, lng],
-            zoom: 6,  // Zoomed out to show state/country context
+            zoom: 2,  // Zoomed out to show hemisphere context
             scrollWheelZoom: false,
             attributionControl: true
         });
@@ -660,7 +761,7 @@ function initMap(lat, lng, username) {
         // Add a marker for the user location
         L.marker([lat, lng])
             .addTo(map)
-            .bindPopup(`<strong>${username}</strong><br/>${lat.toFixed(2)}, ${lng.toFixed(2)}`)
+            .bindPopup(`<strong>${username}</strong><br/>${locationName || 'Unknown Location'}`)
             .openPopup();
         
         // Force the map to recalculate its size after creation

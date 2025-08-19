@@ -34,7 +34,7 @@ func TestGeminiDataCompleteness(t *testing.T) {
 			{Name: "TestOrg", Login: "testorg", Location: "New York, NY"},
 		},
 		Events: []github.PublicEvent{
-			// 100 events over 30 days for good activity data
+			{Type: "PushEvent", CreatedAt: time.Now().Add(-24 * time.Hour)}, // Sample event
 		},
 		PullRequests: []github.PullRequest{
 			// PRs from GraphQL
@@ -43,10 +43,10 @@ func TestGeminiDataCompleteness(t *testing.T) {
 			// Issues from GraphQL
 		},
 		StarredRepos: []github.Repository{
-			// Starred repos from GraphQL
+			{Name: "awesome-project", FullName: "user/awesome-project"}, // Sample starred repo
 		},
 		Gists: []github.Gist{
-			// Gist objects with descriptions from API
+			{ID: "abc123", Description: "Test gist", CreatedAt: time.Now()}, // Sample gist
 		},
 	}
 
@@ -114,9 +114,9 @@ func TestGeminiDataCompleteness(t *testing.T) {
 		"user",
 		"recent_events",
 		"organizations",
-		"social_accounts", // NEW!
-		"starred_repos",   // NEW!
-		"gist_count",      // NEW!
+		"social_accounts",        // NEW!
+		"starred_repositories",   // Fixed: actual key used in code
+		"gist_count",             // NEW!
 	}
 
 	for _, key := range expectedKeys {
@@ -159,7 +159,7 @@ func buildGeminiContext(userCtx *UserContext) map[string]interface{} {
 
 	// NEW data from GraphQL
 	if len(userCtx.StarredRepos) > 0 {
-		context["starred_repos"] = userCtx.StarredRepos
+		context["starred_repositories"] = userCtx.StarredRepos // Fixed: use actual key
 	}
 
 	if len(userCtx.Gists) > 0 {

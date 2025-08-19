@@ -243,6 +243,7 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 		"has_candidates", activityResult.TimezoneCandidates != nil)
 	result.ActivityTimezone = activityResult.ActivityTimezone
 	result.SleepHoursUTC = activityResult.SleepHoursUTC
+	result.SleepRanges = activityResult.SleepRanges
 	result.SleepBucketsUTC = activityResult.SleepBucketsUTC
 	result.ActiveHoursLocal = activityResult.ActiveHoursLocal
 	result.LunchHoursUTC = activityResult.LunchHoursUTC
@@ -252,6 +253,7 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 	result.HalfHourlyActivityUTC = activityResult.HalfHourlyActivityUTC
 	result.HourlyOrganizationActivity = activityResult.HourlyOrganizationActivity
 	result.TimezoneCandidates = activityResult.TimezoneCandidates
+	result.ActivityDateRange = activityResult.ActivityDateRange
 
 	// Always use the lunch times for the final chosen timezone
 	// First check if we already calculated lunch for this timezone in our candidates

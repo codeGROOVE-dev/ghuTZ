@@ -39,7 +39,7 @@ func (d *Detector) collectActivityTimestamps(ctx context.Context, username strin
 				"type", event.Type)
 			continue
 		}
-		
+
 		org := extractOrganization(event.Repo.Name)
 		allTimestamps = append(allTimestamps, timestampEntry{
 			time:   event.CreatedAt,
@@ -53,7 +53,7 @@ func (d *Detector) collectActivityTimestamps(ctx context.Context, username strin
 			eventNewest = event.CreatedAt
 		}
 	}
-	
+
 	if zeroTimeCount > 0 {
 		d.logger.Warn("filtered out events with zero/invalid timestamps",
 			"username", username,
@@ -266,7 +266,7 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 			prNewest = pr.CreatedAt
 		}
 	}
-	
+
 	if prZeroCount > 0 {
 		d.logger.Warn("filtered out PRs with zero/invalid timestamps",
 			"username", username,
@@ -310,7 +310,7 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 			issueNewest = issue.CreatedAt
 		}
 	}
-	
+
 	if issueZeroCount > 0 {
 		d.logger.Warn("filtered out issues with zero/invalid timestamps",
 			"username", username,
@@ -368,7 +368,7 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 		// This is handled separately in the main activity collection
 		org := extractOrganization(repo.FullName)
 		if org != "" {
-			// We'll add these timestamps in a different way since starred repo 
+			// We'll add these timestamps in a different way since starred repo
 			// timestamps come from a different API call with timestamp data
 		}
 	}

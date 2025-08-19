@@ -48,7 +48,7 @@ func (c *Client) FetchUserEnhancedGraphQL(ctx context.Context, username string) 
 			"provider", social.Provider,
 			"url", social.URL,
 			"display", social.DisplayName)
-		
+
 		// Add to user's social accounts
 		user.SocialAccounts = append(user.SocialAccounts, SocialAccount{
 			Provider:    social.Provider,

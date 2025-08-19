@@ -303,57 +303,76 @@
                 }
             }
 
+            .results-table {
+                display: table;
+                width: 100%;
+                border-collapse: collapse;
+            }
+
             .result-row {
-                margin: 8px 0;
-                border-bottom: 1px solid #eee;
-                padding-bottom: 8px;
+                display: table-row;
             }
 
-            .result-row:last-child {
-                border-bottom: none;
-            }
-
-            /* Add visual grouping for sections */
-            #mapRow {
-                margin-top: 20px;
-                padding-top: 15px;
-                border-top: 2px solid #ddd;
-            }
-
-            #activityRow {
-                margin-top: 20px;
-                padding-top: 15px;
-                border-top: 2px solid #ddd;
+            .result-row:hover {
+                background: #fafafa;
             }
 
             .result-label {
-                display: inline-block;
-                width: 120px;
+                display: table-cell;
+                width: 140px;
+                min-width: 140px;
                 color: #666;
                 font-size: 13px;
+                padding: 8px 12px 8px 0;
+                vertical-align: top;
+                border-bottom: 1px solid #eee;
             }
 
             .result-value {
+                display: table-cell;
                 color: #000;
                 font-weight: 500;
+                padding: 8px 0;
+                border-bottom: 1px solid #eee;
+                vertical-align: top;
             }
 
-            .confidence-bar {
-                display: inline-block;
-                width: 100px;
-                height: 8px;
-                border: 1px solid #ccc;
-                background: #f5f5f5;
-                margin-left: 8px;
-                vertical-align: middle;
+            .result-row:last-child .result-label,
+            .result-row:last-child .result-value {
+                border-bottom: none;
             }
 
-            .confidence-fill {
-                height: 100%;
-                background: #ffe838;
-                transition: width 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-                box-shadow: inset 0 0 0 1px #000;
+            /* Special rows that need different handling */
+            .result-row.map-row {
+                display: block;
+                margin: 0 0 20px 0;
+                padding: 0;
+                border: none;
             }
+            
+            .result-row.histogram-row {
+                display: block;
+                margin: 20px 0;
+                padding-top: 15px;
+                border-top: 2px solid #ddd;
+            }
+
+            .result-row.section-divider {
+                display: block;
+                margin-top: 20px;
+                padding-top: 15px;
+                border-top: 2px solid #ddd;
+            }
+
+            /* Mobile responsive */
+            @media (max-width: 480px) {
+                .result-label {
+                    width: 100px;
+                    min-width: 100px;
+                    font-size: 12px;
+                }
+            }
+
 
             #map {
                 width: 100%;
@@ -574,91 +593,80 @@
         <div id="loading" class="loading">Searching...</div>
 
         <div id="result" class="results">
-            <h2>Results</h2>
+            <h2>Approximate location</h2>
 
-            <div class="result-row">
-                <span class="result-label">Username:</span>
-                <span class="result-value" id="displayUsername">-</span>
-            </div>
-
-            <div class="result-row" id="nameRow" style="display: none">
-                <span class="result-label">Name:</span>
-                <span class="result-value" id="displayName">-</span>
-            </div>
-
-            <div class="result-row">
-                <span class="result-label">Timezone:</span>
-                <span class="result-value" id="timezone">-</span>
-            </div>
-
-            <div class="result-row" id="locationRow" style="display: none">
-                <span class="result-label">Location:</span>
-                <span class="result-value" id="location">-</span>
-            </div>
-
-            <div class="result-row">
-                <span class="result-label">Detection method:</span>
-                <span class="result-value" id="method">-</span>
-            </div>
-
-            <div class="result-row">
-                <span class="result-label">Confidence:</span>
-                <span class="result-value" id="confidenceText">-</span>
-                <span class="confidence-bar">
-                    <span
-                        class="confidence-fill"
-                        id="confidenceBar"
-                        style="width: 0%"
-                    ></span>
-                </span>
-            </div>
-
-            <div class="result-row" id="mapRow" style="display: none">
-                <span class="result-label">Map:</span>
+            <div class="result-row map-row" id="mapRow" style="display: none">
                 <div id="map"></div>
             </div>
 
-            <div class="result-row" id="activityRow" style="display: none">
-                <span class="result-label">Activity offset:</span>
-                <span class="result-value" id="activityTz">-</span>
+            <div class="results-table">
+                <div class="result-row">
+                    <span class="result-label">Username:</span>
+                    <span class="result-value" id="displayUsername">-</span>
+                </div>
+
+                <div class="result-row" id="nameRow" style="display: none">
+                    <span class="result-label">Name:</span>
+                    <span class="result-value" id="displayName">-</span>
+                </div>
+
+                <div class="result-row">
+                    <span class="result-label">Timezone:</span>
+                    <span class="result-value" id="timezone">-</span>
+                </div>
+
+                <div class="result-row" id="locationRow" style="display: none">
+                    <span class="result-label">Location:</span>
+                    <span class="result-value" id="location">-</span>
+                </div>
+
+                <div class="result-row">
+                    <span class="result-label">Detection method:</span>
+                    <span class="result-value" id="method">-</span>
+                </div>
+
+                <div class="result-row" id="dataSourcesRow" style="display: none">
+                    <span class="result-label">Data sources:</span>
+                    <span class="result-value" id="dataSources">-</span>
+                </div>
+
+                <div class="result-row" id="activityRow" style="display: none">
+                    <span class="result-label">Activity offset:</span>
+                    <span class="result-value" id="activityTz">-</span>
+                </div>
+
+                <div class="result-row" id="hoursRow" style="display: none">
+                    <span class="result-label">Active hours:</span>
+                    <span class="result-value" id="activeHours">-</span>
+                </div>
+
+                <div class="result-row" id="lunchRow" style="display: none">
+                    <span class="result-label">Lunch hours:</span>
+                    <span class="result-value" id="lunchHours">-</span>
+                </div>
+
+                <div class="result-row" id="peakRow" style="display: none">
+                    <span class="result-label">Peak productivity:</span>
+                    <span class="result-value" id="peakHours">-</span>
+                </div>
+
+                <div class="result-row" id="sleepRow" style="display: none">
+                    <span class="result-label">Sleep time:</span>
+                    <span class="result-value" id="sleepHours">-</span>
+                </div>
+
+                <div class="result-row" id="activitySummaryRow" style="display: none">
+                    <span class="result-label">Activity data:</span>
+                    <span class="result-value" id="activitySummary">-</span>
+                </div>
+
+                <div class="result-row" id="orgsRow" style="display: none">
+                    <span class="result-label">Orgs:</span>
+                    <span class="result-value" id="organizations">-</span>
+                </div>
             </div>
 
-            <div class="result-row" id="hoursRow" style="display: none">
-                <span class="result-label">Active hours:</span>
-                <span class="result-value" id="activeHours">-</span>
-            </div>
-
-            <div class="result-row" id="lunchRow" style="display: none">
-                <span class="result-label">Lunch hours:</span>
-                <span class="result-value" id="lunchHours">-</span>
-            </div>
-
-            <div class="result-row" id="peakRow" style="display: none">
-                <span class="result-label">Peak productivity:</span>
-                <span class="result-value" id="peakHours">-</span>
-            </div>
-
-            <div class="result-row" id="sleepRow" style="display: none">
-                <span class="result-label">Sleep time:</span>
-                <span class="result-value" id="sleepHours">-</span>
-            </div>
-
-            <div class="result-row" id="orgsRow" style="display: none">
-                <span class="result-label">Top organizations:</span>
-                <span class="result-value" id="organizations">-</span>
-            </div>
-
-            <div
-                class="result-row"
-                id="activitySummaryRow"
-                style="display: none"
-            >
-                <span class="result-label">Activity data:</span>
-                <span class="result-value" id="activitySummary">-</span>
-            </div>
-
-            <div class="result-row" id="histogramRow" style="display: none">
-                <span class="result-label">Activity pattern:</span>
+            <div class="result-row histogram-row" id="histogramRow" style="display: none">
                 <div id="histogramContainer">
                     <canvas id="activityChart"></canvas>
                 </div>

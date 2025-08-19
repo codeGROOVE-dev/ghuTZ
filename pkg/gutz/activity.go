@@ -157,7 +157,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			newestActivity = timestamp
 		}
 	}
-	
+
 	// If we have no valid timestamps, use the event dates as fallback
 	if oldestActivity.IsZero() && len(events) > 0 {
 		// Find oldest and newest from the raw events
@@ -232,7 +232,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	for _, h := range quietHours {
 		sleepHoursStr = append(sleepHoursStr, fmt.Sprintf("%d", h))
 	}
-	d.logger.Info("DEBUG: raw sleep hours", "username", username, 
+	d.logger.Info("DEBUG: raw sleep hours", "username", username,
 		"quiet_hours_order", strings.Join(sleepHoursStr, ","),
 		"count", len(quietHours))
 	// With limited data, we might not find clear sleep patterns
@@ -271,7 +271,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// FindSleepHours returns a continuous window of hours, potentially wrapping around midnight
 	// e.g., [22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] for 13 hours starting at 22:00
 	var midQuiet float64
-	
+
 	if len(quietHours) == 0 {
 		// No quiet hours found - shouldn't happen but handle gracefully
 		midQuiet = 2.5 // Default to 2:30 AM UTC
@@ -280,15 +280,15 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		// the start hour plus half the window size
 		startHour := quietHours[0]
 		windowSize := len(quietHours)
-		
+
 		// Calculate midpoint accounting for wrap-around
 		midQuiet = float64(startHour) + float64(windowSize)/2.0
 		if midQuiet >= 24 {
 			midQuiet -= 24
 		}
-		
+
 		d.logger.Debug("sleep midpoint calculation", "username", username,
-			"quiet_hours", quietHours, "start_hour", startHour, 
+			"quiet_hours", quietHours, "start_hour", startHour,
 			"window_size", windowSize, "midQuiet", midQuiet)
 	}
 
@@ -811,7 +811,10 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// UNLESS we have strong evidence for Europe (e.g., Polish name)
 	if suspiciousWorkHours && alternativeTimezone == "UTC+8" && offsetInt <= 3 {
 		// Get user's full name to check for regional indicators
-		user, _ := d.githubClient.FetchUserEnhancedGraphQL(ctx, username)
+		user, err := d.githubClient.FetchUserEnhancedGraphQL(ctx, username)
+		if err != nil {
+			d.logger.Debug("failed to fetch user for regional check", "username", username, "error", err)
+		}
 		isLikelyEuropean := false
 
 		if user != nil && user.Name != "" {
@@ -876,11 +879,15 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// If we have half-hour sleep data, use it to create more accurate hourly sleep hours
 	refinedSleepHours := refineHourlySleepFromBuckets(quietHours, sleepBuckets, halfHourCounts)
 
+	// Calculate sleep ranges using the same logic as CLI
+	sleepRanges := CalculateSleepRanges(refinedSleepHours, detectedTimezone)
+
 	result := &Result{
 		Username:         username,
 		Timezone:         detectedTimezone,
 		ActivityTimezone: detectedTimezone, // Pure activity-based result
 		SleepHoursUTC:    refinedSleepHours,
+		SleepRanges:      sleepRanges, // Pre-calculated sleep ranges in local time
 		SleepBucketsUTC:  sleepBuckets, // 30-minute resolution sleep periods
 		ActiveHoursLocal: struct {
 			Start float64 `json:"start"`
@@ -941,11 +948,11 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 // maxPages controls how many pages of PRs/issues to fetch (1 = first 100, 2 = up to 200).
 func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, username string, maxPages int) *ActivityData {
 	type result struct {
-		prs             []github.PullRequest
-		issues          []github.Issue
-		comments        []github.Comment
-		stars           []time.Time
-		starredRepos    []github.Repository
+		prs              []github.PullRequest
+		issues           []github.Issue
+		comments         []github.Comment
+		stars            []time.Time
+		starredRepos     []github.Repository
 		commitActivities []github.CommitActivity
 	}
 

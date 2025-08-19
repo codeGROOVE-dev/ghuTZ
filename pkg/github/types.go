@@ -144,11 +144,11 @@ type IssueSearchItem struct {
 
 // Comment represents a GitHub comment (issue or commit).
 type Comment struct {
-	Body        string    `json:"body"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	HTMLURL     string    `json:"html_url"`
-	Repository  string    `json:"repository"`  // Repository name (owner/repo)
+	Body       string    `json:"body"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	HTMLURL    string    `json:"html_url"`
+	Repository string    `json:"repository"` // Repository name (owner/repo)
 }
 
 // SSHKey represents a GitHub SSH public key.

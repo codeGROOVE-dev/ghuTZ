@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -118,7 +119,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 
 	contextData["user"] = userCtx.User
 	if userCtx.User != nil {
-		dataSources = append(dataSources, "GitHub Profile")
+		dataSources = append(dataSources, "Profile")
 
 		// Include social accounts from GraphQL
 		if userCtx.User != nil && len(userCtx.User.SocialAccounts) > 0 {
@@ -129,7 +130,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 
 	contextData["recent_events"] = userCtx.Events
 	if len(userCtx.Events) > 0 {
-		dataSources = append(dataSources, "GitHub Events")
+		dataSources = append(dataSources, "Events")
 	}
 
 	// Add activity result if available
@@ -227,7 +228,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 				if existingContent, ok := contextData["website_content"].(string); !ok || existingContent == "" {
 					contextData["website_content"] = websiteContent
 					contextData["github_pages_url"] = githubPagesURL
-					dataSources = append(dataSources, "GitHub Pages")
+					dataSources = append(dataSources, "Pages")
 					d.logger.Debug("fetched GitHub Pages content", "url", githubPagesURL, "content_length", len(websiteContent))
 				}
 			}
@@ -510,6 +511,9 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		return nil
 	}
 
+	// Sort data sources alphabetically for consistent display
+	sort.Strings(dataSources)
+
 	result := &Result{
 		Username:                userCtx.Username,
 		Timezone:                geminiResult.Timezone,
@@ -553,6 +557,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	if activityResult != nil {
 		result.ActiveHoursLocal = activityResult.ActiveHoursLocal
 		result.SleepHoursUTC = activityResult.SleepHoursUTC
+		result.SleepRanges = activityResult.SleepRanges
 		result.SleepBucketsUTC = activityResult.SleepBucketsUTC
 		result.HourlyActivityUTC = activityResult.HourlyActivityUTC
 		result.HalfHourlyActivityUTC = activityResult.HalfHourlyActivityUTC
