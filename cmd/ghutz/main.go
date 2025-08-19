@@ -328,14 +328,29 @@ func printWorkSchedule(result *ghutz.Result) {
 		}
 
 		// Format and display ranges with timezone
+		// Only show sleep periods that are between 4-12 hours (reasonable sleep duration)
 		if len(ranges) > 0 {
 			var rangeStrings []string
 			for _, r := range ranges {
-				rangeStrings = append(rangeStrings, fmt.Sprintf("%s - %s",
-					formatHour(float64(r.start)),
-					formatHour(float64(r.end))))
+				// Calculate duration of this sleep range
+				duration := r.end - r.start
+				if duration <= 0 {
+					// Handle wraparound (e.g., 22:00 - 6:00)
+					duration = (24 - r.start) + r.end
+				}
+				
+				// Only include ranges that are 4-12 hours (reasonable sleep periods)
+				if duration >= 4 && duration <= 12 {
+					rangeStrings = append(rangeStrings, fmt.Sprintf("%s - %s",
+						formatHour(float64(r.start)),
+						formatHour(float64(r.end))))
+				}
 			}
-			fmt.Printf("\n💤 Sleep Time:    %s (%s)", strings.Join(rangeStrings, ", "), result.Timezone)
+			
+			// Only print if we have valid sleep ranges
+			if len(rangeStrings) > 0 {
+				fmt.Printf("\n💤 Sleep Time:    %s (%s)", strings.Join(rangeStrings, ", "), result.Timezone)
+			}
 		}
 	}
 

@@ -10,9 +10,12 @@ EVIDENCE:
 🔴 MANDATORY CONSTRAINT - THIS OVERRIDES ALL OTHER SIGNALS:
 If activity_timezone candidates are provided (e.g., "Top 5 candidates: UTC+12, UTC+9, UTC+11, UTC+10, UTC+8"):
 - You MUST select a timezone within ±2 hours of one of the top 5 candidates
+- The TOP CANDIDATE has the highest confidence based on evening activity, lunch timing, and sleep patterns
+- If candidate #1 has 42% confidence and is UTC-4, DO NOT pick UTC-7 unless you have OVERWHELMING evidence
 - Activity patterns represent ACTUAL behavior and cannot be ignored
 - Name etymology, company location, and other signals can only influence WHICH candidate to pick, not override them entirely
 - Example: If candidates are UTC+10/+11/+12, you CANNOT pick Europe/Moscow (UTC+3) even for a Russian name
+- Example: If top candidate is UTC-4 with 42% confidence, prefer Eastern US/Canada over Pacific
 
 DETECTION PRIORITIES (subject to above constraint):
 
@@ -49,9 +52,11 @@ DETECTION PRIORITIES (subject to above constraint):
 4. ACTIVITY PATTERNS (HARD CONSTRAINTS):
    - Work before 5am local = wrong timezone (5-6am acceptable for some)
    - Lunch outside 11am-2:30pm = wrong timezone likely
-   - Sleep period should be 6+ hours of low activity
+   - Sleep period should be 4-8 continuous hours of low/no activity between 10pm-8am local time
+   - If "Detected sleep hours UTC" is provided, validate that your timezone places sleep in nighttime hours
    - Evening activity (7-11pm) is common for open-source developers, but not universal
    - If activity shows clear sleep/work/lunch patterns, trust them over geographic hints
+   - 🚨 CRITICAL: If sleep hours would be during daytime (e.g., 3pm-11pm local), REJECT that timezone
 
 4. HOBBY & INTEREST SIGNALS (STRONG REGIONAL INDICATORS):
    - 🏔️ Caving/spelunking interests + US timezone = HIGH chance of Mountain timezone (Colorado, Utah, New Mexico)

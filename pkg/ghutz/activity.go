@@ -29,6 +29,51 @@ func aggregateHalfHoursToHours(halfHourCounts map[float64]int) map[int]int {
 	return hourCounts
 }
 
+// refineHourlySleepFromBuckets uses half-hour resolution data to create accurate sleep hours.
+// Since we always have half-hour data, we should use it for precise sleep detection.
+func refineHourlySleepFromBuckets(quietHours []int, sleepBuckets []float64, halfHourCounts map[float64]int) []int {
+	// If we have good sleep bucket data, use it exclusively
+	if len(sleepBuckets) >= 8 { // At least 4 hours of sleep
+		// Convert sleep buckets to hours
+		sleepHourMap := make(map[int]bool)
+		for _, bucket := range sleepBuckets {
+			hour := int(bucket) // Get the hour part
+			sleepHourMap[hour] = true
+		}
+		
+		// Convert to sorted slice
+		var refinedHours []int
+		for hour := range sleepHourMap {
+			refinedHours = append(refinedHours, hour)
+		}
+		sort.Ints(refinedHours)
+		return refinedHours
+	}
+	
+	// Otherwise, refine the hourly quiet hours by checking half-hour activity
+	var refinedHours []int
+	for _, hour := range quietHours {
+		// Check both half-hour buckets in this hour
+		firstHalf := float64(hour)
+		secondHalf := float64(hour) + 0.5
+		
+		firstActivity := halfHourCounts[firstHalf]
+		secondActivity := halfHourCounts[secondHalf]
+		
+		// Only include hour if both halves are very quiet
+		if firstActivity <= 1 && secondActivity <= 1 {
+			refinedHours = append(refinedHours, hour)
+		}
+	}
+	
+	// If we refined away too much, fall back to original
+	if len(refinedHours) < 4 {
+		return quietHours
+	}
+	
+	return refinedHours
+}
+
 // tryActivityPatternsWithContext performs activity pattern analysis using UserContext.
 func (d *Detector) tryActivityPatternsWithContext(ctx context.Context, userCtx *UserContext) *Result {
 	return d.tryActivityPatternsWithEvents(ctx, userCtx.Username, userCtx.Events)
@@ -799,12 +844,16 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 
 	// Detect sleep periods using 30-minute resolution with buffer
 	sleepBuckets := sleep.DetectSleepPeriodsWithHalfHours(halfHourCounts)
+	
+	// Refine sleep hours using the more precise half-hour data
+	// If we have half-hour sleep data, use it to create more accurate hourly sleep hours
+	refinedSleepHours := refineHourlySleepFromBuckets(quietHours, sleepBuckets, halfHourCounts)
 
 	result := &Result{
 		Username:         username,
 		Timezone:         detectedTimezone,
 		ActivityTimezone: detectedTimezone, // Pure activity-based result
-		SleepHoursUTC:    quietHours,
+		SleepHoursUTC:    refinedSleepHours,
 		SleepBucketsUTC:  sleepBuckets, // 30-minute resolution sleep periods
 		ActiveHoursLocal: struct {
 			Start float64 `json:"start"`

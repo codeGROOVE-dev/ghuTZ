@@ -487,6 +487,37 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		fmt.Fprintf(&sb, "Peak productivity UTC: %02d:00-%02d:00\n", peakHours[0], peakHours[1])
 	}
 
+	// Sleep hours indicate timezone alignment
+	if sleepHours, ok := contextData["sleep_hours"].([]int); ok && len(sleepHours) > 0 {
+		// Group consecutive hours for cleaner display
+		var sleepRanges []string
+		if len(sleepHours) > 0 {
+			start := sleepHours[0]
+			end := sleepHours[0]
+			for i := 1; i < len(sleepHours); i++ {
+				if sleepHours[i] == (end+1)%24 {
+					end = sleepHours[i]
+				} else {
+					if start == end {
+						sleepRanges = append(sleepRanges, fmt.Sprintf("%02d:00", start))
+					} else {
+						sleepRanges = append(sleepRanges, fmt.Sprintf("%02d:00-%02d:00", start, (end+1)%24))
+					}
+					start = sleepHours[i]
+					end = sleepHours[i]
+				}
+			}
+			// Add final range
+			if start == end {
+				sleepRanges = append(sleepRanges, fmt.Sprintf("%02d:00", start))
+			} else {
+				sleepRanges = append(sleepRanges, fmt.Sprintf("%02d:00-%02d:00", start, (end+1)%24))
+			}
+		}
+		fmt.Fprintf(&sb, "Detected sleep hours UTC: %s\n", strings.Join(sleepRanges, ", "))
+		fmt.Fprintf(&sb, "Note: Primary sleep period should be 4-8 continuous hours between 10pm-8am local time\n")
+	}
+
 	// Evening activity indicates personal coding time.
 	if eveningHours, ok := contextData["evening_activity_hours"].([]int); ok && len(eveningHours) > 0 {
 		fmt.Fprintf(&sb, "Evening activity hours (7-11pm window): %v\n", eveningHours)
