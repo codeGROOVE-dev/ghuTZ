@@ -145,6 +145,7 @@ type Result struct {
 	LocationConfidence         float64                `json:"location_confidence,omitempty"`
 	TimezoneConfidence         float64                `json:"timezone_confidence,omitempty"`
 	Confidence                 float64                `json:"confidence"`
+	DataSources                []string               `json:"data_sources,omitempty"`
 }
 
 // Location represents geographic coordinates.

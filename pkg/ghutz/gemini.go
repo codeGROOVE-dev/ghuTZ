@@ -133,8 +133,17 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 
 	// Prepare comprehensive context for Gemini
 	contextData := make(map[string]any)
+	var dataSources []string
+
 	contextData["user"] = userCtx.User
+	if userCtx.User != nil {
+		dataSources = append(dataSources, "GitHub Profile")
+	}
+
 	contextData["recent_events"] = userCtx.Events
+	if len(userCtx.Events) > 0 {
+		dataSources = append(dataSources, "GitHub Events")
+	}
 
 	// Add activity result if available
 	if activityResult != nil {
@@ -202,9 +211,11 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	// Use data from UserContext instead of fetching again
 	if len(userCtx.Organizations) > 0 {
 		contextData["organizations"] = userCtx.Organizations
+		dataSources = append(dataSources, "Organizations")
 	}
 	if len(userCtx.Repositories) > 0 {
 		contextData["repositories"] = userCtx.Repositories
+		dataSources = append(dataSources, "Repositories")
 
 		// Check for github.io repositories (personal websites)
 		for i := range userCtx.Repositories {
@@ -228,6 +239,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 				if existingContent, ok := contextData["website_content"].(string); !ok || existingContent == "" {
 					contextData["website_content"] = websiteContent
 					contextData["github_pages_url"] = githubPagesURL
+					dataSources = append(dataSources, "GitHub Pages")
 					d.logger.Debug("fetched GitHub Pages content", "url", githubPagesURL, "content_length", len(websiteContent))
 				}
 			}
@@ -236,6 +248,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	}
 	if len(userCtx.StarredRepos) > 0 {
 		contextData["starred_repositories"] = userCtx.StarredRepos
+		dataSources = append(dataSources, "Starred Repos")
 	}
 
 	// Filter recent PRs and collect contributed repositories
@@ -265,6 +278,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	}
 	if len(recentPRs) > 0 {
 		contextData["pull_requests"] = recentPRs
+		dataSources = append(dataSources, "Pull Requests")
 	}
 
 	// Filter recent issues and collect more contributed repositories
@@ -291,6 +305,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	}
 	if len(recentIssues) > 0 {
 		contextData["issues"] = recentIssues
+		dataSources = append(dataSources, "Issues")
 	}
 
 	// Add contributed repositories to context (repos user has contributed to but doesn't own)
@@ -312,12 +327,14 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 
 	if len(userCtx.Comments) > 0 {
 		contextData["comments"] = userCtx.Comments
+		dataSources = append(dataSources, "Comments")
 	}
 
 	// Collect commit message samples for Gemini to analyze
 	commitSamples := collectCommitMessageSamples(userCtx.Events, 15)
 	if len(commitSamples) > 0 {
 		contextData["commit_message_samples"] = commitSamples
+		dataSources = append(dataSources, "Commits")
 	}
 
 	// Collect text samples from PRs/issues for Gemini to analyze
@@ -409,6 +426,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 						"location": extractedProfiles[idx].Location,
 					}
 					contextData["twitter_profile"] = twitterData
+					dataSources = append(dataSources, "Twitter/X")
 					d.logger.Debug("extracted Twitter profile",
 						"username", extractedProfiles[idx].Username,
 						"location", extractedProfiles[idx].Location,
@@ -424,6 +442,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 						"bio":    extractedProfiles[idx].Bio,
 					}
 					contextData["bluesky_profile"] = blueSkyData
+					dataSources = append(dataSources, "BlueSky")
 					d.logger.Debug("extracted BlueSky profile",
 						"handle", extractedProfiles[idx].Username,
 						"bio_length", len(extractedProfiles[idx].Bio))
@@ -453,6 +472,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 				}
 
 				contextData["mastodon_profile"] = mastodonData
+				dataSources = append(dataSources, "Mastodon")
 
 				for _, website := range mastodonData.Websites {
 					if userCtx.User.Blog == "" {
@@ -495,6 +515,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		GeminiSuggestedLocation: geminiResult.Location,
 		GeminiReasoning:         geminiResult.Reasoning,
 		GeminiPrompt:            geminiResult.Prompt,
+		DataSources:             dataSources,
 	}
 
 	if detectedLocation != nil {

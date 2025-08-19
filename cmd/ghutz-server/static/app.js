@@ -246,8 +246,57 @@ function displayResults(data) {
     // Clear any existing content
     methodElement.innerHTML = '';
     
-    if (data.gemini_reasoning && data.gemini_reasoning.trim()) {
-        // Create tooltip container for method with reasoning
+    // Calculate display confidence (matching CLI logic)
+    const confidencePct = Math.round((data.timezone_confidence || data.confidence || 0) * 100);
+    
+    // Check if we have data sources and it's gemini_analysis
+    if (data.data_sources && data.data_sources.length > 0 && data.method === 'gemini_analysis') {
+        // Create container for method with data sources
+        const container = document.createElement('div');
+        
+        // Create the main method line with confidence
+        const methodLine = document.createElement('div');
+        methodLine.textContent = `${methodName} (${confidencePct}% confidence) using:`;
+        container.appendChild(methodLine);
+        
+        // Create bulleted list of data sources
+        const sourcesList = document.createElement('ul');
+        sourcesList.style.marginTop = '5px';
+        sourcesList.style.marginBottom = '0';
+        sourcesList.style.paddingLeft = '20px';
+        
+        data.data_sources.forEach(source => {
+            const listItem = document.createElement('li');
+            listItem.textContent = source;
+            sourcesList.appendChild(listItem);
+        });
+        
+        container.appendChild(sourcesList);
+        
+        // If there's reasoning, add it as a tooltip to the method line
+        if (data.gemini_reasoning && data.gemini_reasoning.trim()) {
+            const tooltipContainer = document.createElement('span');
+            tooltipContainer.className = 'tooltip-container';
+            
+            const methodSpan = document.createElement('span');
+            methodSpan.className = 'method-with-reasoning';
+            methodSpan.textContent = `${methodName} (${confidencePct}% confidence) using:`;
+            
+            const tooltip = document.createElement('span');
+            tooltip.className = 'tooltip';
+            tooltip.textContent = data.gemini_reasoning;
+            
+            tooltipContainer.appendChild(methodSpan);
+            tooltipContainer.appendChild(tooltip);
+            
+            // Replace the plain text with tooltip version
+            methodLine.textContent = '';
+            methodLine.appendChild(tooltipContainer);
+        }
+        
+        methodElement.appendChild(container);
+    } else if (data.gemini_reasoning && data.gemini_reasoning.trim()) {
+        // Create tooltip container for method with reasoning (no data sources)
         const tooltipContainer = document.createElement('span');
         tooltipContainer.className = 'tooltip-container';
         
@@ -263,7 +312,7 @@ function displayResults(data) {
         tooltipContainer.appendChild(tooltip);
         methodElement.appendChild(tooltipContainer);
     } else {
-        // No reasoning available, just show method name
+        // No reasoning or data sources available, just show method name
         methodElement.textContent = methodName;
     }
 
@@ -290,7 +339,7 @@ function formatMethodName(method) {
         'email_heuristic': 'Email Domain',
         'blog_heuristic': 'Blog Analysis',
         'website_gemini_analysis': 'Website + AI',
-        'gemini_analysis': 'AI Analysis'
+        'gemini_analysis': 'Activity + AI Context Analysis'
     };
     return methodNames[method] || method;
 }

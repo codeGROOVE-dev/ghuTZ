@@ -411,9 +411,21 @@ func printDetectionInfo(result *ghutz.Result) {
 	// This matches how we display to Gemini
 	displayConfidence := 85.0 + math.Min(10, result.Confidence/4.0)
 	displayConfidence = math.Min(95, displayConfidence)
-	fmt.Printf("✨ Detection:     %s (%.0f%% confidence)\n",
-		formatMethodName(result.Method),
-		displayConfidence)
+	
+	// Display data sources inline with method if available
+	if len(result.DataSources) > 0 && result.Method == "gemini_analysis" {
+		fmt.Printf("✨ Detection:     %s (%.0f%% confidence) using:\n",
+			formatMethodName(result.Method),
+			displayConfidence)
+		for _, source := range result.DataSources {
+			fmt.Printf("                  • %s\n", source)
+		}
+	} else {
+		fmt.Printf("✨ Detection:     %s (%.0f%% confidence)\n",
+			formatMethodName(result.Method),
+			displayConfidence)
+	}
+
 	fmt.Println()
 }
 
@@ -451,7 +463,7 @@ func formatMethodName(method string) string {
 		"email_heuristic":         "Email Domain Analysis",
 		"blog_heuristic":          "Blog Domain Analysis",
 		"website_gemini_analysis": "Website AI Analysis",
-		"gemini_analysis":         "AI Context Analysis",
+		"gemini_analysis":         "Activity + AI Context Analysis",
 	}
 	if name, exists := methodNames[method]; exists {
 		return name
