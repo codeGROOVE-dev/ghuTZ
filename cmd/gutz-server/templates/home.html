@@ -24,87 +24,245 @@
                 font-family:
                     -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica,
                     Arial, sans-serif;
-                font-size: 14px;
+                font-size: 16px;
                 line-height: 1.5;
                 color: #000;
                 background: #fff;
                 max-width: 640px;
                 margin: 0 auto;
-                padding: 20px;
+                padding: 32px 24px;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+            }
+
+            @media (max-width: 480px) {
+                body {
+                    padding: 24px 20px;
+                    font-size: 16px; /* Keep 16px to prevent iOS zoom */
+                }
             }
 
             .header {
                 display: flex;
                 align-items: center;
-                margin-bottom: 20px;
-                border-bottom: 1px solid #ccc;
-                padding-bottom: 15px;
+                margin-bottom: 32px;
+                border-bottom: 4px solid #ffe838;
+                padding-bottom: 20px;
+                position: relative;
+                transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            }
+
+            .header:hover {
+                border-bottom-width: 6px;
+                padding-bottom: 18px;
             }
 
             .logo {
-                width: 32px;
-                height: 32px;
-                margin-right: 12px;
+                width: 36px;
+                height: 36px;
+                margin-right: 16px;
+                transition: transform 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+                flex-shrink: 0;
+            }
+
+            .header:hover .logo {
+                transform: rotate(15deg) scale(1.05);
             }
 
             h1 {
-                font-size: 20px;
-                font-weight: 600;
+                font-size: 24px;
+                font-weight: 700;
                 margin: 0;
+                letter-spacing: -0.03em;
+                transition: letter-spacing 0.3s ease;
+            }
+
+            .header:hover h1 {
+                letter-spacing: -0.01em;
+            }
+
+            @media (max-width: 480px) {
+                h1 {
+                    font-size: 22px;
+                }
+                .logo {
+                    width: 32px;
+                    height: 32px;
+                }
             }
 
             h2 {
-                font-size: 16px;
+                font-size: 18px;
                 font-weight: 600;
-                margin: 20px 0 10px 0;
+                margin: 28px 0 16px 0;
+                letter-spacing: -0.02em;
+            }
+
+            .intro-text {
+                font-size: 17px;
+                line-height: 1.45;
+                color: #000;
+                margin-bottom: 28px;
+                font-weight: 400;
+                letter-spacing: -0.01em;
+            }
+
+            @media (max-width: 480px) {
+                .intro-text {
+                    font-size: 16px;
+                    line-height: 1.5;
+                    margin-bottom: 24px;
+                }
             }
 
             .form-section {
-                margin-bottom: 30px;
+                margin-bottom: 36px;
+            }
+
+            @media (max-width: 480px) {
+                .form-section {
+                    margin-bottom: 28px;
+                }
+            }
+
+            .search-form {
+                display: flex;
+                gap: 12px;
+                align-items: center;
+                flex-wrap: wrap;
             }
 
             input[type="text"] {
-                width: 240px;
-                padding: 6px 8px;
-                border: 1px solid #999;
-                font-size: 14px;
+                flex: 0 1 260px;
+                padding: 12px 16px;
+                border: 2px solid #000;
+                font-size: 16px;
                 font-family: inherit;
+                font-weight: 500;
+                transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+                border-radius: 8px;
+                background: #fff;
+            }
+
+            @media (max-width: 480px) {
+                .search-form {
+                    gap: 10px;
+                }
+                input[type="text"] {
+                    flex: 1 1 100%;
+                    font-size: 16px; /* Prevents zoom on iOS */
+                }
             }
 
             input[type="text"]:focus {
                 outline: none;
                 border-color: #000;
+                box-shadow: 0 0 0 4px rgba(255, 232, 56, 0.5);
+                transform: translateY(-1px);
+            }
+
+            input[type="text"]:hover:not(:focus) {
+                border-color: #333;
             }
 
             button {
-                padding: 6px 12px;
-                border: 1px solid #999;
-                background: #f5f5f5;
-                font-size: 14px;
+                padding: 12px 24px;
+                border: 2px solid #000;
+                background: #fff;
+                font-size: 16px;
                 cursor: pointer;
-                margin-left: 8px;
                 font-family: inherit;
+                font-weight: 600;
+                transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+                border-radius: 8px;
+                white-space: nowrap;
+                letter-spacing: -0.01em;
+                position: relative;
+                overflow: hidden;
+            }
+
+            button::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: -100%;
+                width: 100%;
+                height: 100%;
+                background: #ffe838;
+                transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                z-index: -1;
+            }
+
+            @media (max-width: 480px) {
+                button {
+                    flex: 1 1 auto;
+                    padding: 12px 20px;
+                    font-size: 16px;
+                }
             }
 
             button:hover {
-                background: #e5e5e5;
-                border-color: #666;
+                transform: translateY(-2px) scale(1.02);
+                box-shadow: 0 6px 0 #000;
+            }
+
+            button:hover::before {
+                left: 0;
+            }
+
+            button:active {
+                transform: translateY(0) scale(1);
+                box-shadow: 0 2px 0 #000;
             }
 
             button:disabled {
-                background: #f9f9f9;
+                background: #f5f5f5;
                 color: #999;
                 cursor: not-allowed;
+                transform: none;
+                box-shadow: none;
+                border-color: #ddd;
+            }
+
+            button:disabled::before {
+                display: none;
             }
 
             .loading {
                 display: none;
                 padding: 20px 0;
-                color: #666;
+                color: #000;
+                font-weight: 600;
+                position: relative;
             }
 
             .loading.show {
                 display: block;
+            }
+
+            .loading::after {
+                content: "...";
+                display: inline-block;
+                animation: dots 1.5s steps(4, end) infinite;
+                width: 20px;
+                position: absolute;
+            }
+
+            @keyframes dots {
+                0%,
+                20% {
+                    content: "";
+                }
+                40% {
+                    content: ".";
+                }
+                60% {
+                    content: "..";
+                }
+                80%,
+                100% {
+                    content: "...";
+                }
             }
 
             .error {
@@ -123,10 +281,25 @@
             .results {
                 display: none;
                 margin-top: 30px;
+                animation: slideInFunk 0.5s ease;
             }
 
             .results.show {
                 display: block;
+            }
+
+            @keyframes slideInFunk {
+                0% {
+                    opacity: 0;
+                    transform: translateY(20px);
+                }
+                60% {
+                    transform: translateY(-5px);
+                }
+                100% {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
             }
 
             .result-row {
@@ -176,8 +349,9 @@
 
             .confidence-fill {
                 height: 100%;
-                background: #000;
-                transition: width 0.3s ease;
+                background: #ffe838;
+                transition: width 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+                box-shadow: inset 0 0 0 1px #000;
             }
 
             #map {
@@ -249,13 +423,63 @@
                 text-decoration: underline;
             }
 
+            /* Funk up the goose */
+            .goose-wrapper {
+                display: inline-block;
+                transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            }
+
+            .goose-wrapper:hover {
+                transform: scale(1.2) rotate(10deg);
+            }
+
+            .goose-wrapper:hover .goose {
+                animation: groovyWiggle 0.6s ease;
+            }
+
+            @keyframes groovyWiggle {
+                0%, 100% { transform: rotate(0deg); }
+                20% { transform: rotate(-10deg) translateY(-2px); }
+                40% { transform: rotate(10deg) translateY(-2px); }
+                60% { transform: rotate(-5deg); }
+                80% { transform: rotate(5deg); }
+            }
+
+            /* Add some style to result emojis */
+            .result-value {
+                position: relative;
+            }
+
+            /* Style the applications box on hover */
+            .applications-box:hover {
+                border-left-width: 12px !important;
+                padding-left: 16px !important;
+            }
+
             a {
                 color: #000;
                 text-decoration: none;
+                position: relative;
+                transition: all 0.2s ease;
             }
 
             a:hover {
-                text-decoration: underline;
+                text-decoration: none;
+            }
+
+            a::after {
+                content: "";
+                position: absolute;
+                bottom: -2px;
+                left: 0;
+                width: 0;
+                height: 2px;
+                background: #ffe838;
+                transition: width 0.3s ease;
+            }
+
+            a:hover::after {
+                width: 100%;
             }
 
             /* Tooltip styles */
@@ -314,17 +538,18 @@
             <h1>guTZ • Developer Timezone Lookup</h1>
         </div>
 
-        <p>
+        <p class="intro-text">
             Detect the location, timezone, and working hours of any GitHub user
-            for improved collaboration, supply-chain security research, and threat actor identification.
+            for improved collaboration, supply-chain security research, and
+            threat actor identification.
         </p>
 
         <div class="form-section">
-            <form id="detectForm">
+            <form id="detectForm" class="search-form">
                 <input
                     type="text"
                     id="username"
-                    placeholder="github username"
+                    placeholder="Enter GitHub username"
                     value="{{.Username}}"
                     autocomplete="off"
                     required
@@ -429,16 +654,43 @@
             </div>
         </div>
 
-        <div class="applications-box" style="margin-top: 30px; padding: 15px; background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 5px; font-size: 12px; color: #666;">
-            <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #333;">Why Though?</h3>
-            <p style="margin: 0 0 8px 0;">
-                <strong>Code Reviews:</strong> Stop scheduling meetings at 3am for your Australian colleague. Find reviewers who are actually awake.
+        <div
+            class="applications-box"
+            style="
+                margin-top: 30px;
+                padding: 15px 15px 15px 20px;
+                background: #fff;
+                border: 2px solid #000;
+                border-left: 8px solid #ffe838;
+                border-radius: 0;
+                font-size: 12px;
+                color: #000;
+                position: relative;
+                transition: all 0.3s ease;
+            "
+        >
+            <h3
+                style="
+                    margin: 0 0 10px 0;
+                    font-size: 14px;
+                    color: #000;
+                    font-weight: 700;
+                "
+            >
+                Why Though?
+            </h3>
+            <p style="margin: 0 0 8px 0">
+                <strong>Code Reviews:</strong> Find reviewers who are actually
+                awake. Stop waiting 12 hours for feedback.
             </p>
-            <p style="margin: 0 0 8px 0;">
-                <strong>Security Paranoia:</strong> That 4am commit from Bob? Yeah, Bob lives in Kansas. Something's fishy.
+            <p style="margin: 0 0 8px 0">
+                <strong>Security Paranoia:</strong> That new hire in Topeka
+                keeps Pyongyang hours? Sus.
             </p>
-            <p style="margin: 0;">
-                <strong>Supply Chain Drama:</strong> Is your critical dependency maintained by someone in a timezone that doesn't exist? Red flag.
+            <p style="margin: 0">
+                <strong>Supply Chain Drama:</strong> That new dependency
+                maintained a user allegedly in Toronto keeps Moscow hours?
+                Weird.
             </p>
         </div>
 
@@ -446,7 +698,7 @@
             <a href="https://github.com/codeGROOVE-dev/guTZ">GitHub</a>
             <a href="/api/v1/detect?username=octocat">API</a>
             <span
-                >made with 🪿 by
+                >made with <span class="goose-wrapper"><span class="goose">🪿</span></span> by
                 <a href="https://codegroove.dev/" style="margin: 0"
                     >codeGROOVE</a
                 ></span
