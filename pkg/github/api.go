@@ -517,18 +517,20 @@ func (c *Client) FetchUserComments(ctx context.Context, username string) ([]Comm
 	// Add issue comments
 	for _, node := range result.Data.User.IssueComments.Nodes {
 		comments = append(comments, Comment{
-			CreatedAt: node.CreatedAt,
-			Body:      node.Body,
-			HTMLURL:   fmt.Sprintf("https://github.com/%s", node.Repository.NameWithOwner),
+			CreatedAt:  node.CreatedAt,
+			Body:       node.Body,
+			HTMLURL:    fmt.Sprintf("https://github.com/%s", node.Repository.NameWithOwner),
+			Repository: node.Repository.NameWithOwner,
 		})
 	}
 
 	// Add commit comments
 	for _, node := range result.Data.User.CommitComments.Nodes {
 		comments = append(comments, Comment{
-			CreatedAt: node.CreatedAt,
-			Body:      node.Body,
-			HTMLURL:   fmt.Sprintf("https://github.com/%s/commit/%s", node.Commit.Repository.NameWithOwner, node.Commit.AbbreviatedOid),
+			CreatedAt:  node.CreatedAt,
+			Body:       node.Body,
+			HTMLURL:    fmt.Sprintf("https://github.com/%s/commit/%s", node.Commit.Repository.NameWithOwner, node.Commit.AbbreviatedOid),
+			Repository: node.Commit.Repository.NameWithOwner,
 		})
 	}
 

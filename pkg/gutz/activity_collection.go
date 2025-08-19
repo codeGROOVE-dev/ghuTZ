@@ -90,6 +90,20 @@ func (d *Detector) collectActivityTimestamps(ctx context.Context, username strin
 		d.logger.Debug("added gist timestamps", "username", username, "count", len(gistTimestamps))
 	}
 
+	// Log timestamps without org associations for debugging
+	noOrgCount := 0
+	orgCount := 0
+	for _, ts := range allTimestamps {
+		if ts.org == "" {
+			noOrgCount++
+			d.logger.Debug("timestamp without org", "source", ts.source, "time", ts.time.Format("2006-01-02 15:04"))
+		} else {
+			orgCount++
+			orgCounts[ts.org]++
+		}
+	}
+	d.logger.Info("org association summary", "username", username, "with_org", orgCount, "without_org", noOrgCount, "total", len(allTimestamps))
+
 	return allTimestamps, orgCounts
 }
 
@@ -98,6 +112,17 @@ func (d *Detector) collectSupplementalTimestamps(ctx context.Context, username s
 	allTimestamps []timestampEntry, targetDataPoints int,
 ) []timestampEntry {
 	const minDaysSpan = 14 // Need at least 2 weeks for good pattern detection
+
+	// Deduplicate timestamps first to get accurate count
+	uniqueTimestamps := make(map[time.Time]bool)
+	var uniqueEntries []timestampEntry
+	for _, entry := range allTimestamps {
+		if !uniqueTimestamps[entry.time] {
+			uniqueTimestamps[entry.time] = true
+			uniqueEntries = append(uniqueEntries, entry)
+		}
+	}
+	allTimestamps = uniqueEntries
 
 	// Calculate current time span
 	var timeSpanDays int
@@ -313,11 +338,11 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 				"timestamp", comment.CreatedAt)
 			continue
 		}
-		// Comments don't have repository info directly
+		org := extractOrganization(comment.Repository)
 		allTimestamps = append(allTimestamps, timestampEntry{
 			time:   comment.CreatedAt,
 			source: "comment",
-			org:    "",
+			org:    org,
 		})
 		if comment.CreatedAt.Before(commentOldest) {
 			commentOldest = comment.CreatedAt
@@ -335,11 +360,25 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 			"days_covered", int(commentNewest.Sub(commentOldest).Hours()/24))
 	}
 
+	// Add starred repository timestamps (if any were fetched)
+	for i := range additionalData.StarredRepos {
+		repo := &additionalData.StarredRepos[i]
+		// Note: Starred repositories from the API don't have timestamps directly,
+		// but they're fetched with timestamps in FetchStarredRepositories
+		// This is handled separately in the main activity collection
+		org := extractOrganization(repo.FullName)
+		if org != "" {
+			// We'll add these timestamps in a different way since starred repo 
+			// timestamps come from a different API call with timestamp data
+		}
+	}
+
 	d.logger.Debug("collected all timestamps", "username", username,
 		"total_before_dedup", len(allTimestamps),
 		"prs", len(additionalData.PullRequests),
 		"issues", len(additionalData.Issues),
-		"comments", len(additionalData.Comments))
+		"comments", len(additionalData.Comments),
+		"starred_repos", len(additionalData.StarredRepos))
 
 	return allTimestamps
 }

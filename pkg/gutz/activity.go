@@ -941,12 +941,12 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 // maxPages controls how many pages of PRs/issues to fetch (1 = first 100, 2 = up to 200).
 func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, username string, maxPages int) *ActivityData {
 	type result struct {
-		prs          []github.PullRequest
-		issues       []github.Issue
-		comments     []github.Comment
-		stars        []time.Time
-		starredRepos []github.Repository
-		commits      []time.Time
+		prs             []github.PullRequest
+		issues          []github.Issue
+		comments        []github.Comment
+		stars           []time.Time
+		starredRepos    []github.Repository
+		commitActivities []github.CommitActivity
 	}
 
 	ch := make(chan result, 1)
@@ -1009,13 +1009,13 @@ func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, usern
 			}()
 		}
 
-		// Fetch commits with appropriate page limit
+		// Fetch commit activities with appropriate page limit
 		go func() {
 			defer wg.Done()
-			if commits, err := d.githubClient.FetchUserCommitsWithLimit(ctx, username, maxPages); err == nil {
-				res.commits = commits
+			if commitActivities, err := d.githubClient.FetchUserCommitActivitiesWithLimit(ctx, username, maxPages); err == nil {
+				res.commitActivities = commitActivities
 			} else {
-				d.logger.Debug("failed to fetch commits", "username", username, "error", err)
+				d.logger.Debug("failed to fetch commit activities", "username", username, "error", err)
 			}
 		}()
 
@@ -1028,20 +1028,27 @@ func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, usern
 		// Convert starred timestamps to comments for inclusion in activity analysis
 		starComments := make([]github.Comment, len(res.stars))
 		for i, starTime := range res.stars {
+			var repository string
+			// Match up with repository info if available (first 25 repos returned)
+			if i < len(res.starredRepos) {
+				repository = res.starredRepos[i].FullName
+			}
 			starComments[i] = github.Comment{
-				CreatedAt: starTime,
-				Body:      "starred repository",
-				HTMLURL:   "",
+				CreatedAt:  starTime,
+				Body:       "starred repository",
+				HTMLURL:    "",
+				Repository: repository,
 			}
 		}
 
-		// Convert commit timestamps to comments for inclusion in activity analysis
-		commitComments := make([]github.Comment, len(res.commits))
-		for i, commitTime := range res.commits {
+		// Convert commit activities to comments for inclusion in activity analysis
+		commitComments := make([]github.Comment, len(res.commitActivities))
+		for i, commitActivity := range res.commitActivities {
 			commitComments[i] = github.Comment{
-				CreatedAt: commitTime,
-				Body:      "authored commit",
-				HTMLURL:   "",
+				CreatedAt:  commitActivity.AuthorDate,
+				Body:       "authored commit",
+				HTMLURL:    "",
+				Repository: commitActivity.Repository,
 			}
 		}
 
