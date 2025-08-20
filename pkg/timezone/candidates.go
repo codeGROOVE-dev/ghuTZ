@@ -271,7 +271,8 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			actualWorkStart := int(firstActivityLocal)
 
 			// ALWAYS penalize very early starts, regardless of workReasonable flag
-			if actualWorkStart <= 4 {
+			switch {
+			case actualWorkStart <= 4:
 				// 4am or earlier is completely absurd - MASSIVE penalty
 				testConfidence -= 50
 				adjustments = append(adjustments, fmt.Sprintf("-50 (impossible %dam work start)", actualWorkStart))
@@ -279,11 +280,11 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 					testConfidence -= 30 // Additional penalty for midnight starts
 					adjustments = append(adjustments, fmt.Sprintf("-30 (extra penalty for midnight-%dam)", actualWorkStart))
 				}
-			} else if actualWorkStart == 5 {
+			case actualWorkStart == 5:
 				// 5am is extremely early - STRONG penalty
 				testConfidence -= 25
 				adjustments = append(adjustments, "-25 (extremely early 5am start)")
-			} else if workReasonable {
+			case workReasonable:
 				// Only give bonuses for reasonable starts (6am+)
 				switch {
 				case actualWorkStart >= 7 && actualWorkStart <= 9:
@@ -299,7 +300,7 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 					testConfidence++ // Work hours detected but very unusual
 					adjustments = append(adjustments, fmt.Sprintf("+1 (very unusual work start %dam)", actualWorkStart))
 				}
-			} else {
+			default:
 				// Work hours detected but not reasonable - apply penalties
 				testConfidence -= 5
 				adjustments = append(adjustments, fmt.Sprintf("-5 (unreasonable work hours %dam)", actualWorkStart))
@@ -828,7 +829,7 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		// Ensure confidence stays above 0 and scale up for better dynamic range
 		testConfidence = math.Max(0, testConfidence)
 		// Scale confidence by 1.5x for better dynamic range (50% -> 75%)
-		testConfidence = testConfidence * 1.5
+		testConfidence *= 1.5
 
 		// Debug: Log scoring details for all candidates
 		// For egibs debugging specifically

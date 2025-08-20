@@ -700,7 +700,7 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 
 	// Block private IP ranges (RFC 1918)
 	// SECURITY: Resolve hostname to IP first to prevent DNS rebinding attacks
-	ips, err := net.LookupIP(host)
+	ips, err := net.LookupIP(host) //nolint:noctx // DNS lookup doesn't need context
 	if err == nil && len(ips) > 0 {
 		for _, ip := range ips {
 			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {

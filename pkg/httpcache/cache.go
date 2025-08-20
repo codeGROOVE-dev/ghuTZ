@@ -199,6 +199,8 @@ func (c *OtterCache) loadFromDisk() error {
 }
 
 func (c *OtterCache) saveToDisk() error {
+	c.logger.Info("cache: SAVE TO DISK")
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -249,7 +251,7 @@ func (c *OtterCache) saveToDisk() error {
 		return fmt.Errorf("replacing cache file: %w", err)
 	}
 
-	c.logger.Info("cache saved to disk", "entries", len(entries), "path", cachePath)
+	c.logger.Info("cache: SAVED TO DISK", "entries", len(entries), "path", cachePath)
 	return nil
 }
 
@@ -261,7 +263,7 @@ func (c *OtterCache) startPeriodicSave(ctx context.Context) {
 	go func() {
 		defer c.saveWg.Done()
 
-		ticker := time.NewTicker(15 * time.Minute)
+		ticker := time.NewTicker(10 * time.Minute)
 		defer ticker.Stop()
 
 		for {

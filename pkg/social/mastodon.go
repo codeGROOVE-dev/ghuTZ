@@ -50,7 +50,7 @@ type MastodonField struct {
 }
 
 // fetchMastodonProfileViaAPI fetches profile data using the Mastodon API.
-func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger *slog.Logger) *MastodonProfileData {
+func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger *slog.Logger) *MastodonProfileData { //nolint:gocognit // Complex function with necessary error handling and retries
 	// Parse the Mastodon URL to extract hostname and username
 	parsedURL, err := url.Parse(mastodonURL)
 	if err != nil {
@@ -108,15 +108,24 @@ func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger 
 	var resp *http.Response
 	err = retry.Do(
 		func() error {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close() //nolint:errcheck // best effort close on retry
+			}
 			var doErr error
-			resp, doErr = client.Do(req)
+			resp, doErr = client.Do(req) //nolint:bodyclose // response body closed in defer or on retry
 			if doErr != nil {
 				return doErr
 			}
 			// Retry on server errors and rate limiting
 			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
-				body, _ := io.ReadAll(resp.Body)
-				_ = resp.Body.Close()
+				body, readErr := io.ReadAll(resp.Body)
+				if readErr != nil {
+					_ = resp.Body.Close() //nolint:errcheck // best effort close on error path
+					return fmt.Errorf("HTTP %d: failed to read body: %w", resp.StatusCode, readErr)
+				}
+				if closeErr := resp.Body.Close(); closeErr != nil {
+					logger.Debug("failed to close response body", "error", closeErr)
+				}
 				return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 			}
 			return nil
@@ -252,7 +261,7 @@ func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger 
 }
 
 // fetchMastodonProfile fetches comprehensive info from a Mastodon profile via HTML scraping.
-func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.Logger) *MastodonProfileData {
+func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.Logger) *MastodonProfileData { //nolint:gocognit // Complex function with necessary error handling and retries
 	// Mastodon profiles often have metadata in the HTML
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mastodonURL, http.NoBody)
 	if err != nil {
@@ -268,15 +277,24 @@ func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.
 	var resp *http.Response
 	err = retry.Do(
 		func() error {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close() //nolint:errcheck // best effort close on retry
+			}
 			var doErr error
-			resp, doErr = client.Do(req)
+			resp, doErr = client.Do(req) //nolint:bodyclose // response body closed in defer or on retry
 			if doErr != nil {
 				return doErr
 			}
 			// Retry on server errors and rate limiting
 			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
-				body, _ := io.ReadAll(resp.Body)
-				_ = resp.Body.Close()
+				body, readErr := io.ReadAll(resp.Body)
+				if readErr != nil {
+					_ = resp.Body.Close() //nolint:errcheck // best effort close on error path
+					return fmt.Errorf("HTTP %d: failed to read body: %w", resp.StatusCode, readErr)
+				}
+				if closeErr := resp.Body.Close(); closeErr != nil {
+					logger.Debug("failed to close response body", "error", closeErr)
+				}
 				return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 			}
 			return nil

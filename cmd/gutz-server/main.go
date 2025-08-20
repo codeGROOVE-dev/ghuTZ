@@ -261,12 +261,14 @@ func main() {
 	}
 
 	// Create a context for the server lifetime
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	detector := gutz.NewWithLogger(ctx, logger, detectorOpts...)
 
 	if err := runServer(detector, logger); err != nil {
 		logger.Error("Server error", "error", err)
-		os.Exit(1)
+		os.Exit(1) //nolint:gocritic // acceptable use of os.Exit in main
 	}
 }
 

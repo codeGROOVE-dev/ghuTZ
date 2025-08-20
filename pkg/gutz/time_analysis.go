@@ -26,11 +26,12 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 	// Find work hours by looking for consistent activity blocks
 	// Use simple percentage-based thresholds that scale naturally with total activity
 	workThreshold := 5 // Minimum activity count to consider "work"
-	if totalActivity > 250 {
+	switch {
+	case totalActivity > 250:
 		workThreshold = totalActivity / 50 // About 2% of total activity
-	} else if totalActivity > 150 {
+	case totalActivity > 150:
 		workThreshold = totalActivity / 45 // About 2.2% - slightly higher to exclude light activity
-	} else if totalActivity > 100 {
+	case totalActivity > 100:
 		if totalActivity <= 160 {
 			workThreshold = 8 // For patterns like Basic 9-5 (156 total), exclude hours with <8 events
 		} else {
@@ -135,7 +136,7 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 		}
 	} else {
 		// Standard approach: find the longest continuous block
-		for i := range len(workHours) {
+		for i := range workHours {
 			start := workHours[i]
 
 			// Find the end of this continuous block (allowing small gaps)

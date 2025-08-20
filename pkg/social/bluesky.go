@@ -141,15 +141,24 @@ func fetchBlueSkyProfile(ctx context.Context, handle string, logger *slog.Logger
 	var resp *http.Response
 	err = retry.Do(
 		func() error {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close() //nolint:errcheck // best effort close on retry
+			}
 			var doErr error
-			resp, doErr = client.Do(req)
+			resp, doErr = client.Do(req) //nolint:bodyclose // response body closed in defer or on retry
 			if doErr != nil {
 				return doErr
 			}
 			// Retry on server errors and rate limiting
 			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
-				body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-				_ = resp.Body.Close()
+				body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024))
+				if readErr != nil {
+					_ = resp.Body.Close() //nolint:errcheck // best effort close on error path
+					return fmt.Errorf("HTTP %d: failed to read body: %w", resp.StatusCode, readErr)
+				}
+				if closeErr := resp.Body.Close(); closeErr != nil {
+					logger.Debug("failed to close response body", "error", closeErr)
+				}
 				return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 			}
 			return nil
