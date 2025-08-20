@@ -752,14 +752,36 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 		return ""
 	}
 
+	// Create a cache key for markdown conversion based on HTML content
+	// This ensures consistent markdown output for the same HTML input
+	htmlStr := string(body)
+	markdownCacheKey := fmt.Sprintf("markdown:%s", blogURL)
+	
+	// Check if we have a cached markdown conversion
+	// Use the HTML content as request body for cache key generation
+	if cachedData, found := d.cache.APICall(markdownCacheKey, []byte(htmlStr)); found {
+		d.logger.Debug("using cached markdown conversion", "url", blogURL, "cached_length", len(cachedData))
+		return string(cachedData)
+	}
+	
+	d.logger.Debug("markdown cache miss, converting HTML", "url", blogURL, "html_length", len(htmlStr))
+
 	// Convert HTML to markdown for better text extraction
-	markdown, err := md.ConvertString(string(body))
+	markdown, err := md.ConvertString(htmlStr)
 	if err != nil {
-		// If conversion fails, return the raw HTML
+		// If conversion fails, cache and return the raw HTML
 		d.logger.Debug("failed to convert HTML to markdown", "url", blogURL, "error", err)
-		return string(body)
+		// Cache the raw HTML as fallback
+		if cacheErr := d.cache.SetAPICall(markdownCacheKey, []byte(htmlStr), []byte(htmlStr)); cacheErr != nil {
+			d.logger.Debug("failed to cache raw HTML", "error", cacheErr)
+		}
+		return htmlStr
 	}
 
+	// Cache the markdown conversion for consistency
+	if err := d.cache.SetAPICall(markdownCacheKey, []byte(htmlStr), []byte(markdown)); err != nil {
+		d.logger.Debug("failed to cache markdown conversion", "error", err)
+	}
 	return markdown
 }
 
