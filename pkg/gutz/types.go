@@ -83,6 +83,13 @@ func WithMemoryOnlyCache() Option {
 	}
 }
 
+// WithNoCache disables all caching (both memory and disk).
+func WithNoCache() Option {
+	return func(o *OptionHolder) {
+		o.noCache = true
+	}
+}
+
 // OptionHolder holds configuration options.
 type OptionHolder struct {
 	githubToken     string
@@ -93,6 +100,7 @@ type OptionHolder struct {
 	cacheDir        string
 	forceActivity   bool
 	memoryOnlyCache bool
+	noCache         bool // Explicitly disable all caching
 }
 
 // LunchBreak represents detected lunch break times.

@@ -94,8 +94,8 @@ func main() {
 	}
 
 	if *noCache {
-		// Disable cache by setting an empty cache dir
-		detectorOpts = append(detectorOpts, gutz.WithCacheDir(""))
+		// Explicitly disable all caching
+		detectorOpts = append(detectorOpts, gutz.WithNoCache())
 	} else if *cacheDir != "" {
 		detectorOpts = append(detectorOpts, gutz.WithCacheDir(*cacheDir))
 	}

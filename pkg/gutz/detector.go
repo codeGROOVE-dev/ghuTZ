@@ -76,7 +76,12 @@ func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *De
 	// Initialize cache
 	var cache *httpcache.OtterCache
 
-	if optHolder.memoryOnlyCache {
+	switch {
+	case optHolder.noCache:
+		// Explicitly disable all caching
+		logger.Info("caching disabled by --no-cache flag")
+		cache = nil
+	case optHolder.memoryOnlyCache:
 		// Use memory-only cache (for web server)
 		var err error
 		cache, err = httpcache.NewMemoryOnlyCache(12*time.Hour, logger)
@@ -85,7 +90,7 @@ func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *De
 			// Cache is optional, continue without it
 			cache = nil
 		}
-	} else {
+	default:
 		// Use disk-backed cache (for CLI)
 		var cacheDir string
 		if optHolder.cacheDir != "" {
@@ -364,14 +369,15 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 }
 
 // fetchAllUserData fetches all data for a user at once to avoid redundant API calls.
-func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserContext { //nolint:revive,maintidx // Long function but organized logically
+func (d *Detector) fetchAllUserData(ctx context.Context, username string) (*UserContext, error) { //nolint:revive,maintidx // Long function but organized logically
 	userCtx := &UserContext{
 		Username:  username,
 		FromCache: make(map[string]bool),
 	}
 
 	var wg sync.WaitGroup
-	var mu sync.Mutex // For safe concurrent writes to userCtx
+	var mu sync.Mutex     // For safe concurrent writes to userCtx
+	var criticalErr error // Track critical errors that should fail the entire detection
 
 	// Fetch user profile (with GraphQL for social accounts)
 	wg.Add(1)
@@ -379,9 +385,23 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 		defer wg.Done()
 		d.logger.Debug("checking user profile", "username", username)
 		user, err := d.githubClient.FetchUserEnhancedGraphQL(ctx, username)
-		if err != nil && !errors.Is(err, github.ErrNoGitHubToken) && !errors.Is(err, github.ErrUserNotFound) {
-			d.logger.Warn("🚩 User Profile Fetch Failed", "username", username, "error", err,
-				"impact", "Gemini analysis will be skipped due to missing profile data")
+		if err != nil {
+			// User not found is expected, not critical
+			if errors.Is(err, github.ErrUserNotFound) {
+				d.logger.Debug("user not found", "username", username)
+				return
+			}
+			// No token is acceptable, we can work without it
+			if errors.Is(err, github.ErrNoGitHubToken) {
+				d.logger.Debug("no GitHub token available", "username", username)
+				return
+			}
+			// Any other error (like JSON unmarshaling) is critical - API is broken
+			d.logger.Error("Critical: User profile fetch failed", "username", username, "error", err)
+			mu.Lock()
+			criticalErr = fmt.Errorf("failed to fetch GitHub user profile: %w", err)
+			mu.Unlock()
+			return
 		}
 		mu.Lock()
 		userCtx.User = user
@@ -584,6 +604,11 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 	// Wait for all fetches to complete
 	wg.Wait()
 
+	// Check for critical errors
+	if criticalErr != nil {
+		return nil, criticalErr
+	}
+
 	// Log summary
 	d.logger.Info("fetched all user data",
 		"username", username,
@@ -598,7 +623,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 		"commit_activities", len(userCtx.CommitActivities),
 		"ssh_keys", len(userCtx.SSHKeys))
 
-	return userCtx
+	return userCtx, nil
 }
 
 // getCreatedAtFromUser safely extracts the created_at time from a user, returning nil if not available.
@@ -619,7 +644,12 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	d.logger.Info("detecting timezone", "username", username)
 
 	// Fetch ALL data at once to avoid redundant API calls
-	userCtx := d.fetchAllUserData(ctx, username)
+	userCtx, err := d.fetchAllUserData(ctx, username)
+	if err != nil {
+		// Critical error fetching user data - API is broken
+		d.logger.Error("Failed to fetch user data", "username", username, "error", err)
+		return nil, fmt.Errorf("GitHub API error: %w", err)
+	}
 
 	// Get the full name from the fetched user
 	var fullName string
