@@ -103,7 +103,7 @@ func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger 
 	req.Header.Set("User-Agent", "GitHub-Timezone-Detector/1.0")
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	
+
 	// Use retry logic with exponential backoff and jitter
 	var resp *http.Response
 	err = retry.Do(
@@ -130,7 +130,6 @@ func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger 
 			logger.Debug("retrying Mastodon API fetch", "attempt", n+1, "url", apiURL, "error", err)
 		}),
 	)
-	
 	if err != nil {
 		logger.Debug("failed to fetch Mastodon API after retries", "url", apiURL, "error", err)
 		return fetchMastodonProfile(ctx, mastodonURL, logger) // Fallback
@@ -264,7 +263,7 @@ func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.
 	req.Header.Set("User-Agent", "GitHub-Timezone-Detector/1.0")
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	
+
 	// Use retry logic with exponential backoff and jitter
 	var resp *http.Response
 	err = retry.Do(
@@ -291,7 +290,6 @@ func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.
 			logger.Debug("retrying Mastodon profile fetch", "attempt", n+1, "url", mastodonURL, "error", err)
 		}),
 	)
-	
 	if err != nil {
 		logger.Debug("failed to fetch Mastodon profile after retries", "url", mastodonURL, "error", err)
 		return nil

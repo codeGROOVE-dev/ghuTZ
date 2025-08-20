@@ -7,10 +7,10 @@ import (
 // TestCalculateTypicalActiveHours tests the active hours calculation function
 func TestCalculateTypicalActiveHours(t *testing.T) {
 	tests := []struct {
-		name         string
-		hourCounts   map[int]int
-		quietHours   []int
-		utcOffset    int
+		name          string
+		hourCounts    map[int]int
+		quietHours    []int
+		utcOffset     int
 		expectedStart int
 		expectedEnd   int
 	}{
@@ -44,9 +44,9 @@ func TestCalculateTypicalActiveHours(t *testing.T) {
 				23: 10, // 7pm EDT (light evening)
 			},
 			quietHours:    []int{3, 4, 5, 6, 7, 8, 9}, // 11pm-5am EDT (sleep)
-			utcOffset:     -4,                          // EDT (UTC-4)
-			expectedStart: 11,                          // 7am EDT (11 UTC)
-			expectedEnd:   1,                           // 9pm EDT (01 UTC next day)
+			utcOffset:     -4,                         // EDT (UTC-4)
+			expectedStart: 11,                         // 7am EDT (11 UTC)
+			expectedEnd:   1,                          // 9pm EDT (01 UTC next day)
 		},
 		{
 			name: "dlorenc real data pattern (UTC-4)",
@@ -106,7 +106,7 @@ func TestCalculateTypicalActiveHours(t *testing.T) {
 			// Based on EyeCantCU's real pattern: works ~6:30am to midnight (17+ hours!)
 			hourCounts: map[int]int{
 				0:  11, // 6pm CST (evening work)
-				1:  5,  // 7pm CST  
+				1:  5,  // 7pm CST
 				2:  15, // 8pm CST
 				3:  3,  // 9pm CST
 				4:  3,  // 10pm CST
@@ -131,42 +131,42 @@ func TestCalculateTypicalActiveHours(t *testing.T) {
 				23: 15, // 5pm CST
 			},
 			quietHours:    []int{7, 8, 9, 10, 11}, // 1am-5am CST (short sleep!)
-			utcOffset:     -6,                      // CST (UTC-6)
-			expectedStart: 12,                      // 6am CST (12 UTC) 
-			expectedEnd:   5,                       // 11pm CST (5 UTC next day) - algorithm is more conservative
+			utcOffset:     -6,                     // CST (UTC-6)
+			expectedStart: 12,                     // 6am CST (12 UTC)
+			expectedEnd:   5,                      // 11pm CST (5 UTC next day) - algorithm is more conservative
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			start, end := calculateTypicalActiveHours(tt.hourCounts, tt.quietHours, tt.utcOffset)
-			
+
 			if start != tt.expectedStart {
 				t.Errorf("Expected start hour %d UTC, got %d UTC", tt.expectedStart, start)
-				
+
 				// Convert to local time for debugging
 				startLocal := (start + tt.utcOffset + 24) % 24
 				expectedLocal := (tt.expectedStart + tt.utcOffset + 24) % 24
-				t.Logf("Got start: %d UTC (%dam local), expected: %d UTC (%dam local)", 
+				t.Logf("Got start: %d UTC (%dam local), expected: %d UTC (%dam local)",
 					start, startLocal, tt.expectedStart, expectedLocal)
 			}
-			
+
 			if end != tt.expectedEnd {
 				t.Errorf("Expected end hour %d UTC, got %d UTC", tt.expectedEnd, end)
-				
+
 				// Convert to local time for debugging
 				endLocal := (end + tt.utcOffset + 24) % 24
 				expectedLocal := (tt.expectedEnd + tt.utcOffset + 24) % 24
-				t.Logf("Got end: %d UTC (%dpm local), expected: %d UTC (%dpm local)", 
+				t.Logf("Got end: %d UTC (%dpm local), expected: %d UTC (%dpm local)",
 					end, endLocal, tt.expectedEnd, expectedLocal)
 			}
-			
+
 			// Validate duration is reasonable (6-17 hours) - algorithm should handle all work patterns
 			duration := (end - start + 24) % 24
 			if duration < 6 || duration > 17 {
 				t.Errorf("Active duration %d hours is unreasonable (should be 6-17 hours)", duration)
 			}
-			
+
 			t.Logf("Active hours: %d-%d UTC (duration: %d hours)", start, end, duration)
 		})
 	}
@@ -176,31 +176,31 @@ func TestCalculateTypicalActiveHours(t *testing.T) {
 // doesn't trigger any "unusual sleep" or other warnings
 func TestTstrombergActiveHoursNoWarnings(t *testing.T) {
 	// This test ensures tstromberg's sleep pattern (22:00-6:00 EDT) is considered normal
-	
+
 	// Tstromberg's quiet hours in UTC: 2,3,4,5,6,7,8,9 (10pm-5am EDT)
 	quietHours := []int{2, 3, 4, 5, 6, 7, 8, 9}
-	
+
 	// Calculate sleep midpoint for UTC-4
-	startHour := 2   // 10pm EDT
+	startHour := 2 // 10pm EDT
 	windowSize := len(quietHours)
-	
+
 	// Sleep midpoint calculation
 	midQuiet := float64(startHour) + float64(windowSize-1)/2.0
-	expectedMidQuiet := float64(2 + 9) / 2.0 // Should be around 5.5 UTC (1:30am EDT)
-	
+	expectedMidQuiet := float64(2+9) / 2.0 // Should be around 5.5 UTC (1:30am EDT)
+
 	if midQuiet != expectedMidQuiet {
 		t.Errorf("Sleep midpoint calculation error: got %.1f, expected %.1f", midQuiet, expectedMidQuiet)
 	}
-	
+
 	// Convert to local time for timezone validation
 	utcOffset := -4
-	sleepLocalMid := float64(int(midQuiet + float64(utcOffset) + 24) % 24)
-	
+	sleepLocalMid := float64(int(midQuiet+float64(utcOffset)+24) % 24)
+
 	// Sleep midpoint should be around 0.5 (12:30am EDT) which is reasonable
 	if sleepLocalMid < 22 && sleepLocalMid > 10 {
 		t.Errorf("Sleep midpoint %.1f local time is during day - should be nighttime (22-24 or 0-10)", sleepLocalMid)
 	}
-	
+
 	t.Logf("Sleep midpoint: %.1f UTC = %.1f local (EDT) - reasonable nighttime sleep", midQuiet, sleepLocalMid)
 }
 
@@ -237,17 +237,17 @@ func TestActiveHoursEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			start, end := calculateTypicalActiveHours(tt.hourCounts, tt.quietHours, tt.utcOffset)
-			
+
 			// Should not panic and should return reasonable hours
 			if start < 0 || start > 23 || end < 0 || end > 23 {
 				t.Errorf("Active hours out of range: start=%d, end=%d", start, end)
 			}
-			
+
 			duration := (end - start + 24) % 24
 			if duration < 6 || duration > 16 {
 				t.Logf("Duration %d hours is outside normal range (6-16) but acceptable for edge case", duration)
 			}
-			
+
 			t.Logf("Edge case result: %d-%d UTC (duration: %d hours)", start, end, duration)
 		})
 	}

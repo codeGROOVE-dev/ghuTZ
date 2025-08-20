@@ -345,14 +345,14 @@ func FindSleepHours(hourCounts map[int]int) []int {
 				break
 			}
 		}
-		
+
 		if hasWrapAround && wrapPoint > 0 {
 			// Reorder to maintain wrap-around: move the end hours to the beginning
 			// e.g., [2,3,4,5,6,7,8,9,10,22] -> [22,2,3,4,5,6,7,8,9,10]
 			reordered := append(quietHours[wrapPoint:], quietHours[:wrapPoint]...)
 			return reordered
 		}
-		
+
 		return quietHours
 	}
 

@@ -47,12 +47,12 @@ type PublicEvent struct {
 // CommitActivity represents a commit with repository information.
 type CommitActivity struct {
 	AuthorDate     time.Time `json:"author_date"`
-	Repository     string    `json:"repository"`      // Full repository name (owner/repo)
-	RepositoryID   int       `json:"repository_id"`   // GitHub repository ID
-	AuthorName     string    `json:"author_name"`     // Commit author name
-	AuthorEmail    string    `json:"author_email"`    // Commit author email
-	CommitterName  string    `json:"committer_name"`  // Commit committer name
-	CommitterEmail string    `json:"committer_email"` // Commit committer email
+	Repository     string    `json:"repository"`
+	AuthorName     string    `json:"author_name"`
+	AuthorEmail    string    `json:"author_email"`
+	CommitterName  string    `json:"committer_name"`
+	CommitterEmail string    `json:"committer_email"`
+	RepositoryID   int       `json:"repository_id"`
 }
 
 // Gist represents a GitHub gist.
@@ -153,11 +153,11 @@ type Comment struct {
 
 // SSHKey represents a GitHub SSH public key.
 type SSHKey struct {
-	ID        int       `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
 	Key       string    `json:"key"`
 	Title     string    `json:"title"`
-	CreatedAt time.Time `json:"created_at"`
+	URL       string    `json:"url"`
+	ID        int       `json:"id"`
 	Verified  bool      `json:"verified"`
 	ReadOnly  bool      `json:"read_only"`
-	URL       string    `json:"url"`
 }

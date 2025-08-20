@@ -163,7 +163,6 @@ func fetchBlueSkyProfile(ctx context.Context, handle string, logger *slog.Logger
 			logger.Debug("retrying BlueSky API fetch", "attempt", n+1, "url", apiURL, "error", err)
 		}),
 	)
-	
 	if err != nil {
 		return nil, fmt.Errorf("fetching profile after retries: %w", err)
 	}

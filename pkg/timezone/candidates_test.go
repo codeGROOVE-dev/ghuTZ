@@ -116,30 +116,30 @@ func TestUKTimezoneDetection(t *testing.T) {
 	// Active hours UTC: 08:00-17:00
 	// Sleep hours: [2 3 4 5 6 7 8 18 19 20 22 23]
 	hourCounts := map[int]int{
-		0: 0,
-		1: 2,
-		2: 1, // sleep
-		3: 0, // sleep
-		4: 0, // sleep
-		5: 0, // sleep
-		6: 0, // sleep
-		7: 0, // sleep
-		8: 2, // work starts
-		9: 10,
+		0:  0,
+		1:  2,
+		2:  1, // sleep
+		3:  0, // sleep
+		4:  0, // sleep
+		5:  0, // sleep
+		6:  0, // sleep
+		7:  0, // sleep
+		8:  2, // work starts
+		9:  10,
 		10: 21, // peak activity
 		11: 20,
-		12: 7,  // lunch dip
+		12: 7, // lunch dip
 		13: 10,
 		14: 14,
 		15: 14,
 		16: 11,
-		17: 6,  // work ends
-		18: 0,  // quiet
-		19: 2,  // quiet
-		20: 0,  // quiet
-		21: 6,  // some evening activity
-		22: 1,  // quiet
-		23: 0,  // sleep
+		17: 6, // work ends
+		18: 0, // quiet
+		19: 2, // quiet
+		20: 0, // quiet
+		21: 6, // some evening activity
+		22: 1, // quiet
+		23: 0, // sleep
 	}
 
 	// Half-hour resolution for lunch detection
@@ -183,7 +183,7 @@ func TestUKTimezoneDetection(t *testing.T) {
 		DropPercent: 0.75,
 	}
 
-	candidates := EvaluateCandidates("max-allan-cgr", hourCounts, halfHourCounts, 
+	candidates := EvaluateCandidates("max-allan-cgr", hourCounts, halfHourCounts,
 		totalActivity, quietHours, midQuiet, activeStart, bestGlobalLunch)
 
 	// Test 1: UTC+0 should be the top candidate
@@ -267,7 +267,7 @@ func TestUKTimezoneDetection(t *testing.T) {
 
 // Helper function for string contains check
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || 
+	return len(s) >= len(substr) && (s == substr ||
 		(len(s) > len(substr) && containsSubstring(s, substr)))
 }
 

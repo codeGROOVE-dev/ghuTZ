@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -222,7 +223,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// Create a string representation to see the actual order
 	var sleepHoursStr []string
 	for _, h := range quietHours {
-		sleepHoursStr = append(sleepHoursStr, fmt.Sprintf("%d", h))
+		sleepHoursStr = append(sleepHoursStr, strconv.Itoa(h))
 	}
 	d.logger.Info("DEBUG: raw sleep hours", "username", username,
 		"quiet_hours_order", strings.Join(sleepHoursStr, ","),

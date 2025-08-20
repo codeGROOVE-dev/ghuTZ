@@ -101,7 +101,7 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		// Check if work hours are reasonable based on ACTUAL first activity, not initial guess
 		workReasonable := firstActivityLocal >= 6 && firstActivityLocal <= 10 // Allow 6am starts for early risers
 
-		// 4. Evening activity (7-11pm local) 
+		// 4. Evening activity (7-11pm local)
 		// STRICT: Only count 7pm-11pm as evening, NOT 5-6pm which is dinner/transition
 		// To convert local hour to UTC: UTC = local - offset
 		// For UTC-5: 7pm local = 19:00 local = 19 - (-5) = 24 = 0 UTC
@@ -255,7 +255,7 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 				lunchScore -= 10
 				adjustments = append(adjustments, fmt.Sprintf("-10 (lunch at end of work day %.1f vs work end %.0f)", lunchLocalStart, activeEndLocal))
 			}
-			
+
 			finalLunchScore := math.Min(15, lunchScore)
 			testConfidence += finalLunchScore
 		} else if testLunchStart < 0 {
@@ -269,7 +269,7 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		// CRITICAL: Use firstActivityLocal which is calculated per-timezone, not testWorkStart
 		if firstActivityLocal < 24 {
 			actualWorkStart := int(firstActivityLocal)
-			
+
 			// ALWAYS penalize very early starts, regardless of workReasonable flag
 			if actualWorkStart <= 4 {
 				// 4am or earlier is completely absurd - MASSIVE penalty
@@ -309,10 +309,10 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		// Evening activity - VERY conservative scoring (max 0.5 points)
 		// NOT ALL GITHUB USERS CODE IN THE EVENING
 		// What looks like "evening" in one timezone might be afternoon work in another
-		// Also check for misclassified late afternoon activity (5-6pm) 
+		// Also check for misclassified late afternoon activity (5-6pm)
 		if eveningActivity > 0 {
 			eveningRatio := float64(eveningActivity) / float64(totalActivity)
-			
+
 			// Also check 5-6pm activity to detect misclassification
 			lateAfternoonActivity := 0
 			for localHour := 17; localHour <= 18; localHour++ {
@@ -372,14 +372,14 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 				maxActivityHour = hour
 			}
 		}
-		
+
 		// Track if peak time is reasonable
 		peakReasonable := false
 		if maxActivityHour >= 0 {
 			// Convert peak activity UTC hour to local time for this timezone
 			peakLocalHour := (maxActivityHour + testOffset + 24) % 24
-			
-			// Peak is reasonable if it's between 9am-4pm (work) or 6-9pm (OSS hobbyist)  
+
+			// Peak is reasonable if it's between 9am-4pm (work) or 6-9pm (OSS hobbyist)
 			// Morning productivity (9am-12pm) is very common and healthy
 			peakReasonable = (peakLocalHour >= 9 && peakLocalHour <= 16) || (peakLocalHour >= 18 && peakLocalHour <= 21)
 			// Bonus for peak activity during ideal work hours (10am-3pm = 10-15 local)
@@ -632,7 +632,7 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 				// High 5-6pm activity is SUSPICIOUS - people are usually transitioning
 				southAmericaBonus -= 25.0 // Increased from 15 to 25
 				adjustments = append(adjustments, fmt.Sprintf("-25 (suspicious 5-6pm activity %d/%d - dinner time)", lateAfternoonUTC20, endOfDayUTC21))
-				
+
 				// Check if this is actually the peak - if so, it's very wrong
 				isPeak := true
 				for h := range 24 {
@@ -762,7 +762,7 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			} else {
 				adjustments = append(adjustments, "+12 (UK BST/Central Europe winter time)")
 			}
-			
+
 			// Check for European commute pattern (quiet hour at 17-18 local)
 			commuteHourUTC := 17 - testOffset // 17:00 local in UTC
 			if commuteHourUTC >= 0 && commuteHourUTC < 24 {
@@ -772,7 +772,7 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 					adjustments = append(adjustments, fmt.Sprintf("+5 (European commute at %d:00 UTC)", commuteHourUTC))
 				}
 			}
-			
+
 			// Check for UK tea time pattern (15:00-16:00 local)
 			teaTimeUTC := 15 - testOffset
 			if teaTimeUTC >= 0 && teaTimeUTC < 24 {
@@ -833,10 +833,10 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		// Debug: Log scoring details for all candidates
 		// For egibs debugging specifically
 		if username == "egibs" && (testOffset == -3 || testOffset == -5 || testOffset == -6) {
-			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f adjustments=%v\n", 
+			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f adjustments=%v\n",
 				username, testOffset, testConfidence, adjustments)
 		}
-		
+
 		// Add to candidates if confidence is reasonable (at least 10%)
 		if testConfidence >= 10 {
 			candidate := Candidate{

@@ -35,21 +35,21 @@ var (
 
 // UserContext holds all fetched data for a user to avoid redundant API calls.
 type UserContext struct {
-	User          *github.User
-	FromCache     map[string]bool
-	Username      string
-	ProfileHTML   string
-	PullRequests  []github.PullRequest
-	StarredRepos  []github.Repository
-	Repositories  []github.Repository
-	Issues        []github.Issue
-	Comments        []github.Comment
-	Gists           []github.Gist  // Full gist objects with descriptions
-	Commits         []time.Time
+	User             *github.User
+	FromCache        map[string]bool
+	Username         string
+	ProfileHTML      string
+	PullRequests     []github.PullRequest
+	StarredRepos     []github.Repository
+	Repositories     []github.Repository
+	Issues           []github.Issue
+	Comments         []github.Comment
+	Gists            []github.Gist // Full gist objects with descriptions
+	Commits          []time.Time
 	CommitActivities []github.CommitActivity // Enhanced commit data with repository info
-	Organizations   []github.Organization
-	Events          []github.PublicEvent
-	SSHKeys         []github.SSHKey // SSH public keys with creation timestamps
+	Organizations    []github.Organization
+	Events           []github.PublicEvent
+	SSHKeys          []github.SSHKey // SSH public keys with creation timestamps
 }
 
 // Detector performs timezone detection for GitHub users.
@@ -362,7 +362,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 		d.logger.Debug("checking user profile", "username", username)
 		user, err := d.githubClient.FetchUserEnhancedGraphQL(ctx, username)
 		if err != nil {
-			d.logger.Warn("🚩 User Profile Fetch Failed", "username", username, "error", err, 
+			d.logger.Warn("🚩 User Profile Fetch Failed", "username", username, "error", err,
 				"impact", "Gemini analysis will be skipped due to missing profile data")
 		}
 		mu.Lock()
@@ -533,7 +533,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 		userCtx.Gists = gists
 		mu.Unlock()
 	}()
-	
+
 	// Fetch commit activities with repository information (using GraphQL for better quota)
 	wg.Add(1)
 	go func() {
@@ -672,8 +672,8 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 	// SECURITY: Only auto-prefix https:// for well-formed domain names
 	if !strings.HasPrefix(blogURL, "http://") && !strings.HasPrefix(blogURL, "https://") {
 		// Validate it looks like a domain before auto-prefixing
-		if strings.Contains(blogURL, ".") && !strings.Contains(blogURL, " ") && 
-		   !strings.Contains(blogURL, "://") && !strings.HasPrefix(blogURL, "//") {
+		if strings.Contains(blogURL, ".") && !strings.Contains(blogURL, " ") &&
+			!strings.Contains(blogURL, "://") && !strings.HasPrefix(blogURL, "//") {
 			blogURL = "https://" + blogURL
 		} else {
 			d.logger.Debug("invalid URL format, not auto-prefixing", "url", blogURL)
@@ -757,14 +757,14 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 	// This ensures consistent markdown output for the same HTML input
 	htmlStr := string(body)
 	markdownCacheKey := fmt.Sprintf("markdown:%s", blogURL)
-	
+
 	// Check if we have a cached markdown conversion
 	// Use the HTML content as request body for cache key generation
 	if cachedData, found := d.cache.APICall(markdownCacheKey, []byte(htmlStr)); found {
 		d.logger.Debug("using cached markdown conversion", "url", blogURL, "cached_length", len(cachedData))
 		return string(cachedData)
 	}
-	
+
 	d.logger.Debug("markdown cache miss, converting HTML", "url", blogURL, "html_length", len(htmlStr))
 
 	// Convert HTML to markdown for better text extraction

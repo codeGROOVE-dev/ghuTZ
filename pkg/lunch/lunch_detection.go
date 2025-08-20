@@ -146,7 +146,7 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 			lunchTotal := 0
 			lunchBuckets := 0
 			bucketDrops := []float64{} // Track individual bucket drops for steepness analysis
-			
+
 			for t := 0.0; t < duration; t += 0.5 {
 				bucket := math.Mod(startUTC+t+24, 24)
 				// Always count the bucket, even if it doesn't exist (0 events)
@@ -157,7 +157,7 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 					lunchTotal += count
 				}
 				// If bucket doesn't exist, it's 0 events (no activity = lunch!)
-				
+
 				// Calculate drop ratio for this individual bucket
 				bucketDrop := 0.0
 				if beforeCount > 0 {
@@ -174,7 +174,7 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 
 			// Calculate overall drop percentage
 			dropRatio := (float64(beforeCount) - avgLunchActivity) / float64(beforeCount)
-			
+
 			// NEW: Check steepness uniformity for multi-bucket lunch periods
 			// If lunch has multiple buckets, ensure drops are relatively uniform
 			if len(bucketDrops) > 1 {
@@ -188,7 +188,7 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 						minDrop = drop
 					}
 				}
-				
+
 				// If the difference between max and min drop is > 20% of the max drop,
 				// the steepness is not uniform - prefer the steeper single block
 				if maxDrop > 0 && (maxDrop-minDrop)/maxDrop > 0.20 {
@@ -199,7 +199,7 @@ func detectLunchBreakNoonCentered(halfHourCounts map[float64]int, utcOffset int)
 							steepestDrop = drop
 						}
 					}
-					
+
 					// Skip this duration if we're not looking at the steepest bucket
 					// The algorithm will try shorter durations that focus on the steeper drop
 					if duration > 0.5 && steepestDrop > minDrop*1.5 {

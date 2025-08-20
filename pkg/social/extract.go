@@ -29,7 +29,7 @@ func Extract(ctx context.Context, data map[string]string, logger *slog.Logger) [
 	var results []Content
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	
+
 	// SECURITY: Limit concurrent requests to prevent amplification attacks
 	const maxConcurrent = 3
 	const maxURLsToProcess = 10 // SECURITY: Cap total URLs to prevent abuse
@@ -45,12 +45,12 @@ func Extract(ctx context.Context, data map[string]string, logger *slog.Logger) [
 		if urlStr == "" {
 			continue
 		}
-		
+
 		urlCount++
 		wg.Add(1)
 		go func(k, u string) {
 			defer wg.Done()
-			
+
 			// Acquire semaphore
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
@@ -333,7 +333,7 @@ func fetchWebsiteContent(ctx context.Context, websiteURL string, logger *slog.Lo
 	req.Header.Set("User-Agent", "GitHub-Timezone-Detector/1.0")
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	
+
 	// Use retry logic with exponential backoff and jitter
 	var resp *http.Response
 	err = retry.Do(
@@ -360,7 +360,6 @@ func fetchWebsiteContent(ctx context.Context, websiteURL string, logger *slog.Lo
 			logger.Debug("retrying website fetch", "attempt", n+1, "url", websiteURL, "error", err)
 		}),
 	)
-	
 	if err != nil {
 		logger.Debug("failed to fetch website after retries", "url", websiteURL, "error", err)
 		return ""

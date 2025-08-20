@@ -1,6 +1,7 @@
 package gutz
 
 // calculateTypicalActiveHours determines typical work hours based on activity patterns.
+//
 //nolint:gocognit // Complex business logic requires nested conditions
 func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOffset int) (start, end int) {
 	// Convert quiet hours (UTC) to a map for fast lookup
@@ -14,7 +15,7 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 	for _, count := range hourCounts {
 		totalActivity += count
 	}
-	
+
 	if totalActivity == 0 {
 		// Default to 9 AM - 6 PM local time
 		workStart := (9 - utcOffset + 24) % 24
@@ -39,12 +40,12 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 
 	// Collect work hours - significant activity that's not during quiet hours
 	var workHours []int
-	for h := 0; h < 24; h++ {
+	for h := range 24 {
 		if hourCounts[h] >= workThreshold && !quietUTCMap[h] {
 			workHours = append(workHours, h)
 		}
 	}
-	
+
 	// Debug logging (can remove later)
 	if len(workHours) > 0 {
 		// Log for debugging specific cases
@@ -52,7 +53,7 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 
 	// If no substantial work hours found, fall back to all non-quiet activity
 	if len(workHours) == 0 {
-		for h := 0; h < 24; h++ {
+		for h := range 24 {
 			if hourCounts[h] > 0 && !quietUTCMap[h] {
 				workHours = append(workHours, h)
 			}
@@ -73,40 +74,40 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 
 	// For tstromberg pattern: workHours = [0, 1, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
 	// We need to recognize that 0,1 are evening work continuing from 22,23
-	
+
 	// Check if we have hours both early (0-6) and late (18-23) - suggests wraparound pattern
 	// Only consider wraparound if early hours have substantial activity
 	hasEarlyHours := false
 	hasLateHours := false
 	earlyScore := 0
 	lateScore := 0
-	
+
 	for _, h := range workHours {
 		if h <= 6 {
 			hasEarlyHours = true
 			earlyScore += hourCounts[h]
 		}
 		if h >= 18 {
-			hasLateHours = true  
+			hasLateHours = true
 			lateScore += hourCounts[h]
 		}
 	}
-	
-	// Treat as wraparound if early activity is substantial (>8% of total) 
+
+	// Treat as wraparound if early activity is substantial (>8% of total)
 	// AND has at least one hour with significant concentrated activity
-	minEarlyThreshold := totalActivity / 12  // ~8% of total activity
+	minEarlyThreshold := totalActivity / 12 // ~8% of total activity
 	maxEarlyHour := 0
-	for h := 0; h <= 6; h++ {
+	for h := range 7 {
 		if hourCounts[h] > maxEarlyHour {
 			maxEarlyHour = hourCounts[h]
 		}
 	}
-	
+
 	if hasEarlyHours && hasLateHours && earlyScore > minEarlyThreshold && maxEarlyHour >= 10 {
 		// Wraparound pattern: find the main work block and extend to include evening hours
 		var mainBlock []int
 		var earlyBlock []int
-		
+
 		// Separate into early hours (0-6) and main work hours (7-23)
 		for _, h := range workHours {
 			if h <= 6 {
@@ -115,11 +116,11 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 				mainBlock = append(mainBlock, h)
 			}
 		}
-		
+
 		if len(mainBlock) > 0 {
 			bestStart = mainBlock[0]
 			bestEnd = mainBlock[len(mainBlock)-1]
-			
+
 			// If we have significant early morning hours, extend the end to include them
 			if len(earlyBlock) > 0 {
 				// Find the last hour with meaningful activity in the early block
@@ -134,17 +135,17 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 		}
 	} else {
 		// Standard approach: find the longest continuous block
-		for i := 0; i < len(workHours); i++ {
+		for i := range len(workHours) {
 			start := workHours[i]
-			
+
 			// Find the end of this continuous block (allowing small gaps)
 			end := start
 			currentScore := hourCounts[start]
-			
+
 			for j := i + 1; j < len(workHours); j++ {
 				nextHour := workHours[j]
 				gap := (nextHour - end + 24) % 24
-				
+
 				// Allow small gaps (1-3 hours) in work blocks (for lunch, meetings, etc.)
 				if gap <= 3 {
 					end = nextHour
@@ -153,7 +154,7 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 					break
 				}
 			}
-			
+
 			// Check if this block is better (higher total activity)
 			if currentScore > bestScore {
 				bestScore = currentScore
@@ -174,17 +175,17 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 	// Ensure reasonable duration (6-17 hours) - some people work very long days
 	duration := (workEnd - workStart + 24) % 24
 	maxDuration := 17 // More reasonable maximum for extreme cases
-	
+
 	if duration > maxDuration {
 		// Trim to the maximum, keeping the most active part
 		// Find the maxDuration-hour window with the most activity starting from workStart
 		bestWindowStart := workStart
 		bestWindowScore := 0
-		
+
 		for shift := 0; shift <= duration-maxDuration; shift++ {
 			windowStart := (workStart + shift) % 24
 			windowScore := 0
-			for i := 0; i < maxDuration; i++ {
+			for i := range maxDuration {
 				hour := (windowStart + i) % 24
 				windowScore += hourCounts[hour]
 			}
@@ -193,12 +194,12 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 				bestWindowStart = windowStart
 			}
 		}
-		
+
 		workStart = bestWindowStart
-		workEnd = (bestWindowStart + maxDuration - 1) % 24  // maxDuration-hour window
+		workEnd = (bestWindowStart + maxDuration - 1) % 24 // maxDuration-hour window
 	} else if duration < 6 {
 		// Extend to 8 hours
-		workEnd = (workStart + 7) % 24  // 8-hour window
+		workEnd = (workStart + 7) % 24 // 8-hour window
 	}
 
 	return workStart, workEnd

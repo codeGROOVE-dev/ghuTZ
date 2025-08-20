@@ -114,9 +114,9 @@ func TestGeminiDataCompleteness(t *testing.T) {
 		"user",
 		"recent_events",
 		"organizations",
-		"social_accounts",        // NEW!
-		"starred_repositories",   // Fixed: actual key used in code
-		"gist_count",             // NEW!
+		"social_accounts",      // NEW!
+		"starred_repositories", // Fixed: actual key used in code
+		"gist_count",           // NEW!
 	}
 
 	for _, key := range expectedKeys {

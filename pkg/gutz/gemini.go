@@ -50,7 +50,7 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	client := gemini.NewClient(d.geminiAPIKey, d.geminiModel, d.gcpProject)
 	resp, err := client.CallWithSDK(ctx, prompt, d.cache, d.logger)
 	if err != nil {
-		return nil, fmt.Errorf("🚩 Gemini API SDK call failed: %w (prompt_length: %d, has_activity: %t)", 
+		return nil, fmt.Errorf("🚩 Gemini API SDK call failed: %w (prompt_length: %d, has_activity: %t)",
 			err, len(prompt), hasActivityData)
 	}
 
@@ -78,7 +78,7 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	if !hasActivityData && confidence > 0.5 {
 		// Without activity data, cap confidence at 50%
 		confidence = 0.5
-		d.logger.Debug("capped confidence due to no activity data", 
+		d.logger.Debug("capped confidence due to no activity data",
 			"original", confidence, "capped", 0.5)
 	}
 
@@ -86,7 +86,7 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 	if hasActivityData && confidence > 0.5 {
 		// Only boost if confidence is already decent
 		originalConfidence := confidence
-		confidence = math.Min(confidence + 0.05, 0.9) // Add max 5%, cap at 90%
+		confidence = math.Min(confidence+0.05, 0.9) // Add max 5%, cap at 90%
 		if confidence != originalConfidence {
 			d.logger.Debug("applied activity data confidence boost",
 				"original", originalConfidence, "boosted", confidence)
@@ -109,7 +109,7 @@ func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextDat
 //nolint:gocognit,nestif,revive,maintidx // Complex AI-based analysis requires comprehensive data processing
 func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, userCtx *UserContext, activityResult *Result) *Result {
 	if userCtx.User == nil {
-		d.logger.Warn("🚩 User Profile Unavailable - Proceeding with Gemini analysis using available data", "username", userCtx.Username, 
+		d.logger.Warn("🚩 User Profile Unavailable - Proceeding with Gemini analysis using available data", "username", userCtx.Username,
 			"issue", "GitHub user profile fetch failed - likely token scope issues or user not found")
 	}
 
@@ -158,11 +158,11 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 			}
 
 			contextData["activity_date_range"] = map[string]any{
-				"oldest":                 activityResult.ActivityDateRange.OldestActivity,
-				"newest":                 activityResult.ActivityDateRange.NewestActivity,
-				"total_days":             activityResult.ActivityDateRange.TotalDays,
-				"total_events":           totalEvents,
-				"spans_dst_transitions":  activityResult.ActivityDateRange.SpansDSTTransitions,
+				"oldest":                activityResult.ActivityDateRange.OldestActivity,
+				"newest":                activityResult.ActivityDateRange.NewestActivity,
+				"total_days":            activityResult.ActivityDateRange.TotalDays,
+				"total_events":          totalEvents,
+				"spans_dst_transitions": activityResult.ActivityDateRange.SpansDSTTransitions,
 			}
 		}
 
@@ -243,7 +243,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	// Add gist information with descriptions (last 5 gists for location/interest hints)
 	if len(userCtx.Gists) > 0 {
 		contextData["gist_count"] = len(userCtx.Gists)
-		
+
 		// Include last 5 gists with descriptions for location/interest analysis
 		recentGists := userCtx.Gists
 		if len(recentGists) > 5 {
@@ -316,7 +316,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		contextData["contributed_repositories"] = contributedRepos
 		dataSources = append(dataSources, "External Contributions")
 	}
-	
+
 	// Extract and dedupe emails from profile and commits
 	emails := extractAndDedupeEmails(userCtx)
 	if len(emails) > 0 {
@@ -388,19 +388,19 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 			case strings.Contains(socialURL, "bsky.app"):
 				socialProfiles["bluesky"] = socialURL
 				d.logger.Debug("identified BlueSky URL", "url", socialURL)
-			case strings.Contains(socialURL, "/@") || strings.Contains(socialURL, "infosec.exchange") || 
-				 strings.Contains(socialURL, "mastodon") || strings.Contains(socialURL, ".social"):
+			case strings.Contains(socialURL, "/@") || strings.Contains(socialURL, "infosec.exchange") ||
+				strings.Contains(socialURL, "mastodon") || strings.Contains(socialURL, ".social"):
 				socialProfiles["mastodon"] = socialURL
 				d.logger.Debug("identified Mastodon URL", "url", socialURL)
 			}
 		}
 
 		d.logger.Debug("social profiles to extract", "profiles", socialProfiles, "count", len(socialProfiles))
-		
+
 		// Extract social media data using the social package
 		d.logger.Debug("calling social.Extract", "profiles", socialProfiles)
 		extractedProfiles := social.Extract(ctx, socialProfiles, d.logger)
-		
+
 		d.logger.Debug("extracted social profiles", "count", len(extractedProfiles), "profiles", extractedProfiles)
 
 		// Process extracted profiles
@@ -457,7 +457,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 						strings.Contains(lowerKey, "home") || strings.Contains(lowerKey, "url") {
 						if strings.HasPrefix(value, "http") {
 							mastodonData.Websites = append(mastodonData.Websites, value)
-							d.logger.Debug("found website in Mastodon field", 
+							d.logger.Debug("found website in Mastodon field",
 								"field", key, "url", value, "username", extractedProfiles[idx].Username)
 						}
 					}
@@ -494,7 +494,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	// Query Gemini with all context
 	geminiResult, err := d.queryUnifiedGeminiForTimezone(ctx, contextData)
 	if err != nil {
-		d.logger.Warn("🚩 Gemini API Analysis Failed", "username", userCtx.Username, 
+		d.logger.Warn("🚩 Gemini API Analysis Failed", "username", userCtx.Username,
 			"error", err,
 			"data_sources", dataSources,
 			"context_keys", getContextDataKeys(contextData),
@@ -566,23 +566,23 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		result.TopOrganizations = activityResult.TopOrganizations
 		result.HourlyOrganizationActivity = activityResult.HourlyOrganizationActivity
 		result.ActivityDateRange = activityResult.ActivityDateRange
-		
+
 		// Check if Gemini's timezone differs significantly from activity-based detection
 		if len(activityResult.TimezoneCandidates) > 0 {
 			// Get the UTC offset from Gemini's timezone
 			geminiOffset := getUTCOffsetFromTimezone(geminiResult.Timezone)
-			
+
 			// Get the top activity-based candidate offset
 			topActivityOffset := activityResult.TimezoneCandidates[0].Offset
-			
+
 			// Calculate the difference in hours
 			offsetDiff := math.Abs(geminiOffset - topActivityOffset)
-			
+
 			// Flag if difference is > 2 hours
 			if offsetDiff > 2.0 {
 				result.GeminiActivityMismatch = true
 				result.GeminiActivityOffsetHours = offsetDiff
-				
+
 				d.logger.Warn("Gemini timezone differs significantly from activity pattern",
 					"username", userCtx.Username,
 					"gemini_timezone", geminiResult.Timezone,
@@ -612,12 +612,12 @@ func getUTCOffsetFromTimezone(tzString string) float64 {
 		// Default to 0 if we can't parse
 		return 0
 	}
-	
+
 	// Get the offset for the current time
 	// This handles DST correctly for the current date
 	now := time.Now().In(loc)
 	_, offset := now.Zone()
-	
+
 	// Convert seconds to hours
 	return float64(offset) / 3600.0
 }
@@ -625,7 +625,7 @@ func getUTCOffsetFromTimezone(tzString string) float64 {
 // extractRepositoryContributions aggregates repository contributions from all sources.
 func extractRepositoryContributions(userCtx *UserContext) []repoContribution {
 	contributedRepos := make(map[string]int)
-	
+
 	// Extract from PRs
 	for i := range userCtx.PullRequests {
 		pr := &userCtx.PullRequests[i]
@@ -633,7 +633,7 @@ func extractRepositoryContributions(userCtx *UserContext) []repoContribution {
 			contributedRepos[pr.RepoName]++
 		}
 	}
-	
+
 	// Extract from Issues
 	for i := range userCtx.Issues {
 		issue := &userCtx.Issues[i]
@@ -641,7 +641,7 @@ func extractRepositoryContributions(userCtx *UserContext) []repoContribution {
 			contributedRepos[issue.RepoName]++
 		}
 	}
-	
+
 	// Extract from Comments (parse repository from HTML URL)
 	for _, comment := range userCtx.Comments {
 		if repoFullName := extractRepoFromGitHubURL(comment.HTMLURL); repoFullName != "" {
@@ -651,7 +651,7 @@ func extractRepositoryContributions(userCtx *UserContext) []repoContribution {
 			}
 		}
 	}
-	
+
 	// Extract from Commit Activities (using enhanced GraphQL commit data)
 	for _, commitActivity := range userCtx.CommitActivities {
 		// Only count external contributions (not user's own repos)
@@ -659,17 +659,17 @@ func extractRepositoryContributions(userCtx *UserContext) []repoContribution {
 			contributedRepos[commitActivity.Repository]++
 		}
 	}
-	
+
 	// Convert to sorted list
 	if len(contributedRepos) == 0 {
 		return nil
 	}
-	
+
 	var contribs []repoContribution
 	for repo, count := range contributedRepos {
 		contribs = append(contribs, repoContribution{Name: repo, Count: count})
 	}
-	
+
 	// Sort by contribution count descending, then by name for deterministic ordering
 	for i := 0; i < len(contribs); i++ {
 		for j := i + 1; j < len(contribs); j++ {
@@ -679,52 +679,53 @@ func extractRepositoryContributions(userCtx *UserContext) []repoContribution {
 			}
 		}
 	}
-	
+
 	// Limit to top 15 contributions to avoid overwhelming Gemini
 	if len(contribs) > 15 {
 		contribs = contribs[:15]
 	}
-	
+
 	return contribs
 }
 
 // extractRepoFromGitHubURL extracts repository owner/name from a GitHub URL
 // Examples:
-//   https://github.com/owner/repo/issues/123 -> "owner/repo"
-//   https://github.com/owner/repo/pull/456#issuecomment-789 -> "owner/repo"
-//   https://github.com/owner/repo/commit/abc123 -> "owner/repo"
+//
+//	https://github.com/owner/repo/issues/123 -> "owner/repo"
+//	https://github.com/owner/repo/pull/456#issuecomment-789 -> "owner/repo"
+//	https://github.com/owner/repo/commit/abc123 -> "owner/repo"
 func extractRepoFromGitHubURL(htmlURL string) string {
 	if htmlURL == "" {
 		return ""
 	}
-	
+
 	// Parse the URL to extract the path
 	// Expected format: https://github.com/owner/repo/...
 	// We want to extract "owner/repo"
-	
+
 	// Simple string parsing approach for GitHub URLs
 	const githubPrefix = "https://github.com/"
 	if !strings.HasPrefix(htmlURL, githubPrefix) {
 		return ""
 	}
-	
+
 	// Remove the github.com prefix
 	path := strings.TrimPrefix(htmlURL, githubPrefix)
-	
+
 	// Split by '/' and take first two parts (owner/repo)
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
 		return ""
 	}
-	
+
 	owner := parts[0]
 	repo := parts[1]
-	
+
 	// Basic validation - owner and repo should not be empty
 	if owner == "" || repo == "" {
 		return ""
 	}
-	
+
 	return owner + "/" + repo
 }
 
@@ -732,7 +733,7 @@ func extractRepoFromGitHubURL(htmlURL string) string {
 func extractAndDedupeEmails(userCtx *UserContext) []string {
 	emailSet := make(map[string]bool)
 	var emails []string
-	
+
 	// Add user profile email if available
 	if userCtx.User != nil && userCtx.User.Email != "" {
 		email := strings.ToLower(strings.TrimSpace(userCtx.User.Email))
@@ -741,7 +742,7 @@ func extractAndDedupeEmails(userCtx *UserContext) []string {
 			emails = append(emails, email)
 		}
 	}
-	
+
 	// Add emails from commit activities
 	for _, commitActivity := range userCtx.CommitActivities {
 		// Add author email
@@ -752,7 +753,7 @@ func extractAndDedupeEmails(userCtx *UserContext) []string {
 				emails = append(emails, email)
 			}
 		}
-		
+
 		// Add committer email (often different from author)
 		if commitActivity.CommitterEmail != "" {
 			email := strings.ToLower(strings.TrimSpace(commitActivity.CommitterEmail))
@@ -762,7 +763,7 @@ func extractAndDedupeEmails(userCtx *UserContext) []string {
 			}
 		}
 	}
-	
+
 	return emails
 }
 
@@ -771,25 +772,25 @@ func isValidEmail(email string) bool {
 	if email == "" || len(email) > 254 {
 		return false
 	}
-	
+
 	// Basic validation - must contain @ and domain
 	if !strings.Contains(email, "@") {
 		return false
 	}
-	
+
 	parts := strings.Split(email, "@")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return false
 	}
-	
+
 	// Skip noreply and bot emails that aren't useful for location detection
-	if strings.Contains(email, "noreply") || 
-	   strings.Contains(email, "users.noreply.github.com") ||
-	   strings.Contains(email, "+bot@") ||
-	   strings.Contains(email, "bot@") {
+	if strings.Contains(email, "noreply") ||
+		strings.Contains(email, "users.noreply.github.com") ||
+		strings.Contains(email, "+bot@") ||
+		strings.Contains(email, "bot@") {
 		return false
 	}
-	
+
 	return true
 }
 
@@ -809,4 +810,3 @@ func truncateString(s string, maxLen int) string {
 	}
 	return s[:maxLen] + "..."
 }
-

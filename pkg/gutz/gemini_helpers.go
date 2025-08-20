@@ -83,7 +83,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		}
 		sb.WriteString("\n")
 	}
-	
+
 	// Display social accounts from GraphQL
 	if socialAccounts, ok := contextData["social_accounts"].([]github.SocialAccount); ok && len(socialAccounts) > 0 {
 		sb.WriteString("Social Media Accounts:\n")
@@ -96,7 +96,6 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		}
 		sb.WriteString("\n")
 	}
-
 
 	// Organizations with their locations and descriptions.
 	if orgs, ok := contextData["organizations"].([]github.Organization); ok && len(orgs) > 0 {
@@ -196,7 +195,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		if mastodonProfile.JoinedDate != "" {
 			fmt.Fprintf(&sb, "- Joined: %s\n", mastodonProfile.JoinedDate)
 		}
-		
+
 		// Display profile fields (these often contain location, pronouns, websites, etc.)
 		if len(mastodonProfile.ProfileFields) > 0 {
 			sb.WriteString("- Profile fields:\n")
@@ -204,7 +203,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 				fmt.Fprintf(&sb, "  • %s: %s\n", key, value)
 			}
 		}
-		
+
 		// Display extracted websites
 		if len(mastodonProfile.Websites) > 0 {
 			sb.WriteString("- Websites found:\n")
@@ -212,7 +211,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 				fmt.Fprintf(&sb, "  • %s\n", website)
 			}
 		}
-		
+
 		// Display hashtags if present (can indicate interests/location)
 		if len(mastodonProfile.Hashtags) > 0 {
 			sb.WriteString("- Hashtags: ")
@@ -245,28 +244,28 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 			fmt.Fprintf(&sb, "UTC%+.0f", candidate.Offset)
 		}
 		sb.WriteString("\n")
-		
+
 		// Add time range analyzed and DST warning if applicable
 		if dateRange, ok := contextData["activity_date_range"].(map[string]any); ok {
 			if oldest, ok := dateRange["oldest"].(time.Time); ok {
 				if newest, ok := dateRange["newest"].(time.Time); ok {
-					fmt.Fprintf(&sb, "Time range analyzed: %s to %s", 
+					fmt.Fprintf(&sb, "Time range analyzed: %s to %s",
 						oldest.Format("2006-01-02"), newest.Format("2006-01-02"))
-					
+
 					// Add DST transition warning if applicable
 					if spansDST, ok := dateRange["spans_dst_transitions"].(bool); ok && spansDST {
 						sb.WriteString(" ⚠️ WARNING: Analysis spans daylight saving time transitions")
-						
+
 						// Determine if it's US or EU DST transitions based on date ranges
 						oldestMonth := oldest.Month()
 						newestMonth := newest.Month()
-						
+
 						// Check for US DST transitions (March/November)
 						if (oldestMonth <= 3 && newestMonth >= 3) || (oldestMonth <= 11 && newestMonth >= 11) {
 							sb.WriteString(" (US: March/November)")
 						}
-						
-						// Check for EU DST transitions (March/October)  
+
+						// Check for EU DST transitions (March/October)
 						if (oldestMonth <= 3 && newestMonth >= 3) || (oldestMonth <= 10 && newestMonth >= 10) {
 							sb.WriteString(" (EU: March/October)")
 						}
@@ -305,13 +304,13 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 				// Convert candidate's UTC lunch time to local time for this candidate
 				localLunchStart := math.Mod(candidate.LunchStartUTC+float64(offset)+24, 24)
 				localLunchEnd := math.Mod(candidate.LunchEndUTC+float64(offset)+24, 24)
-				
+
 				// Format the times properly
 				startHour := int(localLunchStart)
 				startMin := int((localLunchStart - float64(startHour)) * 60)
 				endHour := int(localLunchEnd)
 				endMin := int((localLunchEnd - float64(endHour)) * 60)
-				
+
 				fmt.Fprintf(&sb, "   Lunch: %02d:%02d-%02d:%02d local", startHour, startMin, endHour, endMin)
 				if localLunchStart >= 11 && localLunchStart <= 14 {
 					sb.WriteString(" ✓")
@@ -333,7 +332,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 				currentEnd := sleepHours[0]
 				maxLength := 1
 				currentLength := 1
-				
+
 				for i := 1; i < len(sleepHours); i++ {
 					// Check if this hour continues the sequence (considering wrap-around)
 					expectedNext := (currentEnd + 1) % 24
@@ -352,15 +351,15 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 						currentLength = 1
 					}
 				}
-				
+
 				// Calculate local sleep hours
 				localSleepStart := (longestStart + offset + 24) % 24
-				localSleepEnd := ((longestEnd + 1) % 24 + offset + 24) % 24 // Add 1 to get end of sleep period
-				
+				localSleepEnd := ((longestEnd+1)%24 + offset + 24) % 24 // Add 1 to get end of sleep period
+
 				// Format the sleep display with more detail
-				fmt.Fprintf(&sb, "   Sleep: %02d:00-%02d:00 local (%d hrs)", 
+				fmt.Fprintf(&sb, "   Sleep: %02d:00-%02d:00 local (%d hrs)",
 					localSleepStart, localSleepEnd, maxLength)
-				
+
 				// Check if sleep is at night - normal sleep starts 8pm-2am and ends 4am-10am
 				nighttimeStart := (localSleepStart >= 20 && localSleepStart <= 23) || (localSleepStart >= 0 && localSleepStart <= 2)
 				nighttimeEnd := (localSleepEnd >= 4 && localSleepEnd <= 10) || (localSleepEnd >= 0 && localSleepEnd <= 3)
@@ -391,7 +390,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 				}
 				sb.WriteString("\n")
 			}
-			
+
 			// Add validation indicators
 			if candidate.WorkHoursReasonable && candidate.LunchReasonable && candidate.SleepReasonable && candidate.PeakTimeReasonable {
 				sb.WriteString("   ✓ All patterns align well with this timezone\n")
@@ -413,7 +412,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 					fmt.Fprintf(&sb, "   ⚠️ Issues: %s\n", strings.Join(issues, ", "))
 				}
 			}
-			
+
 			// Include human-readable scoring analysis for AI
 			if len(candidate.ScoringDetails) > 0 {
 				var positives, negatives []string
@@ -424,19 +423,19 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 						reason = strings.TrimSuffix(reason, ")")
 						positives = append(positives, reason)
 					} else if strings.HasPrefix(detail, "-") {
-						// Convert "-15 (suspicious 5-6pm activity)" to "Suspicious 5-6pm activity" 
+						// Convert "-15 (suspicious 5-6pm activity)" to "Suspicious 5-6pm activity"
 						reason := strings.TrimSpace(strings.Split(detail, "(")[1])
 						reason = strings.TrimSuffix(reason, ")")
 						negatives = append(negatives, reason)
 					}
 				}
-				
+
 				if len(positives) > 0 {
 					sb.WriteString("   ✓ Reasons this timezone fits: ")
 					sb.WriteString(strings.Join(positives, "; "))
 					sb.WriteString("\n")
 				}
-				
+
 				if len(negatives) > 0 {
 					sb.WriteString("   ⚠️ Reasons this may not be correct: ")
 					sb.WriteString(strings.Join(negatives, "; "))
