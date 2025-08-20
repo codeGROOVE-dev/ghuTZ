@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/codeGROOVE-dev/retry"
 )
 
 // BlueSkyProfile represents a BlueSky profile from the API.
@@ -135,9 +137,35 @@ func fetchBlueSkyProfile(ctx context.Context, handle string, logger *slog.Logger
 		Timeout: 10 * time.Second,
 	}
 
-	resp, err := client.Do(req)
+	// Use retry logic with exponential backoff and jitter
+	var resp *http.Response
+	err = retry.Do(
+		func() error {
+			var doErr error
+			resp, doErr = client.Do(req)
+			if doErr != nil {
+				return doErr
+			}
+			// Retry on server errors and rate limiting
+			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+				resp.Body.Close()
+				return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+			}
+			return nil
+		},
+		retry.Context(ctx),
+		retry.Attempts(5),
+		retry.Delay(time.Second),
+		retry.MaxDelay(2*time.Minute),
+		retry.DelayType(retry.FullJitterBackoffDelay),
+		retry.OnRetry(func(n uint, err error) {
+			logger.Debug("retrying BlueSky API fetch", "attempt", n+1, "url", apiURL, "error", err)
+		}),
+	)
+	
 	if err != nil {
-		return nil, fmt.Errorf("fetching profile: %w", err)
+		return nil, fmt.Errorf("fetching profile after retries: %w", err)
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {

@@ -3,6 +3,7 @@ package social
 
 import (
 	"context"
+	"fmt"
 	"html"
 	"io"
 	"log/slog"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/codeGROOVE-dev/retry"
 )
 
 // Extract processes a map of social media URLs/data and returns structured content for each
@@ -330,9 +333,36 @@ func fetchWebsiteContent(ctx context.Context, websiteURL string, logger *slog.Lo
 	req.Header.Set("User-Agent", "GitHub-Timezone-Detector/1.0")
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	
+	// Use retry logic with exponential backoff and jitter
+	var resp *http.Response
+	err = retry.Do(
+		func() error {
+			var doErr error
+			resp, doErr = client.Do(req)
+			if doErr != nil {
+				return doErr
+			}
+			// Retry on server errors and rate limiting
+			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
+				body, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+			}
+			return nil
+		},
+		retry.Context(ctx),
+		retry.Attempts(5),
+		retry.Delay(time.Second),
+		retry.MaxDelay(2*time.Minute),
+		retry.DelayType(retry.FullJitterBackoffDelay),
+		retry.OnRetry(func(n uint, err error) {
+			logger.Debug("retrying website fetch", "attempt", n+1, "url", websiteURL, "error", err)
+		}),
+	)
+	
 	if err != nil {
-		logger.Debug("failed to fetch website", "url", websiteURL, "error", err)
+		logger.Debug("failed to fetch website after retries", "url", websiteURL, "error", err)
 		return ""
 	}
 	defer func() {
