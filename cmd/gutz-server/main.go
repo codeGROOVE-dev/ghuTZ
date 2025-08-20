@@ -654,6 +654,9 @@ func decompressJSON(data []byte) ([]byte, error) {
 func checkDiskCache(cachePath string, memoryCacheKey string, username string, logger *slog.Logger) (*gutz.Result, bool) {
 	compressedData, err := os.ReadFile(cachePath)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.Debug("Failed to read cache file", "path", cachePath, "error", err)
+		}
 		return nil, false
 	}
 
@@ -682,7 +685,14 @@ func checkDiskCache(cachePath string, memoryCacheKey string, username string, lo
 		return nil, false
 	}
 
-	logger.Info("Disk cache hit", "username", username, "age_hours", int(age.Hours()))
+	fileSize := len(compressedData)
+	logger.Info("CACHE HIT: Disk",
+		"username", username,
+		"path", cachePath,
+		"cache_type", "disk",
+		"age_hours", int(age.Hours()),
+		"compressed_size_bytes", fileSize,
+		"uncompressed_size_bytes", len(jsonData))
 
 	// Also store in memory cache for next time
 	responseCache.Set(memoryCacheKey, jsonData)
@@ -721,11 +731,16 @@ func saveToDiskCache(result *gutz.Result, cachePath string, memoryCacheKey strin
 		return
 	}
 
-	logger.Info("Disk cache updated", "username", username, "path", cachePath,
-		"uncompressed_size", len(jsonData), "compressed_size", len(compressedData))
+	logger.Info("CACHE WRITE: Disk cache saved",
+		"username", username,
+		"path", cachePath,
+		"uncompressed_size_bytes", len(jsonData),
+		"compressed_size_bytes", len(compressedData),
+		"compression_ratio", fmt.Sprintf("%.1f%%", float64(len(compressedData))*100/float64(len(jsonData))))
 
 	// Store uncompressed JSON in memory cache
 	responseCache.Set(memoryCacheKey, jsonData)
+	logger.Debug("CACHE WRITE: Memory cache updated", "username", username, "cache_key", memoryCacheKey)
 }
 
 func handleAPIDetect(detector *gutz.Detector, logger *slog.Logger) http.HandlerFunc {
@@ -767,7 +782,10 @@ func handleAPIDetect(detector *gutz.Detector, logger *slog.Logger) http.HandlerF
 		// Check in-memory cache first
 		memoryCacheKey := "api:detect:" + req.Username
 		if cachedBytes, found := responseCache.Get(memoryCacheKey); found {
-			logger.Info("Memory cache hit", "username", req.Username)
+			logger.Info("CACHE HIT: Memory",
+				"username", req.Username,
+				"cache_type", "memory",
+				"size_bytes", len(cachedBytes))
 			writer.Header().Set("Content-Type", "application/json")
 			writer.Header().Set("X-Cache", "memory-hit")
 			if _, err := writer.Write(cachedBytes); err != nil {
@@ -775,16 +793,21 @@ func handleAPIDetect(detector *gutz.Detector, logger *slog.Logger) http.HandlerF
 			}
 			return
 		}
+		logger.Debug("CACHE MISS: Memory", "username", req.Username, "cache_key", memoryCacheKey)
 
 		// Check disk cache if configured
 		var result *gutz.Result
 		diskCacheHit := false
+		var cachePath string
 
 		if *cacheDir != "" {
-			cachePath := buildCachePath(*cacheDir, req.Username)
+			cachePath = buildCachePath(*cacheDir, req.Username)
+			logger.Debug("Checking disk cache", "path", cachePath)
 			if cachedResult, hit := checkDiskCache(cachePath, memoryCacheKey, req.Username, logger); hit {
 				result = cachedResult
 				diskCacheHit = true
+			} else {
+				logger.Debug("CACHE MISS: Disk", "username", req.Username, "path", cachePath)
 			}
 		}
 
@@ -802,8 +825,10 @@ func handleAPIDetect(detector *gutz.Detector, logger *slog.Logger) http.HandlerF
 			result = detectionResult
 
 			// Save to disk cache if detection succeeded and cache directory is configured
-			if *cacheDir != "" {
-				cachePath := buildCachePath(*cacheDir, req.Username)
+			if *cacheDir != "" && cachePath == "" {
+				cachePath = buildCachePath(*cacheDir, req.Username)
+			}
+			if cachePath != "" {
 				saveToDiskCache(result, cachePath, memoryCacheKey, req.Username, logger)
 			}
 		}
@@ -815,11 +840,18 @@ func handleAPIDetect(detector *gutz.Detector, logger *slog.Logger) http.HandlerF
 			return
 		}
 
-		logger.Info("Detection successful",
+		// Log response details with cache source
+		cacheSource := "computed"
+		if diskCacheHit {
+			cacheSource = "disk_cache"
+		}
+
+		logger.Info("API Response",
 			"username", req.Username,
 			"timezone", result.Timezone,
 			"method", result.Method,
-			"disk_cached", diskCacheHit)
+			"cache_source", cacheSource,
+			"cache_path", cachePath)
 
 		// Log detailed result information for debugging
 		logger.Debug("Detection result details",

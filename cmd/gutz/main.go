@@ -194,18 +194,16 @@ func main() {
 }
 
 func printResult(result *gutz.Result) {
-	printHeader(result)
+	// Print header
+	fmt.Printf("\n🌍 GitHub User: %s\n", result.Username)
+	fmt.Println(strings.Repeat("─", 50))
+
 	printLocation(result)
 	printTimezone(result)
 	printWorkSchedule(result)
 	printOrganizations(result)
 	printActivitySummary(result)
 	printDetectionInfo(result)
-}
-
-func printHeader(result *gutz.Result) {
-	fmt.Printf("\n🌍 GitHub User: %s\n", result.Username)
-	fmt.Println(strings.Repeat("─", 50))
 }
 
 func printLocation(result *gutz.Result) {

@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>guTZ - GitHub Timezone Detective</title>
+        <title>guTZ GitHub Timezone Detective</title>
         <style>
             :root {
                 --burnt-orange: #cc5500;
@@ -553,6 +553,8 @@
 
                 if (usernameParam) {
                     document.getElementById("username").value = usernameParam;
+                    // Update page title with username from URL
+                    document.title = usernameParam + " - guTZ GitHub Timezone Detective";
                     setTimeout(() => {
                         document
                             .getElementById("detectForm")
@@ -566,6 +568,8 @@
                 const newURL = new URL(window.location);
                 newURL.searchParams.set("u", username);
                 window.history.replaceState({}, "", newURL);
+                // Update page title with username
+                document.title = username + " - guTZ GitHub Timezone Detective";
             }
 
             document
