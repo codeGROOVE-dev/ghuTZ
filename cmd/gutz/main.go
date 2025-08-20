@@ -119,6 +119,11 @@ func main() {
 
 	// Removed - Gemini info now shown after activity pattern
 
+	// Clear GeminiPrompt unless in verbose mode (to save memory)
+	if !*verbose {
+		result.GeminiPrompt = ""
+	}
+
 	// Print results in CLI format
 	printResult(result)
 

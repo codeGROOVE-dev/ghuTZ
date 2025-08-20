@@ -260,6 +260,7 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 	result.SleepBucketsUTC = activityResult.SleepBucketsUTC
 	result.ActiveHoursLocal = activityResult.ActiveHoursLocal
 	result.LunchHoursUTC = activityResult.LunchHoursUTC
+	result.LunchHoursLocal = activityResult.LunchHoursLocal
 	result.PeakProductivity = activityResult.PeakProductivity
 	result.TopOrganizations = activityResult.TopOrganizations
 	result.HourlyActivityUTC = activityResult.HourlyActivityUTC
@@ -330,6 +331,8 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 						End:        candidate.LunchEndUTC,
 						Confidence: candidate.LunchConfidence,
 					}
+					// Set LunchHoursLocal to the same values (like ActiveHoursLocal, it's actually UTC)
+					result.LunchHoursLocal = result.LunchHoursUTC
 					lunchFound = true
 					break
 				}
@@ -354,6 +357,8 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 				End:        lunchEnd,
 				Confidence: lunchConfidence,
 			}
+			// Set LunchHoursLocal to the same values (like ActiveHoursLocal, it's actually UTC)
+			result.LunchHoursLocal = result.LunchHoursUTC
 		}
 	}
 }

@@ -714,6 +714,7 @@ func saveToDiskCache(result *gutz.Result, cachePath string, memoryCacheKey strin
 		return
 	}
 
+	// Note: GeminiPrompt has already been cleared before this function is called
 	jsonData, err := json.Marshal(result)
 	if err != nil {
 		logger.Debug("Failed to marshal result", "error", err)
@@ -824,12 +825,20 @@ func handleAPIDetect(detector *gutz.Detector, logger *slog.Logger) http.HandlerF
 			}
 			result = detectionResult
 
-			// Save to disk cache if detection succeeded and cache directory is configured
+			// Save to disk cache asynchronously if detection succeeded and cache directory is configured
 			if *cacheDir != "" && cachePath == "" {
 				cachePath = buildCachePath(*cacheDir, req.Username)
 			}
 			if cachePath != "" {
-				saveToDiskCache(result, cachePath, memoryCacheKey, req.Username, logger)
+				// Make a copy of the result for async disk cache save to avoid race conditions
+				// Clear GeminiPrompt before caching - we never want to store it
+				resultCopy := *result
+				resultCopy.GeminiPrompt = ""
+				finalCachePath := cachePath
+				finalMemoryCacheKey := memoryCacheKey
+				finalUsername := req.Username
+				// Save to disk cache in background to avoid blocking the HTTP response
+				go saveToDiskCache(&resultCopy, finalCachePath, finalMemoryCacheKey, finalUsername, logger)
 			}
 		}
 
@@ -884,6 +893,11 @@ func handleAPIDetect(detector *gutz.Detector, logger *slog.Logger) http.HandlerF
 
 		// SECURITY: Restrictive CORS - only allow same origin by default
 		// No CORS headers = same-origin only (most secure default)
+
+		// Clear GeminiPrompt unless in verbose/debug mode
+		if !*verbose {
+			result.GeminiPrompt = ""
+		}
 
 		if err := json.NewEncoder(writer).Encode(result); err != nil {
 			logger.Error("failed to encode JSON response", "error", err)

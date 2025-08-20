@@ -83,7 +83,6 @@ func (c *Client) checkCache(prompt string, cache CacheInterface, logger Logger) 
 		return nil
 	}
 
-	logger.Debug("Gemini SDK cache hit", "cache_data_length", len(cachedData))
 	var result Response
 	if err := json.Unmarshal(cachedData, &result); err != nil {
 		logger.Debug("Failed to unmarshal cached Gemini response", "error", err)
@@ -96,7 +95,7 @@ func (c *Client) checkCache(prompt string, cache CacheInterface, logger Logger) 
 	}
 
 	// Validate the cached result has actual data
-	logger.Debug("Using cached Gemini response", "timezone", result.DetectedTimezone, "confidence", result.ConfidenceLevel)
+	logger.Info("Using cached Gemini response", "timezone", result.DetectedTimezone, "confidence", result.ConfidenceLevel)
 	return &result
 }
 
@@ -315,7 +314,7 @@ func (c *Client) processResponseAndCache(resp *genai.GenerateContentResponse, pr
 		return nil, errors.New("gemini response missing timezone information")
 	}
 
-	logger.Debug("Gemini response validated successfully",
+	logger.Info("Gemini response received",
 		"timezone", geminiResp.DetectedTimezone,
 		"location", geminiResp.DetectedLocation,
 		"confidence", geminiResp.ConfidenceLevel)

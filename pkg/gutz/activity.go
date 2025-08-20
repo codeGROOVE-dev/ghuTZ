@@ -892,6 +892,9 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		Confidence: lunchConfidence,
 	}
 
+	// Store lunch hours in "Local" (actually UTC like ActiveHoursLocal for consistency)
+	result.LunchHoursLocal = result.LunchHoursUTC
+
 	// Store peak productivity window in UTC
 	result.PeakProductivity = struct {
 		Start float64 `json:"start"`

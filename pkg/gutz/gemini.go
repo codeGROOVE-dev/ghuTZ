@@ -511,6 +511,14 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		return nil
 	}
 
+	// Log successful Gemini response at INFO level
+	d.logger.Info("Gemini response received",
+		"username", userCtx.Username,
+		"timezone", geminiResult.Timezone,
+		"location", geminiResult.Location,
+		"confidence", geminiResult.Confidence,
+		"data_sources", dataSources)
+
 	// Sort data sources alphabetically for consistent display
 	sort.Strings(dataSources)
 
@@ -562,6 +570,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		result.HourlyActivityUTC = activityResult.HourlyActivityUTC
 		result.HalfHourlyActivityUTC = activityResult.HalfHourlyActivityUTC
 		result.LunchHoursUTC = activityResult.LunchHoursUTC
+		result.LunchHoursLocal = activityResult.LunchHoursLocal
 		result.PeakProductivity = activityResult.PeakProductivity
 		result.TopOrganizations = activityResult.TopOrganizations
 		result.HourlyOrganizationActivity = activityResult.HourlyOrganizationActivity

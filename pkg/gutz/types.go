@@ -259,6 +259,7 @@ type Result struct {
 	TimezoneCandidates         []timezone.Candidate   `json:"timezone_candidates,omitempty"`
 	DataSources                []string               `json:"data_sources,omitempty"`
 	LunchHoursUTC              LunchBreak             `json:"lunch_hours_utc,omitempty"`
+	LunchHoursLocal            LunchBreak             `json:"lunch_hours_local,omitempty"`
 	PeakProductivity           PeakTime               `json:"peak_productivity"`
 	ActiveHoursLocal           ActiveHours            `json:"active_hours_local,omitempty"`
 	LocationConfidence         float64                `json:"location_confidence,omitempty"`
