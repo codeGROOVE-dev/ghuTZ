@@ -115,7 +115,7 @@ func (rl *rateLimiter) cleanupOldEntries(cutoff time.Time) {
 	}
 }
 
-var apiLimiter = newRateLimiter(5, time.Minute) // 5 requests per minute per IP - defense against abuse
+var apiLimiter = newRateLimiter(65, time.Minute) // 65 requests per minute per IP - defense against abuse
 
 // SECURITY: Username validation regex - GitHub usernames can only contain alphanumeric characters and hyphens.
 var validUsernameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]{0,38}$`)

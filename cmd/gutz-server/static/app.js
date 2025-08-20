@@ -216,15 +216,15 @@ function displayResults(data) {
             const oldestDate = oldestDateObj.toISOString().split('T')[0];
             const newestDate = newestDateObj.toISOString().split('T')[0];
         
-        let summaryText = '';
+        let summaryHTML = '';
         if (totalEvents > 0) {
-            summaryText = `${totalEvents} events from ${oldestDate} to ${newestDate}`;
+            summaryHTML = `${totalEvents} events from ${oldestDate} to ${newestDate}`;
         } else {
-            summaryText = `${oldestDate} to ${newestDate}`;
+            summaryHTML = `${oldestDate} to ${newestDate}`;
         }
 
         if (data.activity_date_range.total_days > 0) {
-            summaryText += ` (${data.activity_date_range.total_days} days)`;
+            summaryHTML += ` (${data.activity_date_range.total_days} days)`;
         }
         
         // Add warnings for insufficient data or new accounts
@@ -243,10 +243,15 @@ function displayResults(data) {
         }
         
         if (warnings.length > 0) {
-            summaryText += '\n' + warnings.join('\n');
+            // Format warnings as a list with proper spacing
+            summaryHTML += '<div style="margin-top: 10px;">';
+            warnings.forEach(warning => {
+                summaryHTML += `<div style="margin: 5px 0; color: #b45309;">${warning}</div>`;
+            });
+            summaryHTML += '</div>';
         }
 
-            document.getElementById('activitySummary').textContent = summaryText;
+            document.getElementById('activitySummary').innerHTML = summaryHTML;
             document.getElementById('activitySummaryRow').style.display = 'table-row';
         }
     }
@@ -462,14 +467,31 @@ function getRelativeTimeDelta(targetHour, timezone) {
         
         const currentHour = currentLocalTime.getHours() + (currentLocalTime.getMinutes() / 60);
         
-        // Calculate the difference
+        // Calculate the simple difference
         let delta = targetHour - currentHour;
         
-        // Handle day wraparound (e.g., if current time is 23:00 and target is 1:00)
-        if (delta > 12) {
-            delta -= 24;
-        } else if (delta < -12) {
-            delta += 24;
+        // Intuitive logic for "ago" vs "from now":
+        // - If the time already happened today (negative delta), always show "ago"
+        // - If the time is coming up later today (positive delta), show "from now"
+        // - Special case: if it's evening and showing morning time, that's tomorrow
+        
+        let isTomorrow = false;
+        
+        if (delta < 0) {
+            // Target is before current time
+            // This is always "ago" for today
+            // No adjustment needed
+        } else if (delta > 0) {
+            // Target is after current time
+            // Check if this is actually tomorrow (e.g., it's 8pm and target is 7am)
+            if (targetHour < 12 && currentHour > 18) {
+                // Morning target, evening now = tomorrow
+                isTomorrow = true;
+                // Don't show as "from now" if it's more than 12 hours away
+                // Instead show as negative (ago) from this morning
+                delta = targetHour - (currentHour - 24);
+            }
+            // Otherwise it's later today, keep positive delta
         }
         
         // Calculate absolute delta for determining units
@@ -482,14 +504,14 @@ function getRelativeTimeDelta(targetHour, timezone) {
             // Less than 1 hour - show minutes
             const minutes = Math.round(absDelta * 60);
             if (delta > 0) {
-                return minutes === 1 ? '1m from now' : `${minutes}m from now`;
+                return isTomorrow ? `${minutes}m ago` : (minutes === 1 ? '1m from now' : `${minutes}m from now`);
             } else {
                 return minutes === 1 ? '1m ago' : `${minutes}m ago`;
             }
         } else if (absDelta < 24) {
             // Less than 24 hours - show hours
             const hours = Math.round(absDelta);
-            if (delta > 0) {
+            if (delta > 0 && !isTomorrow) {
                 return hours === 1 ? '1h from now' : `${hours}h from now`;
             } else {
                 return hours === 1 ? '1h ago' : `${hours}h ago`;
