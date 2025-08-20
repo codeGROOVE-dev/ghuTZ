@@ -22,11 +22,14 @@ type Response struct {
 	// Place larger alignment fields first (float64 = 8 bytes)
 	Latitude  float64 `json:"latitude"`  // GPS latitude coordinate
 	Longitude float64 `json:"longitude"` // GPS longitude coordinate
+	// Boolean field (1 byte, but usually padded)
+	SuspiciousMismatch bool `json:"suspicious_mismatch"` // Flag for suspicious location patterns
 	// Strings are pointers (8 bytes each on 64-bit), group them together
 	DetectedTimezone   string `json:"detected_timezone"`
 	DetectedLocation   string `json:"detected_location"`
 	ConfidenceLevel    string `json:"confidence_level"` // "high", "medium", or "low"
 	DetectionReasoning string `json:"detection_reasoning"`
+	MismatchReason     string `json:"mismatch_reason"` // Explanation if suspicious_mismatch is true
 }
 
 // Client represents a Gemini API client.
@@ -203,9 +206,17 @@ func (*Client) createResponseSchema() *genai.Schema {
 				Type:        genai.TypeString,
 				Description: "Explanation of the key evidence and reasoning that led to this timezone conclusion",
 			},
+			"suspicious_mismatch": {
+				Type:        genai.TypeBoolean,
+				Description: "True if the user's claimed location is implausible or incompatible with activity patterns (e.g., claims Antarctica but shows US Eastern timezone activity)",
+			},
+			"mismatch_reason": {
+				Type:        genai.TypeString,
+				Description: "If suspicious_mismatch is true, explain the discrepancy (e.g., 'User claims Antarctica, but activity suggests US Eastern timezone'). Empty string if no mismatch.",
+			},
 		},
-		PropertyOrdering: []string{"detected_timezone", "confidence_level", "detected_location", "latitude", "longitude", "detection_reasoning"},
-		Required:         []string{"detected_timezone", "confidence_level", "detected_location", "latitude", "longitude", "detection_reasoning"},
+		PropertyOrdering: []string{"detected_timezone", "confidence_level", "detected_location", "latitude", "longitude", "detection_reasoning", "suspicious_mismatch", "mismatch_reason"},
+		Required:         []string{"detected_timezone", "confidence_level", "detected_location", "latitude", "longitude", "detection_reasoning", "suspicious_mismatch", "mismatch_reason"},
 	}
 }
 

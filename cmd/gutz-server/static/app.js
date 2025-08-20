@@ -90,13 +90,75 @@ function displayResults(data) {
     document.getElementById('locationRow').style.display = 'none';
     document.getElementById('mapRow').style.display = 'none';
     
+    // Check for suspicious patterns from both detection systems
+    const warningDiv = document.getElementById('suspiciousWarning');
+    if (warningDiv) {
+        const hasMajorLocation = data.verification && data.verification.location_mismatch === 'major';
+        const hasMajorTimezone = data.verification && data.verification.timezone_mismatch === 'major';
+        const hasGeminiSuspicion = data.gemini_suspicious_mismatch;
+        
+        if ((hasMajorLocation || hasMajorTimezone) && hasGeminiSuspicion) {
+            // Both systems detected anomalies
+            warningDiv.innerHTML = `<div style="background: #fee2e2; border: 2px solid #dc2626; border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+                <span style="color: #991b1b; font-weight: bold;">🔍 DETECTION ALERT:</span> 
+                <span style="color: #7f1d1d;">Multiple anomalies detected. ${data.gemini_mismatch_reason || 'Location/timezone discrepancies found.'}</span>
+            </div>`;
+            warningDiv.style.display = 'block';
+        } else if (hasGeminiSuspicion && data.gemini_mismatch_reason) {
+            // Only AI detected something
+            warningDiv.innerHTML = `<div style="background: #fef3c7; border: 2px solid #f59e0b; border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+                <span style="color: #d97706; font-weight: bold;">⚠️ AI ANALYSIS:</span> 
+                <span style="color: #92400e;">${data.gemini_mismatch_reason}</span>
+            </div>`;
+            warningDiv.style.display = 'block';
+        } else {
+            warningDiv.style.display = 'none';
+        }
+    }
+    
     // Set required fields
     document.getElementById('displayUsername').textContent = data.username;
     
     // Show timezone with current local time and UTC offset
     const currentTime = getCurrentTimeInTimezone(data.timezone);
     const utcOffsetStr = getUTCOffsetString(data.timezone);
-    document.getElementById('timezone').textContent = `${data.timezone} (${currentTime}, ${utcOffsetStr})`;
+    let timezoneHTML = `${data.timezone} (${currentTime}, ${utcOffsetStr})`;
+    
+    // Check for verification discrepancy
+    if (data.verification && data.verification.claimed_timezone) {
+        let claimHTML = ` — user claims `;
+        
+        // Check if we have a Gemini mismatch reason to show as tooltip
+        let hasTooltip = data.gemini_suspicious_mismatch && data.gemini_mismatch_reason;
+        
+        if (hasTooltip) {
+            // Create tooltip container for claimed timezone
+            claimHTML += `<span class="tooltip-container">`;
+            claimHTML += `<span style="text-decoration: underline; text-decoration-style: dotted; cursor: help;">`;
+            claimHTML += data.verification.claimed_timezone;
+            claimHTML += `</span>`;
+            claimHTML += `<span class="tooltip">${data.gemini_mismatch_reason}</span>`;
+            claimHTML += `</span>`;
+        } else {
+            claimHTML += data.verification.claimed_timezone;
+        }
+        
+        if (data.verification.timezone_offset_diff > 0) {
+            claimHTML += ` (${data.verification.timezone_offset_diff} hours off)`;
+        }
+        
+        // Apply color based on mismatch level
+        if (data.verification.timezone_mismatch === 'major' || data.gemini_suspicious_mismatch) {
+            // Red for >3 timezone difference or suspicious mismatch
+            claimHTML = `<span style="color: #dc2626;">${claimHTML}</span>`;
+        } else if (data.verification.timezone_mismatch === 'minor') {
+            // Black (normal) for >1 timezone difference
+            claimHTML = `<span>${claimHTML}</span>`;
+        }
+        timezoneHTML += claimHTML;
+    }
+    
+    document.getElementById('timezone').innerHTML = timezoneHTML;
 
     // Display full name if available
     if (data.name) {
@@ -272,7 +334,43 @@ function displayResults(data) {
     }
     
     if (locationText) {
-        document.getElementById('location').textContent = locationText;
+        let locationHTML = locationText;
+        
+        // Check for verification discrepancy
+        if (data.verification && data.verification.claimed_location) {
+            let claimHTML = ` — user claims `;
+            
+            // Check if we have a Gemini mismatch reason to show as tooltip
+            let hasTooltip = data.gemini_suspicious_mismatch && data.gemini_mismatch_reason;
+            
+            if (hasTooltip) {
+                // Create tooltip container for claimed location
+                claimHTML += `<span class="tooltip-container">`;
+                claimHTML += `<span style="text-decoration: underline; text-decoration-style: dotted; cursor: help;">`;
+                claimHTML += data.verification.claimed_location;
+                claimHTML += `</span>`;
+                claimHTML += `<span class="tooltip">${data.gemini_mismatch_reason}</span>`;
+                claimHTML += `</span>`;
+            } else {
+                claimHTML += data.verification.claimed_location;
+            }
+            
+            if (data.verification.location_distance_miles > 0) {
+                claimHTML += ` (${Math.round(data.verification.location_distance_miles)} mi away)`;
+            }
+            
+            // Apply color based on mismatch level
+            if (data.verification.location_mismatch === 'major' || data.gemini_suspicious_mismatch) {
+                // Red for >1000 miles or suspicious mismatch
+                claimHTML = `<span style="color: #dc2626;">${claimHTML}</span>`;
+            } else if (data.verification.location_mismatch === 'minor') {
+                // Black (normal) for >250 miles
+                claimHTML = `<span>${claimHTML}</span>`;
+            }
+            locationHTML += claimHTML;
+        }
+        
+        document.getElementById('location').innerHTML = locationHTML;
         document.getElementById('locationRow').style.display = 'table-row';
     }
 
@@ -330,13 +428,16 @@ function formatMethodName(method) {
     const methodNames = {
         'github_profile': 'Profile Scraping',
         'location_geocoding': 'Location Geocoding', 
+        'location_field': 'Location Field Analysis',
         'activity_patterns': 'Activity Analysis',
         'gemini_refined_activity': 'AI + Activity',
         'company_heuristic': 'Company Intel',
         'email_heuristic': 'Email Domain',
         'blog_heuristic': 'Blog Analysis',
         'website_gemini_analysis': 'Website + AI',
-        'gemini_analysis': 'Activity + AI Context Analysis'
+        'gemini_analysis': 'Activity + AI Context Analysis',
+        'gemini_enhanced': 'Activity + AI Enhanced',
+        'gemini_corrected': 'AI-Corrected Location'
     };
     return methodNames[method] || method;
 }

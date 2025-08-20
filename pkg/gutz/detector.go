@@ -667,16 +667,106 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		d.logger.Info("detected from profile HTML", "username", username, "timezone", result.Timezone)
 		result.Name = fullName
 		d.mergeActivityData(result, activityResult)
+		// Add verification
+		if userCtx.User != nil {
+			result.Verification = d.verifyLocationAndTimezone(ctx, userCtx.User, result.LocationName, result.Timezone)
+		}
 		return result, nil
 	}
 	d.logger.Debug("profile HTML scraping failed", "username", username)
 
 	d.logger.Debug("trying location field analysis", "username", username)
-	if result := d.tryLocationFieldWithContext(ctx, userCtx); result != nil {
-		d.logger.Info("detected from location field", "username", username, "timezone", result.Timezone, "location", result.LocationName)
-		result.Name = fullName
-		d.mergeActivityData(result, activityResult)
-		return result, nil
+	locationResult := d.tryLocationFieldWithContext(ctx, userCtx)
+	if locationResult != nil {
+		d.logger.Info("detected from location field", "username", username, "timezone", locationResult.Timezone, "location", locationResult.LocationName)
+		locationResult.Name = fullName
+		d.mergeActivityData(locationResult, activityResult)
+		
+		// Always run Gemini analysis for better detection, even when location field succeeds
+		d.logger.Debug("running additional Gemini analysis for better detection", "username", username)
+		if geminiResult := d.tryUnifiedGeminiAnalysisWithContext(ctx, userCtx, activityResult); geminiResult != nil {
+			// Always prefer Gemini's detected values when available - they're more accurate
+			// Store the location-field values as the "claimed" ones for verification
+			verification := &VerificationResult{
+				ClaimedLocation: userCtx.User.Location,
+				ClaimedTimezone: locationResult.Timezone, // The timezone from their claimed location
+			}
+			
+			// Use Gemini's detected values as the actual result
+			locationResult.Timezone = geminiResult.Timezone
+			locationResult.Location = geminiResult.Location  
+			locationResult.LocationName = geminiResult.GeminiSuggestedLocation
+			locationResult.GeminiSuggestedLocation = geminiResult.GeminiSuggestedLocation
+			locationResult.GeminiSuspiciousMismatch = geminiResult.GeminiSuspiciousMismatch
+			locationResult.GeminiMismatchReason = geminiResult.GeminiMismatchReason
+			locationResult.GeminiReasoning = geminiResult.GeminiReasoning // Copy the reasoning for tooltip
+			locationResult.GeminiPrompt = geminiResult.GeminiPrompt // Copy the prompt for verbose mode
+			// Preserve timezone candidates from activity analysis - Gemini doesn't generate these
+			// locationResult.TimezoneCandidates already has the candidates from mergeActivityData
+			locationResult.Method = "gemini_enhanced" // Update method to indicate Gemini enhanced the detection
+			
+			// Calculate timezone offset difference for verification display
+			if verification.ClaimedTimezone != "" && verification.ClaimedTimezone != geminiResult.Timezone {
+				offsetDiff := d.calculateTimezoneOffsetDiff(verification.ClaimedTimezone, geminiResult.Timezone)
+				if offsetDiff != 0 {
+					verification.TimezoneOffsetDiff = abs(offsetDiff)
+					if abs(offsetDiff) > 3 {
+						verification.TimezoneMismatch = "major"
+					} else if abs(offsetDiff) > 1 {
+						verification.TimezoneMismatch = "minor"
+					}
+				}
+			}
+			
+			// Calculate location distance if different
+			if verification.ClaimedLocation != "" && geminiResult.Location != nil {
+				claimedCoords, err := d.geocodeLocation(ctx, verification.ClaimedLocation)
+				if err == nil && claimedCoords != nil {
+					distance := haversineDistance(claimedCoords.Latitude, claimedCoords.Longitude,
+						geminiResult.Location.Latitude, geminiResult.Location.Longitude)
+					if distance > 0 {
+						verification.LocationDistanceMiles = distance
+						if distance > 1000 {
+							verification.LocationMismatch = "major"
+						} else if distance > 250 {
+							verification.LocationMismatch = "minor"
+						}
+					}
+				}
+			}
+			
+			locationResult.Verification = verification
+			d.logger.Info("Gemini enhanced location detection", 
+				"claimed", userCtx.User.Location,
+				"detected", geminiResult.GeminiSuggestedLocation,
+				"timezone", geminiResult.Timezone,
+				"suspicious", geminiResult.GeminiSuspiciousMismatch,
+				"mismatch_reason", geminiResult.GeminiMismatchReason)
+		}
+		
+		// Add verification if we didn't already add it above
+		if locationResult.Verification == nil && userCtx.User != nil && activityResult != nil {
+			// Since we detected from their claimed location, compare that timezone with activity
+			verification := &VerificationResult{
+				ClaimedLocation: userCtx.User.Location,
+				ClaimedTimezone: locationResult.Timezone, // The timezone from their claimed location
+			}
+			
+			// Check if activity timezone differs from location-based timezone
+			if activityResult.Timezone != "" && activityResult.Timezone != locationResult.Timezone {
+				offsetDiff := d.calculateTimezoneOffsetDiff(locationResult.Timezone, activityResult.Timezone)
+				if offsetDiff != 0 {
+					verification.TimezoneOffsetDiff = abs(offsetDiff)
+					if abs(offsetDiff) > 3 {
+						verification.TimezoneMismatch = "major"
+					} else if abs(offsetDiff) > 1 {
+						verification.TimezoneMismatch = "minor"
+					}
+				}
+			}
+			locationResult.Verification = verification
+		}
+		return locationResult, nil
 	}
 	d.logger.Debug("location field analysis failed", "username", username)
 
@@ -685,6 +775,14 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		result.Name = fullName
 		// Use mergeActivityData to properly handle lunch time reuse from candidates
 		d.mergeActivityData(result, activityResult)
+		// Add verification
+		if userCtx.User != nil {
+			detectedLocation := result.GeminiSuggestedLocation
+			if detectedLocation == "" {
+				detectedLocation = result.LocationName
+			}
+			result.Verification = d.verifyLocationAndTimezone(ctx, userCtx.User, detectedLocation, result.Timezone)
+		}
 		if activityResult != nil {
 			d.logger.Info("timezone detected with Gemini + activity", "username", username,
 				"activity_timezone", activityResult.Timezone, "final_timezone", result.Timezone)
@@ -698,6 +796,10 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	if activityResult != nil {
 		d.logger.Info("using activity-only result as fallback", "username", username, "timezone", activityResult.Timezone)
 		activityResult.Name = fullName
+		// Add verification for activity-only result
+		if userCtx.User != nil {
+			activityResult.Verification = d.verifyLocationAndTimezone(ctx, userCtx.User, activityResult.LocationName, activityResult.Timezone)
+		}
 		return activityResult, nil
 	}
 

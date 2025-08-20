@@ -274,6 +274,9 @@ type Result struct {
 	TimezoneConfidence         float64                `json:"timezone_confidence,omitempty"`
 	Confidence                 float64                `json:"confidence"`
 	GeminiActivityMismatch     bool                   `json:"gemini_activity_mismatch,omitempty"`
+	Verification               *VerificationResult    `json:"verification,omitempty"`
+	GeminiSuspiciousMismatch   bool                   `json:"gemini_suspicious_mismatch,omitempty"`
+	GeminiMismatchReason       string                 `json:"gemini_mismatch_reason,omitempty"`
 	GeminiActivityOffsetHours  float64                `json:"gemini_activity_offset_hours,omitempty"`
 }
 

@@ -349,7 +349,7 @@
                 padding: 0;
                 border: none;
             }
-            
+
             .result-row.histogram-row {
                 display: block;
                 margin: 20px 0;
@@ -372,7 +372,6 @@
                     font-size: 12px;
                 }
             }
-
 
             #map {
                 width: 100%;
@@ -593,6 +592,8 @@
         <div id="loading" class="loading">Searching...</div>
 
         <div id="result" class="results">
+            <div id="suspiciousWarning" style="display: none;"></div>
+            
             <h2>Approximate location</h2>
 
             <div class="result-row map-row" id="mapRow" style="display: none">
@@ -625,7 +626,11 @@
                     <span class="result-value" id="method">-</span>
                 </div>
 
-                <div class="result-row" id="dataSourcesRow" style="display: none">
+                <div
+                    class="result-row"
+                    id="dataSourcesRow"
+                    style="display: none"
+                >
                     <span class="result-label">Data sources:</span>
                     <span class="result-value" id="dataSources">-</span>
                 </div>
@@ -655,7 +660,11 @@
                     <span class="result-value" id="sleepHours">-</span>
                 </div>
 
-                <div class="result-row" id="activitySummaryRow" style="display: none">
+                <div
+                    class="result-row"
+                    id="activitySummaryRow"
+                    style="display: none"
+                >
                     <span class="result-label">Activity data:</span>
                     <span class="result-value" id="activitySummary">-</span>
                 </div>
@@ -666,7 +675,11 @@
                 </div>
             </div>
 
-            <div class="result-row histogram-row" id="histogramRow" style="display: none">
+            <div
+                class="result-row histogram-row"
+                id="histogramRow"
+                style="display: none"
+            >
                 <div id="histogramContainer">
                     <canvas id="activityChart"></canvas>
                 </div>
@@ -699,12 +712,15 @@
                 Why Though?
             </h3>
             <p style="margin: 0 0 12px 0">
-                <a href="https://codegroove.dev/products/hub/">grooveHUB</a> needs to find code reviewers 
-                who share work hours with PR authors. guTZ provides the timezone detection to make this possible.
+                guTZ powers the timezone detection that
+                <a href="https://codegroove.dev/products/hub/">grooveHUB</a>
+                needs to find code reviewers who share work hours with PR
+                authors, among other constraints.
             </p>
             <p style="margin: 0 0 12px 0">
-                <strong>Security use case:</strong> Detect location mismatches—like a "Toronto" developer 
-                working Moscow hours, or supply chain contributors with suspicious activity patterns.
+                <strong>Security use case:</strong> Detect location
+                mismatches—like a prospective hire in Albuquerque working
+                Pyongyang hours.
             </p>
         </div>
 

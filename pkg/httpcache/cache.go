@@ -96,6 +96,10 @@ func NewOtterCache(ctx context.Context, dir string, ttl time.Duration, logger *s
 
 // Get retrieves cached data for the given URL, returning data, etag, and found status.
 func (c *OtterCache) Get(url string) (data []byte, etag string, found bool) {
+	if c == nil {
+		return nil, "", false
+	}
+
 	// Generate cache key from URL
 	h := sha256.New()
 	h.Write([]byte(url))
@@ -119,6 +123,10 @@ func (c *OtterCache) Get(url string) (data []byte, etag string, found bool) {
 
 // Set stores data in the cache with the given URL and etag.
 func (c *OtterCache) Set(url string, data []byte, etag string) error {
+	if c == nil {
+		return nil
+	}
+
 	// Generate cache key from URL
 	h := sha256.New()
 	h.Write([]byte(url))
@@ -137,6 +145,10 @@ func (c *OtterCache) Set(url string, data []byte, etag string) error {
 
 // SetAPICall stores API call data in the cache with URL and request body as key.
 func (c *OtterCache) SetAPICall(url string, requestBody []byte, data []byte) error {
+	if c == nil {
+		return nil
+	}
+
 	// Generate cache key from URL and request body
 	h := sha256.New()
 	h.Write([]byte(url))
@@ -156,6 +168,10 @@ func (c *OtterCache) SetAPICall(url string, requestBody []byte, data []byte) err
 
 // APICall retrieves cached API call data for the given URL and request body.
 func (c *OtterCache) APICall(url string, requestBody []byte) ([]byte, bool) {
+	if c == nil {
+		return nil, false
+	}
+
 	// Generate cache key from URL and request body
 	h := sha256.New()
 	h.Write([]byte(url))

@@ -8,8 +8,8 @@ EVIDENCE:
 %s
 
 🔴 MANDATORY CONSTRAINT - THIS OVERRIDES ALL OTHER SIGNALS:
-If activity_timezone candidates are provided (e.g., "Top 5 candidates: UTC+12, UTC+9, UTC+11, UTC+10, UTC+8"):
-- You MUST select a timezone within ±1 hours of one of the top 5 candidates
+If activity_timezone candidates are provided (e.g., "Top 3 candidates: UTC+12, UTC+9, UTC+11, UTC+10, UTC+8"):
+- You MUST select a timezone within ±1 hours of one of the candidates
 - The TOP CANDIDATE has the highest confidence based on evening activity, lunch timing, and sleep patterns
 - Activity patterns represent ACTUAL behavior and cannot be ignored
 - Name etymology, company location, and other signals can only influence WHICH candidate to pick, not override them entirely
@@ -83,7 +83,7 @@ DETECTION PRIORITIES (subject to above constraint):
    - If the timezone overlaps with the United States of America, and you don't see any clues that
      lean toward another country, default to the USA
     - Consider that most cities in the US & Europe respect Daylight Savings Time and may be in one UTC offset
-      or the other based on the activity timespan.
+      or the other based on the activity timespan. Use the current date to determine DST influence in your recommendation.
 
 7. Location & GPS Coordinate Generation
 	- Guess a specific city in the timezone that would be the most likely with all evidence given
@@ -105,7 +105,14 @@ DETECTION PRIORITIES (subject to above constraint):
 
 Seriously though, if they have a .ca e-mail address or .ca website, they almost certainly live in Canada. Do not assign them to New York.
 
-Response example: { "detected_timezone": "America/Toronto", "detected_location": "Toronto, ON, Canada",
-  "confidence_level": "75%%", "detection_reasoning": "Strong evidence summary in 1-2 sentences." }
+8. SUSPICIOUS MISMATCH DETECTION:
+	- 🚨 CRITICAL: This tool has a responsibility to detect people being deceptive about their GitHub location.
+    - Set "suspicious_mismatch": true if the location in their GitHub profile is implausible or incompatible with the other evidence we've found, for example - if it's more than 4 timezones away.
+    - Set "mismatch_reason" to explain the suspicious pattern
+    - If no suspicious patterns detected, set "suspicious_mismatch": false and "mismatch_reason": ""
+
+Example: { "detected_timezone": "America/Toronto", "detected_location": "Toronto, ON, Canada", "latitude": 43.6532, "longitude": -79.3832,
+  "confidence_level": "high", "detection_reasoning": "Strong evidence summary in 1-2 sentences.",
+  "suspicious_mismatch": true, "mismatch_reason": "User claims Antarctica, but activity suggests Toronto Canada" }
 `
 }

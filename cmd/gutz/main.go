@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/codeGROOVE-dev/guTZ/pkg/gutz"
+	"github.com/codeGROOVE-dev/guTZ/pkg/timezone"
 )
 
 var (
@@ -117,79 +118,115 @@ func main() {
 		return
 	}
 
-	// Removed - Gemini info now shown after activity pattern
+	// Show Gemini prompt in verbose mode as the very first output
+	if *verbose && result.GeminiPrompt != "" {
+		fmt.Println("\n🤖 Gemini AI Analysis Prompt")
+		fmt.Println(strings.Repeat("═", 50))
+		fmt.Printf("%s\n", result.GeminiPrompt)
+		fmt.Println(strings.Repeat("═", 50))
+		fmt.Println()
+	}
 
 	// Clear GeminiPrompt unless in verbose mode (to save memory)
 	if !*verbose {
 		result.GeminiPrompt = ""
 	}
 
-	// Print results in CLI format
-	printResult(result)
-
-	// Show histogram by default if activity data is available
-	if result.HourlyActivityUTC != nil {
-		// Use forced offset if specified, otherwise use detected timezone
-		displayTimezone := result.Timezone
-		displayResult := result
-
-		if *forceOffset >= -12 && *forceOffset <= 14 {
-			// Convert forced offset to UTC+/- format
-			if *forceOffset >= 0 {
-				displayTimezone = fmt.Sprintf("UTC+%d", *forceOffset)
-			} else {
-				displayTimezone = fmt.Sprintf("UTC%d", *forceOffset)
-			}
-
-			// Check if this offset matches one of our analyzed candidates
-			foundCandidate := false
-			for i := range result.TimezoneCandidates {
-				candidate := &result.TimezoneCandidates[i]
-				if int(candidate.Offset) != *forceOffset {
-					continue
-				}
-				// We have data for this timezone! Use the pre-calculated values
-				// Find the rank of this candidate (1-based)
-				rank := 0
-				for i := range result.TimezoneCandidates {
-					c := &result.TimezoneCandidates[i]
-					if c.Offset == candidate.Offset {
-						rank = i + 1
-						break
-					}
-				}
-				fmt.Printf("\n🔧 Using forced offset %s for visualization (analyzed candidate #%d)\n",
-					displayTimezone, rank)
-
-				// Create a modified result with the candidate's lunch data
-				modifiedResult := *result
-				modifiedResult.LunchHoursUTC = gutz.LunchBreak{
-					Start:      candidate.LunchStartUTC,
-					End:        candidate.LunchEndUTC,
-					Confidence: candidate.LunchConfidence,
-				}
-				// Keep existing peak and quiet markers as they're still valid
-				displayResult = &modifiedResult
-				foundCandidate = true
-				break
-			}
-
-			if !foundCandidate {
-				// Not in our candidates - clear all markers as they would be misleading
-				fmt.Printf("\n🔧 Using forced offset %s for visualization\n", displayTimezone)
-				fmt.Println("    (Note: No lunch/peak markers - offset not in analyzed candidates)")
-
-				modifiedResult := *result
-				modifiedResult.LunchHoursUTC = gutz.LunchBreak{}  // Clear lunch markers
-				modifiedResult.PeakProductivity = gutz.PeakTime{} // Clear peak markers
-				modifiedResult.SleepHoursUTC = nil                // Clear sleep hour markers
-				modifiedResult.SleepBucketsUTC = nil              // Clear sleep markers
-				displayResult = &modifiedResult
-			}
+	// Handle forced offset BEFORE printing results
+	displayResult := result
+	displayTimezone := result.Timezone
+	
+	if *forceOffset >= -12 && *forceOffset <= 14 && result.HourlyActivityUTC != nil {
+		// Convert forced offset to UTC+/- format
+		if *forceOffset >= 0 {
+			displayTimezone = fmt.Sprintf("UTC+%d", *forceOffset)
+		} else {
+			displayTimezone = fmt.Sprintf("UTC%d", *forceOffset)
 		}
 
+		// Check if this offset matches one of our analyzed candidates
+		foundCandidate := false
+		for i := range result.TimezoneCandidates {
+			candidate := &result.TimezoneCandidates[i]
+			if int(candidate.Offset) != *forceOffset {
+				continue
+			}
+			// We have data for this timezone! Use the pre-calculated values
+			// Find the rank of this candidate (1-based)
+			rank := 0
+			for i := range result.TimezoneCandidates {
+				c := &result.TimezoneCandidates[i]
+				if c.Offset == candidate.Offset {
+					rank = i + 1
+					break
+				}
+			}
+			fmt.Printf("\n🔧 Using forced offset %s for visualization (analyzed candidate #%d)\n",
+				displayTimezone, rank)
+
+			// Create a modified result with the candidate's lunch data
+			modifiedResult := *result
+			modifiedResult.LunchHoursUTC = gutz.LunchBreak{
+				Start:      candidate.LunchStartUTC,
+				End:        candidate.LunchEndUTC,
+				Confidence: candidate.LunchConfidence,
+			}
+			// Keep existing peak and quiet markers as they're still valid
+			displayResult = &modifiedResult
+			foundCandidate = true
+			break
+		}
+
+		if !foundCandidate {
+			// Not in our candidates - this offset wasn't analyzed
+			fmt.Printf("\n🔧 Using forced offset %s for visualization\n", displayTimezone)
+			fmt.Println("    (Note: This offset was not in the analyzed candidates)")
+			fmt.Println("    Using original detected lunch/sleep patterns")
+
+			modifiedResult := *result
+			// Keep the original lunch data - it's still valid in UTC and will be converted for display
+			// The lunch hours are in UTC so they'll show at different local times
+			displayResult = &modifiedResult
+		}
+		
+		// Update the timezone in displayResult for correct display
+		displayResult.Timezone = displayTimezone
+	}
+
+	// Print results in CLI format (using displayResult which may be modified)
+	printResult(displayResult)
+
+	// Show histogram if activity data is available
+	if displayResult.HourlyActivityUTC != nil {
 		histogramOutput := gutz.GenerateHistogram(displayResult, displayResult.HourlyActivityUTC, displayTimezone)
 		fmt.Print(histogramOutput)
+	}
+
+	// Show timezone candidates in verbose mode  
+	if *verbose && result.TimezoneCandidates != nil && len(result.TimezoneCandidates) > 0 {
+		fmt.Println("\n📊 Timezone Candidates (Activity Analysis)")
+		fmt.Println(strings.Repeat("─", 50))
+		for i, candidate := range result.TimezoneCandidates {
+			if i >= 5 {
+				break // Only show top 5
+			}
+			offsetStr := fmt.Sprintf("UTC%+d", int(candidate.Offset))
+			if candidate.Offset == 0 {
+				offsetStr = "UTC+0"
+			}
+			
+			fmt.Printf("%d. %s (%.1f%% confidence)\n", i+1, offsetStr, candidate.Confidence)
+			fmt.Printf("   Evening activity: %d events\n", candidate.EveningActivity)
+			fmt.Printf("   Lunch: %s\n", formatCandidateLunch(candidate))
+			fmt.Printf("   Work start: %d:00\n", candidate.WorkStartLocal)
+			if len(candidate.ScoringDetails) > 0 {
+				fmt.Printf("   Scoring details:\n")
+				for _, detail := range candidate.ScoringDetails {
+					fmt.Printf("     • %s\n", detail)
+				}
+			}
+			fmt.Println()
+		}
 	}
 
 	// Show Gemini information after activity pattern when verbose
@@ -203,12 +240,96 @@ func printResult(result *gutz.Result) {
 	fmt.Printf("\n🌍 GitHub User: %s\n", result.Username)
 	fmt.Println(strings.Repeat("─", 50))
 
+	// Show combined analysis warning when both systems detect issues
+	hasSuspiciousLocation := result.Verification != nil && result.Verification.LocationMismatch == "major"
+	hasSuspiciousTimezone := result.Verification != nil && result.Verification.TimezoneMismatch == "major"
+	hasGeminiSuspicion := result.GeminiSuspiciousMismatch
+	
+	if (hasSuspiciousLocation || hasSuspiciousTimezone) && hasGeminiSuspicion {
+		// Both detection systems agree something is off
+		fmt.Printf("\033[91m🔍 DETECTION ALERT: Multiple anomalies detected\033[0m\n")
+		fmt.Println(strings.Repeat("─", 50))
+	} else if hasGeminiSuspicion && result.GeminiMismatchReason != "" &&
+	          (result.Verification == nil || (result.Verification.ClaimedLocation == "" && result.Verification.ClaimedTimezone == "")) {
+		// Only Gemini detected something (no claims to verify against)
+		fmt.Printf("\033[33m⚠️  AI ANALYSIS: %s\033[0m\n", result.GeminiMismatchReason)
+		fmt.Println(strings.Repeat("─", 50))
+	}
+
 	printLocation(result)
 	printTimezone(result)
 	printWorkSchedule(result)
 	printOrganizations(result)
 	printActivitySummary(result)
 	printDetectionInfo(result)
+}
+
+// extractMainLocation extracts the main city/state from a location string
+// Examples: 
+//   "Raleigh, NC, United States" -> "Raleigh, NC"
+//   "Raleigh, NC" -> "Raleigh, NC"
+//   "London, United Kingdom" -> "London"
+func extractMainLocation(location string) string {
+	if location == "" {
+		return ""
+	}
+	
+	parts := strings.Split(location, ",")
+	if len(parts) == 0 {
+		return location
+	}
+	
+	// Trim spaces from all parts
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	
+	// If last part is a country name, remove it
+	if len(parts) > 1 {
+		lastPart := parts[len(parts)-1]
+		// Common country names to strip
+		countries := []string{
+			"United States", "USA", "US", "United Kingdom", "UK", 
+			"Canada", "Australia", "Germany", "France", "India",
+			"China", "Japan", "Brazil", "Mexico", "Spain", "Italy",
+		}
+		for _, country := range countries {
+			if strings.EqualFold(lastPart, country) {
+				parts = parts[:len(parts)-1]
+				break
+			}
+		}
+	}
+	
+	// For US locations, keep city and state (first 2 parts)
+	// For others, keep just the city (first part)
+	if len(parts) >= 2 {
+		// Check if second part looks like a US state code
+		if len(parts[1]) == 2 && isUSStateCode(parts[1]) {
+			return parts[0] + ", " + parts[1]
+		}
+	}
+	
+	return parts[0]
+}
+
+// isUSStateCode checks if a string is a valid US state code
+func isUSStateCode(code string) bool {
+	states := []string{
+		"AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+		"HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+		"MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+		"NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+		"SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+		"DC",
+	}
+	upperCode := strings.ToUpper(code)
+	for _, state := range states {
+		if upperCode == state {
+			return true
+		}
+	}
+	return false
 }
 
 func printLocation(result *gutz.Result) {
@@ -225,7 +346,68 @@ func printLocation(result *gutz.Result) {
 	}
 
 	if locationStr != "" {
-		fmt.Printf("📍 Location:      %s\n", locationStr)
+		fmt.Printf("📍 Location:      %s", locationStr)
+		
+		// Check for discrepancies from both our verification and Gemini
+		if result.Verification != nil && result.Verification.ClaimedLocation != "" {
+			// Check if we should show the claim
+			// 1. If distance > 50 miles, definitely show
+			// 2. If LocationMismatch is flagged, show
+			// 3. If Gemini says it's suspicious, show
+			// 4. If location strings differ but distance is 0, check if cities match
+			showClaim := false
+			
+			if result.Verification.LocationDistanceMiles > 50 {
+				showClaim = true
+			} else if result.Verification.LocationMismatch != "" {
+				showClaim = true
+			} else if result.GeminiSuspiciousMismatch {
+				showClaim = true
+			} else if locationStr != result.Verification.ClaimedLocation {
+				// Strings differ but no distance/mismatch flags
+				// Check if it's just formatting differences (e.g., "Raleigh, NC" vs "Raleigh, NC, United States")
+				detectedCity := extractMainLocation(locationStr)
+				claimedCity := extractMainLocation(result.Verification.ClaimedLocation)
+				showClaim = detectedCity != claimedCity
+			}
+			
+			if showClaim {
+				claimStr := fmt.Sprintf(" — claims %s", result.Verification.ClaimedLocation)
+				if result.Verification.LocationDistanceMiles > 0 {
+					distStr := fmt.Sprintf(" (%.0f mi away)", result.Verification.LocationDistanceMiles)
+					claimStr += distStr
+				}
+				
+				// Determine severity based on both detectors
+				isMajor := result.Verification.LocationMismatch == "major" || result.GeminiSuspiciousMismatch
+				isMinor := result.Verification.LocationMismatch == "minor"
+				
+				if isMajor {
+					// Red for major discrepancy
+					fmt.Printf("\033[31m%s\033[0m", claimStr)
+				} else if isMinor {
+					// Normal for minor discrepancy
+					fmt.Printf("%s", claimStr)
+				} else {
+					fmt.Printf("%s", claimStr)
+				}
+			}
+		}
+		fmt.Println()
+		
+		// Show analysis from both detectors working together
+		if result.GeminiSuspiciousMismatch && result.GeminiMismatchReason != "" {
+			// Gemini AI analysis
+			fmt.Printf("                  └─ AI: \033[33m%s\033[0m\n", result.GeminiMismatchReason)
+		}
+		if result.Verification != nil && result.Verification.LocationMismatch != "" {
+			// Distance-based analysis
+			severity := "suspicious"
+			if result.Verification.LocationMismatch == "major" {
+				severity = "highly suspicious"
+			}
+			fmt.Printf("                  └─ Distance: %s discrepancy detected\n", severity)
+		}
 	}
 }
 
@@ -248,6 +430,36 @@ func printTimezone(result *gutz.Result) {
 	} else {
 		// Fallback for UTC+/- format
 		fmt.Printf("🕐 Timezone:      %s", result.Timezone)
+	}
+
+	// Check for verification discrepancy (claimed location's timezone vs activity)
+	if result.Verification != nil && result.Verification.TimezoneMismatch != "" {
+		// When detected from location field, show that the location implies wrong timezone
+		claimStr := ""
+		if result.Method == "location_field" && result.ActivityTimezone != "" {
+			claimStr = fmt.Sprintf(" — location implies this")
+			if result.Verification.TimezoneOffsetDiff > 0 {
+				diffStr := fmt.Sprintf(" (%d hr off from activity)", result.Verification.TimezoneOffsetDiff)
+				claimStr += diffStr
+			}
+		} else if result.Verification.ClaimedTimezone != "" {
+			claimStr = fmt.Sprintf(" — user claims %s", result.Verification.ClaimedTimezone)
+			if result.Verification.TimezoneOffsetDiff > 0 {
+				diffStr := fmt.Sprintf(" (%d hours off)", result.Verification.TimezoneOffsetDiff)
+				claimStr += diffStr
+			}
+		}
+		
+		if claimStr != "" {
+			switch result.Verification.TimezoneMismatch {
+			case "major":
+				// Red for >3 timezone difference
+				fmt.Printf("\033[31m%s\033[0m", claimStr)
+			case "minor":
+				// Normal color for >1 timezone difference
+				fmt.Printf("%s", claimStr)
+			}
+		}
 	}
 
 	if result.ActivityTimezone != "" && result.ActivityTimezone != result.Timezone {
@@ -405,10 +617,23 @@ func calculateTimezoneOffset(timezone string) int {
 	return 0
 }
 
+func formatCandidateLunch(candidate timezone.Candidate) string {
+	if candidate.LunchStartUTC == 0 && candidate.LunchEndUTC == 0 {
+		return "Not detected"
+	}
+	
+	// Convert UTC lunch to local time for this candidate
+	localStart := math.Mod(candidate.LunchStartUTC+candidate.Offset+24, 24)
+	localEnd := math.Mod(candidate.LunchEndUTC+candidate.Offset+24, 24)
+	
+	return fmt.Sprintf("%.1f-%.1f local (%.0f%% conf)", localStart, localEnd, candidate.LunchConfidence*100)
+}
+
 func formatMethodName(method string) string {
 	methodNames := map[string]string{
 		"github_profile":          "GitHub Profile Timezone",
 		"location_geocoding":      "Location Field Geocoding",
+		"location_field":          "location_field",
 		"activity_patterns":       "Activity Pattern Analysis",
 		"gemini_refined_activity": "AI-Enhanced Activity Analysis",
 		"company_heuristic":       "Company-based Inference",
@@ -416,6 +641,8 @@ func formatMethodName(method string) string {
 		"blog_heuristic":          "Blog Domain Analysis",
 		"website_gemini_analysis": "Website AI Analysis",
 		"gemini_analysis":         "Activity + AI Context Analysis",
+		"gemini_enhanced":         "Activity + AI Enhanced",
+		"gemini_corrected":        "AI-Corrected Location",
 	}
 	if name, exists := methodNames[method]; exists {
 		return name
@@ -424,18 +651,14 @@ func formatMethodName(method string) string {
 }
 
 func printGeminiInfo(result *gutz.Result) {
-	if result.GeminiPrompt == "" && result.GeminiReasoning == "" {
+	// Skip if no Gemini reasoning to show (prompt is now shown at the beginning)
+	if result.GeminiReasoning == "" {
 		return
 	}
 
 	fmt.Println()
-	fmt.Println("🤖 Gemini Analysis")
+	fmt.Println("🤖 Gemini Analysis Response")
 	fmt.Println(strings.Repeat("─", 50))
-
-	if result.GeminiPrompt != "" {
-		fmt.Println("\n📝 Prompt:")
-		fmt.Println(result.GeminiPrompt)
-	}
 
 	if result.GeminiReasoning != "" {
 		fmt.Println("\n💭 Response:")

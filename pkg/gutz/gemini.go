@@ -535,6 +535,12 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		CreatedAt:               getCreatedAtFromUser(userCtx.User),
 	}
 
+	// Add suspicious mismatch detection from Gemini
+	if geminiResult.Response != nil {
+		result.GeminiSuspiciousMismatch = geminiResult.Response.SuspiciousMismatch
+		result.GeminiMismatchReason = geminiResult.Response.MismatchReason
+	}
+
 	// Use location in priority order:
 	// 1. User's profile location (if available and geocodable)
 	// 2. Gemini GPS coordinates (if valid)
