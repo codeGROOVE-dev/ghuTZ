@@ -2,6 +2,7 @@ package gutz
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -778,7 +779,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	if suspiciousWorkHours && alternativeTimezone == "UTC+8" && offsetInt <= 3 {
 		// Get user's full name to check for regional indicators
 		user, err := d.githubClient.FetchUserEnhancedGraphQL(ctx, username)
-		if err != nil {
+		if err != nil && !errors.Is(err, github.ErrNoGitHubToken) && !errors.Is(err, github.ErrUserNotFound) {
 			d.logger.Debug("failed to fetch user for regional check", "username", username, "error", err)
 		}
 		isLikelyEuropean := false

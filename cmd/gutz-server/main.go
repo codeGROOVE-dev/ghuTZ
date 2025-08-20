@@ -2,6 +2,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"embed"
 	"encoding/json"
@@ -10,12 +12,14 @@ import (
 	"fmt"
 	"html"
 	"html/template"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -23,6 +27,7 @@ import (
 	"time"
 
 	"github.com/codeGROOVE-dev/guTZ/pkg/gutz"
+	"github.com/maypok86/otter"
 )
 
 //go:embed templates/home.html
@@ -41,6 +46,9 @@ var (
 	cacheDir     = flag.String("cache-dir", "", "Cache directory (or set CACHE_DIR)")
 	verbose      = flag.Bool("verbose", false, "Enable verbose logging")
 	version      = flag.Bool("version", false, "Show version")
+
+	// In-memory cache for API responses (12 hour TTL).
+	responseCache otter.Cache[string, []byte]
 )
 
 // Simple rate limiter for QPS control with memory protection.
@@ -156,7 +164,7 @@ func securityHeadersMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 
 		// HSTS - Force HTTPS (commented out for local development)
-		// w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
 		// Permissions policy - restrict browser features
 		w.Header().Set("Permissions-Policy",
@@ -218,6 +226,17 @@ func main() {
 		Level: level,
 	}))
 
+	// Initialize in-memory response cache with 12 hour TTL
+	var err error
+	responseCache, err = otter.MustBuilder[string, []byte](10_000).
+		WithTTL(12 * time.Hour).
+		Build()
+	if err != nil {
+		logger.Error("Failed to initialize response cache", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("Response cache initialized", "capacity", 10_000, "ttl", "12h")
+
 	// Get tokens from environment if not provided as flags
 	if *githubToken == "" {
 		*githubToken = os.Getenv("GITHUB_TOKEN")
@@ -253,11 +272,13 @@ func main() {
 		gutz.WithGeminiModel(*geminiModel),
 		gutz.WithMapsAPIKey(*mapsAPIKey),
 		gutz.WithGCPProject(*gcpProject),
+		gutz.WithMemoryOnlyCache(), // Use memory-only HTTP cache for web server
 	}
 
 	if *cacheDir != "" {
-		detectorOpts = append(detectorOpts, gutz.WithCacheDir(*cacheDir))
-		logger.Info("using custom cache directory", "cache_dir", *cacheDir)
+		// Note: cacheDir is only used for response caching in the web server
+		// HTTP caching is now memory-only with 12-hour TTL
+		logger.Info("using custom cache directory for response cache", "cache_dir", *cacheDir)
 	}
 
 	// Create a context for the server lifetime
@@ -282,6 +303,12 @@ func runServer(detector *gutz.Detector, logger *slog.Logger) error {
 			securityHeadersMiddleware(
 				rateLimitMiddleware(
 					handleAPIDetect(detector, logger)))))
+
+	// Cleanup handler for removing old cache files
+	mux.HandleFunc("/_/x-cleanup",
+		panicRecoveryMiddleware(logger,
+			securityHeadersMiddleware(
+				handleCleanup(logger))))
 	// Static file server using embedded files
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
@@ -449,6 +476,258 @@ func handleHomeOrUser(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleCleanup removes cache files older than 28 days.
+func handleCleanup(logger *slog.Logger) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		// Only allow POST requests
+		if request.Method != http.MethodPost {
+			http.Error(writer, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if *cacheDir == "" {
+			logger.Info("Cleanup requested but no cache directory configured")
+			writer.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(writer).Encode(map[string]any{
+				"status":  "skipped",
+				"message": "No cache directory configured",
+			}); err != nil {
+				logger.Error("failed to encode JSON response", "error", err)
+			}
+			return
+		}
+
+		logger.Info("Starting cache cleanup", "cache_dir", *cacheDir)
+
+		// Walk through the cache directory and delete old files
+		var filesDeleted int
+		var bytesFreed int64
+		var filesChecked int
+		var errs []string
+
+		cutoffTime := time.Now().Add(-28 * 24 * time.Hour)
+
+		err := filepath.Walk(filepath.Join(*cacheDir, "v1"), func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				// Log the error but continue walking
+				logger.Debug("Error accessing path", "path", path, "error", err)
+				errs = append(errs, fmt.Sprintf("%s: %v", path, err))
+				return nil
+			}
+
+			// Skip directories
+			if info.IsDir() {
+				return nil
+			}
+
+			// Only process .json.gz files
+			if !strings.HasSuffix(path, ".json.gz") {
+				return nil
+			}
+
+			filesChecked++
+
+			// Check if file is older than 28 days and delete immediately
+			if info.ModTime().Before(cutoffTime) {
+				size := info.Size()
+				// Delete the file immediately - don't wait
+				if err := os.Remove(path); err != nil {
+					logger.Debug("Failed to delete old cache file", "path", path, "error", err)
+					errs = append(errs, fmt.Sprintf("delete %s: %v", path, err))
+				} else {
+					filesDeleted++
+					bytesFreed += size
+					logger.Info("Deleted old cache file", "path", path, "age_days",
+						int(time.Since(info.ModTime()).Hours()/24), "size", size)
+
+					// Log progress periodically so we can see it's working even if killed
+					if filesDeleted%100 == 0 {
+						logger.Info("Cleanup progress",
+							"files_deleted_so_far", filesDeleted,
+							"bytes_freed_so_far", bytesFreed,
+							"bytes_freed_human", formatBytes(bytesFreed))
+					}
+				}
+			}
+
+			return nil
+		})
+		if err != nil {
+			logger.Error("Cache cleanup walk failed", "error", err)
+			http.Error(writer, "Cleanup failed", http.StatusInternalServerError)
+			return
+		}
+
+		// Note: In-memory cache (otter) handles expiration automatically with TTL
+
+		logger.Info("Cache cleanup completed",
+			"files_checked", filesChecked,
+			"files_deleted", filesDeleted,
+			"bytes_freed", bytesFreed,
+			"errors", len(errs))
+
+		writer.Header().Set("Content-Type", "application/json")
+		response := map[string]any{
+			"status":            "success",
+			"files_checked":     filesChecked,
+			"files_deleted":     filesDeleted,
+			"bytes_freed":       bytesFreed,
+			"bytes_freed_human": formatBytes(bytesFreed),
+			"cutoff_time":       cutoffTime.Format(time.RFC3339),
+		}
+
+		if len(errs) > 0 {
+			response["errors"] = errs
+		}
+
+		if err := json.NewEncoder(writer).Encode(response); err != nil {
+			logger.Error("failed to encode JSON response", "error", err)
+		}
+	}
+}
+
+// formatBytes converts bytes to human-readable format.
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// buildCachePath constructs hierarchical cache path: v1/{first-2}/{3-4}/{username}.json.gz.
+func buildCachePath(cacheDir, username string) string {
+	// Handle short usernames
+	var dir1, dir2 string
+	if len(username) >= 2 {
+		dir1 = username[:2]
+	} else {
+		dir1 = username
+	}
+
+	switch {
+	case len(username) >= 4:
+		dir2 = username[2:4]
+	case len(username) > 2:
+		dir2 = username[2:]
+	default:
+		dir2 = "_"
+	}
+
+	return filepath.Join(cacheDir, "v1", dir1, dir2, username+".json.gz")
+}
+
+// compressJSON compresses JSON data using gzip.
+func compressJSON(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write(data); err != nil {
+		return nil, err
+	}
+	if err := gz.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// decompressJSON decompresses gzipped JSON data.
+func decompressJSON(data []byte) ([]byte, error) {
+	r, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := r.Close(); closeErr != nil {
+			// Log but don't fail - data has already been read
+			slog.Debug("Failed to close gzip reader", "error", closeErr)
+		}
+	}()
+	return io.ReadAll(r)
+}
+
+// checkDiskCache checks if a valid cached result exists on disk.
+func checkDiskCache(cachePath string, memoryCacheKey string, username string, logger *slog.Logger) (*gutz.Result, bool) {
+	compressedData, err := os.ReadFile(cachePath)
+	if err != nil {
+		return nil, false
+	}
+
+	// Check file modification time
+	stat, err := os.Stat(cachePath)
+	if err != nil {
+		return nil, false
+	}
+
+	age := time.Since(stat.ModTime())
+	if age >= 30*24*time.Hour { // 30 days or older
+		logger.Debug("Cache expired", "username", username, "age_days", int(age.Hours()/24))
+		return nil, false
+	}
+
+	// Decompress and decode
+	jsonData, err := decompressJSON(compressedData)
+	if err != nil {
+		logger.Debug("Failed to decompress cache", "username", username, "error", err)
+		return nil, false
+	}
+
+	var cachedResult gutz.Result
+	if err := json.Unmarshal(jsonData, &cachedResult); err != nil {
+		logger.Debug("Failed to decode cache", "username", username, "error", err)
+		return nil, false
+	}
+
+	logger.Info("Disk cache hit", "username", username, "age_hours", int(age.Hours()))
+
+	// Also store in memory cache for next time
+	responseCache.Set(memoryCacheKey, jsonData)
+
+	return &cachedResult, true
+}
+
+// saveToDiskCache saves detection result to disk cache.
+func saveToDiskCache(result *gutz.Result, cachePath string, memoryCacheKey string, username string, logger *slog.Logger) {
+	if result.Method == "user_not_found" {
+		return
+	}
+
+	cacheSubDir := filepath.Dir(cachePath)
+
+	// Create subdirectories if they don't exist
+	if err := os.MkdirAll(cacheSubDir, 0o750); err != nil {
+		logger.Debug("Failed to create cache directory", "path", cacheSubDir, "error", err)
+		return
+	}
+
+	jsonData, err := json.Marshal(result)
+	if err != nil {
+		logger.Debug("Failed to marshal result", "error", err)
+		return
+	}
+
+	compressedData, err := compressJSON(jsonData)
+	if err != nil {
+		logger.Debug("Failed to compress cache", "error", err)
+		return
+	}
+
+	if err := os.WriteFile(cachePath, compressedData, 0o600); err != nil {
+		logger.Debug("Failed to write cache", "path", cachePath, "error", err)
+		return
+	}
+
+	logger.Info("Disk cache updated", "username", username, "path", cachePath,
+		"uncompressed_size", len(jsonData), "compressed_size", len(compressedData))
+
+	// Store uncompressed JSON in memory cache
+	responseCache.Set(memoryCacheKey, jsonData)
+}
+
 func handleAPIDetect(detector *gutz.Detector, logger *slog.Logger) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		// Method check is now handled by the mux pattern "POST /api/v1/detect"
@@ -471,9 +750,11 @@ func handleAPIDetect(detector *gutz.Detector, logger *slog.Logger) http.HandlerF
 		}
 
 		req.Username = strings.TrimSpace(req.Username)
-		if req.Username == "" || len(req.Username) > 100 {
+		// SECURITY: Validate GitHub username format to prevent path traversal
+		if !gutz.IsValidGitHubUsername(req.Username) {
 			// SECURITY: Log potential attack attempts
 			logger.Warn("SECURITY: Invalid username attempt",
+				"username", req.Username,
 				"username_length", len(req.Username),
 				"remote_addr", request.RemoteAddr,
 				"user_agent", request.Header.Get("User-Agent"))
@@ -483,14 +764,48 @@ func handleAPIDetect(detector *gutz.Detector, logger *slog.Logger) http.HandlerF
 
 		logger.Info("Processing detection request", "username", req.Username, "remote_addr", request.RemoteAddr)
 
-		ctx, cancel := context.WithTimeout(request.Context(), 30*time.Second)
-		defer cancel()
-
-		result, err := detector.Detect(ctx, req.Username)
-		if err != nil {
-			logger.Error("Detection failed", "username", req.Username, "error", err)
-			http.Error(writer, "Detection failed", http.StatusInternalServerError)
+		// Check in-memory cache first
+		memoryCacheKey := "api:detect:" + req.Username
+		if cachedBytes, found := responseCache.Get(memoryCacheKey); found {
+			logger.Info("Memory cache hit", "username", req.Username)
+			writer.Header().Set("Content-Type", "application/json")
+			writer.Header().Set("X-Cache", "memory-hit")
+			if _, err := writer.Write(cachedBytes); err != nil {
+				logger.Error("Failed to write cached response", "error", err)
+			}
 			return
+		}
+
+		// Check disk cache if configured
+		var result *gutz.Result
+		diskCacheHit := false
+
+		if *cacheDir != "" {
+			cachePath := buildCachePath(*cacheDir, req.Username)
+			if cachedResult, hit := checkDiskCache(cachePath, memoryCacheKey, req.Username, logger); hit {
+				result = cachedResult
+				diskCacheHit = true
+			}
+		}
+
+		// If no cache hit, do regular detection
+		if !diskCacheHit {
+			ctx, cancel := context.WithTimeout(request.Context(), 30*time.Second)
+			defer cancel()
+
+			detectionResult, err := detector.Detect(ctx, req.Username)
+			if err != nil {
+				logger.Error("Detection failed", "username", req.Username, "error", err)
+				http.Error(writer, "Detection failed", http.StatusInternalServerError)
+				return
+			}
+			result = detectionResult
+
+			// Save to disk cache if detection succeeded and cache directory is configured
+			if *cacheDir != "" {
+				cachePath := buildCachePath(*cacheDir, req.Username)
+				saveToDiskCache(result, cachePath, memoryCacheKey, req.Username, logger)
+			}
 		}
 
 		// Check if this is a "user not found" result
@@ -500,7 +815,11 @@ func handleAPIDetect(detector *gutz.Detector, logger *slog.Logger) http.HandlerF
 			return
 		}
 
-		logger.Info("Detection successful", "username", req.Username, "timezone", result.Timezone, "method", result.Method)
+		logger.Info("Detection successful",
+			"username", req.Username,
+			"timezone", result.Timezone,
+			"method", result.Method,
+			"disk_cached", diskCacheHit)
 
 		// Log detailed result information for debugging
 		logger.Debug("Detection result details",
@@ -524,12 +843,12 @@ func handleAPIDetect(detector *gutz.Detector, logger *slog.Logger) http.HandlerF
 				"organizations", strings.Join(orgNames, ", "))
 		}
 
-		// Marshal to JSON for logging the full response
-		if jsonBytes, err := json.MarshalIndent(result, "", "  "); err == nil {
-			logger.Debug("Full JSON response", "username", req.Username, "response", string(jsonBytes))
-		}
-
 		writer.Header().Set("Content-Type", "application/json")
+		if diskCacheHit {
+			writer.Header().Set("X-Cache", "disk-hit")
+		} else {
+			writer.Header().Set("X-Cache", "miss")
+		}
 
 		// SECURITY: Restrictive CORS - only allow same origin by default
 		// No CORS headers = same-origin only (most secure default)

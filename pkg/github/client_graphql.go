@@ -2,6 +2,13 @@ package github
 
 import (
 	"context"
+	"errors"
+)
+
+// Common errors.
+var (
+	ErrNoGitHubToken = errors.New("no GitHub token available")
+	ErrUserNotFound  = errors.New("user not found")
 )
 
 // FetchUserEnhancedGraphQL fetches comprehensive user data using our enhanced GraphQL implementation
@@ -10,7 +17,7 @@ func (c *Client) FetchUserEnhancedGraphQL(ctx context.Context, username string) 
 	if c.githubToken == "" {
 		// Can't use GraphQL without a token
 		c.logger.Debug("No GitHub token available for GraphQL", "username", username)
-		return nil, nil
+		return nil, ErrNoGitHubToken
 	}
 
 	graphql := NewGraphQLClient(c.githubToken, c.cachedHTTPDo, c.logger)
@@ -22,7 +29,7 @@ func (c *Client) FetchUserEnhancedGraphQL(ctx context.Context, username string) 
 	}
 
 	if profile.User.Login == "" {
-		return nil, nil // User not found
+		return nil, ErrUserNotFound
 	}
 
 	// Convert GraphQL response to User struct
@@ -234,16 +241,16 @@ func (c *Client) FetchCommentsWithGraphQL(ctx context.Context, username string) 
 }
 
 // CompareAPIEfficiency shows the efficiency gains from using GraphQL.
-func CompareAPIEfficiency() map[string]interface{} {
-	return map[string]interface{}{
-		"rest_search_api": map[string]interface{}{
+func CompareAPIEfficiency() map[string]any {
+	return map[string]any{
+		"rest_search_api": map[string]any{
 			"rate_limit":       "30 requests/minute",
 			"requests_needed":  4, // User + PRs + Issues + Comments
 			"data_per_request": "30-100 items",
 			"secondary_limits": "Very restrictive",
 			"total_api_calls":  "4-8 (with pagination)",
 		},
-		"graphql_api": map[string]interface{}{
+		"graphql_api": map[string]any{
 			"rate_limit":       "5000 points/hour",
 			"requests_needed":  2, // 1 for profile+orgs, 1 for PRs+Issues
 			"data_per_request": "100 PRs + 100 Issues + profile + orgs",
@@ -251,7 +258,7 @@ func CompareAPIEfficiency() map[string]interface{} {
 			"total_api_calls":  "2-3 (with pagination)",
 			"point_cost":       "~10-20 points per query",
 		},
-		"efficiency_gain": map[string]interface{}{
+		"efficiency_gain": map[string]any{
 			"api_calls_reduced": "50-75%",
 			"rate_limit_usage":  "95% less",
 			"response_time":     "2-3x faster",

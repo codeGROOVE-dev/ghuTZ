@@ -75,25 +75,37 @@ func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *De
 
 	// Initialize cache
 	var cache *httpcache.OtterCache
-	var cacheDir string
 
-	if optHolder.cacheDir != "" {
-		// Use custom cache directory
-		cacheDir = optHolder.cacheDir
-	} else if userCacheDir, err := os.UserCacheDir(); err == nil {
-		// Use default user cache directory
-		cacheDir = filepath.Join(userCacheDir, "gutz")
-	} else {
-		logger.Debug("could not determine user cache directory", "error", err)
-	}
-
-	if cacheDir != "" {
+	if optHolder.memoryOnlyCache {
+		// Use memory-only cache (for web server)
 		var err error
-		cache, err = httpcache.NewOtterCache(ctx, cacheDir, 30*24*time.Hour, logger)
+		cache, err = httpcache.NewMemoryOnlyCache(12*time.Hour, logger)
 		if err != nil {
-			logger.Warn("cache initialization failed", "error", err, "cache_dir", cacheDir)
+			logger.Warn("memory-only cache initialization failed", "error", err)
 			// Cache is optional, continue without it
 			cache = nil
+		}
+	} else {
+		// Use disk-backed cache (for CLI)
+		var cacheDir string
+		if optHolder.cacheDir != "" {
+			// Use custom cache directory
+			cacheDir = optHolder.cacheDir
+		} else if userCacheDir, err := os.UserCacheDir(); err == nil {
+			// Use default user cache directory
+			cacheDir = filepath.Join(userCacheDir, "gutz")
+		} else {
+			logger.Debug("could not determine user cache directory", "error", err)
+		}
+
+		if cacheDir != "" {
+			var err error
+			cache, err = httpcache.NewOtterCache(ctx, cacheDir, 30*24*time.Hour, logger)
+			if err != nil {
+				logger.Warn("cache initialization failed", "error", err, "cache_dir", cacheDir)
+				// Cache is optional, continue without it
+				cache = nil
+			}
 		}
 	}
 
@@ -180,8 +192,9 @@ func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*htt
 	return resp, nil
 }
 
-// isValidGitHubUsername validates GitHub username format for security.
-func isValidGitHubUsername(username string) bool {
+// IsValidGitHubUsername validates GitHub username format for security.
+// This is exported for use by the server to prevent path traversal attacks.
+func IsValidGitHubUsername(username string) bool {
 	// SECURITY: Validate username to prevent injection attacks
 	username = strings.TrimSpace(username)
 
@@ -346,7 +359,7 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 }
 
 // fetchAllUserData fetches all data for a user at once to avoid redundant API calls.
-func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserContext {
+func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserContext { //nolint:revive,maintidx // Long function but organized logically
 	userCtx := &UserContext{
 		Username:  username,
 		FromCache: make(map[string]bool),
@@ -361,7 +374,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) *UserC
 		defer wg.Done()
 		d.logger.Debug("checking user profile", "username", username)
 		user, err := d.githubClient.FetchUserEnhancedGraphQL(ctx, username)
-		if err != nil {
+		if err != nil && !errors.Is(err, github.ErrNoGitHubToken) && !errors.Is(err, github.ErrUserNotFound) {
 			d.logger.Warn("🚩 User Profile Fetch Failed", "username", username, "error", err,
 				"impact", "Gemini analysis will be skipped due to missing profile data")
 		}
@@ -594,7 +607,7 @@ func getCreatedAtFromUser(user *github.User) *time.Time {
 // Detect performs timezone detection for the given GitHub username.
 func (d *Detector) Detect(ctx context.Context, username string) (*Result, error) {
 	// SECURITY: Validate username to prevent injection attacks
-	if !isValidGitHubUsername(username) {
+	if !IsValidGitHubUsername(username) {
 		return nil, errors.New("invalid GitHub username format")
 	}
 
@@ -672,13 +685,12 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 	// SECURITY: Only auto-prefix https:// for well-formed domain names
 	if !strings.HasPrefix(blogURL, "http://") && !strings.HasPrefix(blogURL, "https://") {
 		// Validate it looks like a domain before auto-prefixing
-		if strings.Contains(blogURL, ".") && !strings.Contains(blogURL, " ") &&
-			!strings.Contains(blogURL, "://") && !strings.HasPrefix(blogURL, "//") {
-			blogURL = "https://" + blogURL
-		} else {
+		if !strings.Contains(blogURL, ".") || strings.Contains(blogURL, " ") ||
+			strings.Contains(blogURL, "://") || strings.HasPrefix(blogURL, "//") {
 			d.logger.Debug("invalid URL format, not auto-prefixing", "url", blogURL)
 			return ""
 		}
+		blogURL = "https://" + blogURL
 	}
 
 	// SECURITY: Parse URL to validate it's safe to fetch

@@ -1,6 +1,7 @@
 package lunch
 
 import (
+	"math"
 	"testing"
 )
 
@@ -61,11 +62,11 @@ func TestDlorencLunchSteepnessUniformity(t *testing.T) {
 
 	// Allow small tolerance for floating point comparison
 	tolerance := 0.1
-	if abs(startUTC-expectedStartUTC) > tolerance {
+	if math.Abs(startUTC-expectedStartUTC) > tolerance {
 		t.Errorf("Expected lunch start at %.1f UTC (steepest drop), got %.1f UTC", expectedStartUTC, startUTC)
 	}
 
-	if abs(endUTC-expectedEndUTC) > tolerance {
+	if math.Abs(endUTC-expectedEndUTC) > tolerance {
 		t.Errorf("Expected lunch end at %.1f UTC (30-min duration), got %.1f UTC", expectedEndUTC, endUTC)
 	}
 
@@ -88,7 +89,7 @@ func TestDlorencSteepnessCalculation(t *testing.T) {
 	drop1130 := (float64(preLunchActivity) - 7.0) / float64(preLunchActivity)
 	expected1130 := 0.30 // 30% drop
 
-	if abs(drop1130-expected1130) > 0.01 {
+	if math.Abs(drop1130-expected1130) > 0.01 {
 		t.Errorf("11:30 drop calculation wrong: expected %.2f, got %.2f", expected1130, drop1130)
 	}
 
@@ -106,7 +107,7 @@ func TestDlorencSteepnessCalculation(t *testing.T) {
 	uniformityRatio := (maxDrop - minDrop) / maxDrop
 
 	expectedUniformityRatio := 0.75 // 75% difference
-	if abs(uniformityRatio-expectedUniformityRatio) > 0.01 {
+	if math.Abs(uniformityRatio-expectedUniformityRatio) > 0.01 {
 		t.Errorf("Uniformity ratio calculation wrong: expected %.2f, got %.2f", expectedUniformityRatio, uniformityRatio)
 	}
 
@@ -117,11 +118,4 @@ func TestDlorencSteepnessCalculation(t *testing.T) {
 
 	t.Logf("✓ Steepness uniformity check: 11:30 drop=%.0f%%, 12:00 drop=%.0f%%, difference=%.0f%% (exceeds 20%% threshold)",
 		dropWith11AsBaseline1130*100, dropWith11AsBaseline1200*100, uniformityRatio*100)
-}
-
-func abs(x float64) float64 {
-	if x < 0 {
-		return -x
-	}
-	return x
 }

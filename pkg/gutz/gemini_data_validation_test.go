@@ -129,8 +129,8 @@ func TestGeminiDataCompleteness(t *testing.T) {
 }
 
 // buildGeminiContext simulates building context for Gemini
-func buildGeminiContext(userCtx *UserContext) map[string]interface{} {
-	context := make(map[string]interface{})
+func buildGeminiContext(userCtx *UserContext) map[string]any {
+	context := make(map[string]any)
 
 	if userCtx.User != nil {
 		context["user"] = userCtx.User

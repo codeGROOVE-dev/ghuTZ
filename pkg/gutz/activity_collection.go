@@ -360,18 +360,11 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 			"days_covered", int(commentNewest.Sub(commentOldest).Hours()/24))
 	}
 
-	// Add starred repository timestamps (if any were fetched)
-	for i := range additionalData.StarredRepos {
-		repo := &additionalData.StarredRepos[i]
-		// Note: Starred repositories from the API don't have timestamps directly,
-		// but they're fetched with timestamps in FetchStarredRepositories
-		// This is handled separately in the main activity collection
-		org := extractOrganization(repo.FullName)
-		if org != "" {
-			// We'll add these timestamps in a different way since starred repo
-			// timestamps come from a different API call with timestamp data
-		}
-	}
+	// Note: Starred repositories from the API don't have timestamps directly,
+	// but they're fetched with timestamps in FetchStarredRepositories
+	// This is handled separately in the main activity collection
+	// Currently not processing organization timestamps for starred repos
+	// since they come from a different API call with timestamp data
 
 	d.logger.Debug("collected all timestamps", "username", username,
 		"total_before_dedup", len(allTimestamps),

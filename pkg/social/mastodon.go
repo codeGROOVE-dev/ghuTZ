@@ -50,7 +50,7 @@ type MastodonField struct {
 }
 
 // fetchMastodonProfileViaAPI fetches profile data using the Mastodon API.
-func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger *slog.Logger) *MastodonProfileData { //nolint:gocognit // Complex function with necessary error handling and retries
+func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger *slog.Logger) *MastodonProfileData { //nolint:gocognit,revive,maintidx // Complex function with necessary error handling and retries
 	// Parse the Mastodon URL to extract hostname and username
 	parsedURL, err := url.Parse(mastodonURL)
 	if err != nil {
@@ -261,7 +261,7 @@ func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger 
 }
 
 // fetchMastodonProfile fetches comprehensive info from a Mastodon profile via HTML scraping.
-func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.Logger) *MastodonProfileData { //nolint:gocognit // Complex function with necessary error handling and retries
+func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.Logger) *MastodonProfileData { //nolint:gocognit,revive,maintidx // Complex function with necessary error handling and retries
 	// Mastodon profiles often have metadata in the HTML
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mastodonURL, http.NoBody)
 	if err != nil {

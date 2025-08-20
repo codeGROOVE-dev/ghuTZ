@@ -2,7 +2,7 @@ package gutz
 
 // calculateTypicalActiveHours determines typical work hours based on activity patterns.
 //
-//nolint:gocognit // Complex business logic requires nested conditions
+//nolint:gocognit,revive,maintidx // Complex business logic requires nested conditions
 func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOffset int) (start, end int) {
 	// Convert quiet hours (UTC) to a map for fast lookup
 	quietUTCMap := make(map[int]bool)
@@ -37,6 +37,8 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 		} else {
 			workThreshold = totalActivity / 25 // About 4% for light activity
 		}
+	default:
+		// Keep the default value of 5
 	}
 
 	// Collect work hours - significant activity that's not during quiet hours
@@ -47,10 +49,7 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 		}
 	}
 
-	// Debug logging (can remove later)
-	if len(workHours) > 0 {
-		// Log for debugging specific cases
-	}
+	// Debug logging removed - add back if needed for debugging
 
 	// If no substantial work hours found, fall back to all non-quiet activity
 	if len(workHours) == 0 {
@@ -148,12 +147,11 @@ func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOf
 				gap := (nextHour - end + 24) % 24
 
 				// Allow small gaps (1-3 hours) in work blocks (for lunch, meetings, etc.)
-				if gap <= 3 {
-					end = nextHour
-					currentScore += hourCounts[nextHour]
-				} else {
+				if gap > 3 {
 					break
 				}
+				end = nextHour
+				currentScore += hourCounts[nextHour]
 			}
 
 			// Check if this block is better (higher total activity)

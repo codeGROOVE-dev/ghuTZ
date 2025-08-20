@@ -37,6 +37,29 @@ type OtterCache struct {
 	mu         sync.RWMutex
 }
 
+// NewMemoryOnlyCache creates an in-memory only cache with no disk persistence.
+// This is ideal for web servers where response caching is handled separately.
+func NewMemoryOnlyCache(ttl time.Duration, logger *slog.Logger) (*OtterCache, error) {
+	// Create otter cache with 100k capacity using v2 API
+	cache := otter.Must(&otter.Options[string, CacheEntry]{
+		MaximumSize:      100_000,
+		InitialCapacity:  10_000,
+		ExpiryCalculator: otter.ExpiryWriting[string, CacheEntry](ttl),
+	})
+
+	c := &OtterCache{
+		cache:  *cache, // Dereference the pointer
+		dir:    "",     // No directory for memory-only cache
+		ttl:    ttl,
+		logger: logger,
+	}
+
+	logger.Info("memory-only HTTP cache initialized", "ttl", ttl, "capacity", 100_000)
+
+	// No disk loading or periodic save for memory-only cache
+	return c, nil
+}
+
 // NewOtterCache creates a new OtterCache instance with the specified directory, TTL, and logger.
 func NewOtterCache(ctx context.Context, dir string, ttl time.Duration, logger *slog.Logger) (*OtterCache, error) {
 	// Create cache directory if it doesn't exist
@@ -256,6 +279,11 @@ func (c *OtterCache) saveToDisk() error {
 }
 
 func (c *OtterCache) startPeriodicSave(ctx context.Context) {
+	// Skip for memory-only cache
+	if c.dir == "" {
+		return
+	}
+
 	saveCtx, cancel := context.WithCancel(ctx)
 	c.saveCancel = cancel
 
@@ -281,13 +309,20 @@ func (c *OtterCache) startPeriodicSave(ctx context.Context) {
 
 // Close shuts down the cache and saves all pending data.
 func (c *OtterCache) Close() error {
-	// Stop periodic saving
+	// Stop periodic saving (if configured)
 	if c.saveCancel != nil {
 		c.saveCancel()
+		c.saveWg.Wait()
 	}
-	c.saveWg.Wait()
 
-	// Final save before closing
+	// Skip disk operations for memory-only cache
+	if c.dir == "" {
+		c.logger.Debug("closing memory-only HTTP cache")
+		// Otter v2 doesn't require explicit clearing
+		return nil
+	}
+
+	// Final save before closing (for disk-backed cache)
 	if err := c.saveToDisk(); err != nil {
 		c.logger.Error("final cache save failed", "error", err)
 		return err

@@ -26,12 +26,13 @@ func NewGraphQLClient(token string, cachedHTTPDo func(context.Context, *http.Req
 	}
 }
 
-// GraphQL response structures.
+// GraphQLResponse represents the response from a GraphQL query.
 type GraphQLResponse struct {
 	Data   json.RawMessage `json:"data"`
 	Errors []GraphQLError  `json:"errors,omitempty"`
 }
 
+// GraphQLError represents an error in a GraphQL response.
 type GraphQLError struct {
 	Message string `json:"message"`
 	Type    string `json:"type"`
@@ -264,13 +265,15 @@ func (c *GraphQLClient) FetchUserProfile(ctx context.Context, username string) (
 		}
 	}`
 
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"login": username,
 	}
 
 	resp, err := c.executeQuery(ctx, query, variables)
 	if err != nil {
-		c.logger.Error("🚩 GraphQL User Profile Query Failed", "query_type", "user_profile_with_starred_repos_and_gists", "username", username, "error", err)
+		c.logger.Error("🚩 GraphQL User Profile Query Failed",
+			"query_type", "user_profile_with_starred_repos_and_gists",
+			"username", username, "error", err)
 		return nil, err
 	}
 
@@ -333,7 +336,7 @@ func (c *GraphQLClient) FetchActivityData(ctx context.Context, username string, 
 		}
 	}`
 
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"login": username,
 	}
 
@@ -377,7 +380,7 @@ func (c *GraphQLClient) FetchComments(ctx context.Context, username string, curs
 		}
 	}`
 
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"login": username,
 	}
 
@@ -405,8 +408,8 @@ func (c *GraphQLClient) FetchComments(ctx context.Context, username string, curs
 // doesn't support COMMIT type. Use REST API for commit search instead.
 
 // executeQuery executes a GraphQL query.
-func (c *GraphQLClient) executeQuery(ctx context.Context, query string, variables map[string]interface{}) (*GraphQLResponse, error) {
-	payload := map[string]interface{}{
+func (c *GraphQLClient) executeQuery(ctx context.Context, query string, variables map[string]any) (*GraphQLResponse, error) {
+	payload := map[string]any{
 		"query":     query,
 		"variables": variables,
 	}

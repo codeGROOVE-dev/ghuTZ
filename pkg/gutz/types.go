@@ -1,4 +1,4 @@
-package gutz
+package gutz //nolint:revive // Multiple public structs needed for API
 
 import (
 	"math"
@@ -76,15 +76,23 @@ func WithCacheDir(dir string) Option {
 	}
 }
 
+// WithMemoryOnlyCache configures the detector to use memory-only HTTP caching.
+func WithMemoryOnlyCache() Option {
+	return func(o *OptionHolder) {
+		o.memoryOnlyCache = true
+	}
+}
+
 // OptionHolder holds configuration options.
 type OptionHolder struct {
-	githubToken   string
-	mapsAPIKey    string
-	geminiAPIKey  string
-	geminiModel   string
-	gcpProject    string
-	cacheDir      string
-	forceActivity bool
+	githubToken     string
+	mapsAPIKey      string
+	geminiAPIKey    string
+	geminiModel     string
+	gcpProject      string
+	cacheDir        string
+	forceActivity   bool
+	memoryOnlyCache bool
 }
 
 // LunchBreak represents detected lunch break times.

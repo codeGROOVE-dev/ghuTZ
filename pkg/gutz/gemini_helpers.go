@@ -230,7 +230,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	sb.WriteString("=== ACTIVITY TIMEZONE ANALYSIS ===\n\n")
 
 	// Timezone candidates are critical constraints that must be respected.
-	if candidates, ok := contextData["timezone_candidates"].([]timezone.Candidate); ok && len(candidates) > 0 {
+	if candidates, ok := contextData["timezone_candidates"].([]timezone.Candidate); ok && len(candidates) > 0 { //nolint:nestif // Complex but necessary for accurate timezone detection
 		// Summary line shows all viable candidates.
 		sb.WriteString("Top 3 candidates: ")
 		for i := range candidates {

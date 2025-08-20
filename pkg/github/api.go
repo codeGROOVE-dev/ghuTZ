@@ -103,7 +103,7 @@ func (c *Client) FetchUserGistsDetails(ctx context.Context, username string) ([]
 
 	if resp.StatusCode != http.StatusOK {
 		c.logger.Warn("🚩 GitHub API Error", "status", resp.StatusCode, "url", apiURL)
-		return nil, fmt.Errorf("GitHub API error: %d", resp.StatusCode)
+		return nil, fmt.Errorf("github API returned status %d", resp.StatusCode)
 	}
 
 	var gists []Gist
@@ -139,7 +139,7 @@ func (c *Client) FetchUserGists(ctx context.Context, username string) ([]time.Ti
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
 	var gists []struct {
@@ -461,7 +461,7 @@ func (c *Client) FetchUserComments(ctx context.Context, username string) ([]Comm
 		if err != nil {
 			return nil, fmt.Errorf("GitHub GraphQL API returned status %d (failed to read response)", resp.StatusCode)
 		}
-		return nil, fmt.Errorf("GitHub GraphQL API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("graphQL API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Parse the response
@@ -508,7 +508,7 @@ func (c *Client) FetchUserComments(ctx context.Context, username string) ([]Comm
 
 	if len(result.Errors) > 0 {
 		c.logger.Error("🚩 GitHub GraphQL API Error", "username", username, "errors", result.Errors)
-		return nil, fmt.Errorf("GraphQL errors: %v", result.Errors[0].Message)
+		return nil, fmt.Errorf("graphQL error: %s", result.Errors[0].Message)
 	}
 
 	var comments []Comment
@@ -579,7 +579,7 @@ func (c *Client) FetchOrganizations(ctx context.Context, username string) ([]Org
 		if err != nil {
 			return nil, fmt.Errorf("GitHub API returned status %d (failed to read response)", resp.StatusCode)
 		}
-		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("github API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Read the response body first for debugging
@@ -686,7 +686,7 @@ func (c *Client) FetchPinnedRepositories(ctx context.Context, username string) (
 		if err != nil {
 			return nil, fmt.Errorf("GitHub GraphQL API returned status %d (failed to read response)", resp.StatusCode)
 		}
-		return nil, fmt.Errorf("GitHub GraphQL API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("graphQL API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var result struct {
@@ -718,7 +718,7 @@ func (c *Client) FetchPinnedRepositories(ctx context.Context, username string) (
 
 	if len(result.Errors) > 0 {
 		c.logger.Error("🚩 GitHub GraphQL API Error", "username", username, "errors", result.Errors)
-		return nil, fmt.Errorf("GraphQL errors: %v", result.Errors[0].Message)
+		return nil, fmt.Errorf("graphQL error: %s", result.Errors[0].Message)
 	}
 
 	var repositories []Repository
@@ -773,7 +773,7 @@ func (c *Client) FetchPopularRepositories(ctx context.Context, username string) 
 		if err != nil {
 			return nil, fmt.Errorf("GitHub API returned status %d (failed to read response)", resp.StatusCode)
 		}
-		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("github API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var apiRepos []struct {
@@ -920,7 +920,7 @@ func (c *Client) FetchStarredRepositories(ctx context.Context, username string) 
 		if err != nil {
 			return nil, nil, fmt.Errorf("GitHub API returned status %d (failed to read response)", resp.StatusCode)
 		}
-		return nil, nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, nil, fmt.Errorf("github API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var starData []struct {
@@ -1051,7 +1051,7 @@ func (c *Client) fetchCommitPage(ctx context.Context, username string, page int,
 			return nil, fmt.Errorf("failed to read response body: %w", err)
 		}
 		c.logger.Warn("🚩 GitHub API Error", "status", resp.StatusCode, "page", page, "body", string(body))
-		return timestamps, fmt.Errorf("GitHub API error: %d", resp.StatusCode)
+		return timestamps, fmt.Errorf("github API returned status %d", resp.StatusCode)
 	}
 
 	var searchResult struct {
@@ -1134,22 +1134,8 @@ func (c *Client) FetchUserCommitActivitiesGraphQL(ctx context.Context, username 
 			c.logger.Debug("commit search API request failed", "page", page, "error", err)
 			break
 		}
-		defer func() {
-			if err := resp.Body.Close(); err != nil {
-				c.logger.Debug("failed to close response body", "error", err)
-			}
-		}()
 
-		if resp.StatusCode != http.StatusOK {
-			body, readErr := io.ReadAll(resp.Body)
-			if readErr != nil {
-				c.logger.Warn("🚩 GitHub Commit Search API Error", "status", resp.StatusCode, "page", page, "read_error", readErr)
-			} else {
-				c.logger.Warn("🚩 GitHub Commit Search API Error", "status", resp.StatusCode, "page", page, "body", string(body))
-			}
-			break
-		}
-
+		// Process response and close body immediately to avoid resource leak
 		var searchResult struct {
 			Items []struct {
 				Repository struct {
@@ -1172,7 +1158,20 @@ func (c *Client) FetchUserCommitActivitiesGraphQL(ctx context.Context, username 
 			TotalCount int `json:"total_count"`
 		}
 
-		if err := json.NewDecoder(resp.Body).Decode(&searchResult); err != nil {
+		if resp.StatusCode != http.StatusOK {
+			body, readErr := io.ReadAll(resp.Body)
+			_ = resp.Body.Close() //nolint:errcheck // best effort close
+			if readErr != nil {
+				c.logger.Warn("🚩 GitHub Commit Search API Error", "status", resp.StatusCode, "page", page, "read_error", readErr)
+			} else {
+				c.logger.Warn("🚩 GitHub Commit Search API Error", "status", resp.StatusCode, "page", page, "body", string(body))
+			}
+			break
+		}
+
+		err = json.NewDecoder(resp.Body).Decode(&searchResult)
+		_ = resp.Body.Close() //nolint:errcheck // best effort close
+		if err != nil {
 			c.logger.Debug("failed to decode commit search response", "page", page, "error", err)
 			break
 		}
