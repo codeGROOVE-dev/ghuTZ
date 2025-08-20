@@ -1178,7 +1178,8 @@ func (c *Client) FetchUserCommitActivitiesGraphQL(ctx context.Context, username 
 		}
 
 		// Convert to CommitActivity objects
-		for _, item := range searchResult.Items {
+		for i := range searchResult.Items {
+			item := &searchResult.Items[i]
 			if item.Repository.FullName != "" && !item.Commit.Committer.Date.IsZero() {
 				allActivities = append(allActivities, CommitActivity{
 					AuthorDate:     item.Commit.Committer.Date,
@@ -1308,7 +1309,8 @@ func (c *Client) fetchCommitActivitiesPage(ctx context.Context, username string,
 		c.logger.Debug("GitHub commit activities search results", "username", username, "total_count", searchResult.TotalCount)
 	}
 
-	for _, item := range searchResult.Items {
+	for i := range searchResult.Items {
+		item := &searchResult.Items[i]
 		if !item.Commit.Author.Date.IsZero() && item.Repository.FullName != "" {
 			activities = append(activities, CommitActivity{
 				AuthorDate:     item.Commit.Author.Date,

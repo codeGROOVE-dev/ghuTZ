@@ -298,7 +298,8 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 		// Look through all candidates for a matching offset
 		// We check offsets in order of preference (current DST offset first)
 		for _, offset := range possibleOffsets {
-			for _, candidate := range result.TimezoneCandidates {
+			for i := range result.TimezoneCandidates {
+				candidate := &result.TimezoneCandidates[i]
 				if int(candidate.Offset) == offset && candidate.LunchStartUTC >= 0 {
 					// Reuse the lunch calculation from this candidate
 					d.logger.Debug("reusing lunch from candidate",

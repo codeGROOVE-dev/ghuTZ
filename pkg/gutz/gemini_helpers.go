@@ -234,10 +234,11 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	if candidates, ok := contextData["timezone_candidates"].([]timezone.Candidate); ok && len(candidates) > 0 {
 		// Summary line shows all viable candidates.
 		sb.WriteString("Top 3 candidates: ")
-		for i, candidate := range candidates {
+		for i := range candidates {
 			if i >= maxTopCandidates {
 				break
 			}
+			candidate := &candidates[i]
 			if i > 0 {
 				sb.WriteString(", ")
 			}
@@ -277,10 +278,11 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		sb.WriteString("\n")
 
 		// Show detailed signals for top 3 candidates with work patterns.
-		for i, candidate := range candidates {
+		for i := range candidates {
 			if i >= maxDetailedCandidates {
 				break
 			}
+			candidate := &candidates[i]
 			fmt.Fprintf(&sb, "%d. UTC%+.1f (%.0f%% confidence)\n",
 				i+1, candidate.Offset, candidate.Confidence)
 

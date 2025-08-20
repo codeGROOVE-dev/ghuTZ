@@ -1,6 +1,7 @@
 package gutz
 
 // calculateTypicalActiveHours determines typical work hours based on activity patterns.
+//nolint:gocognit // Complex business logic requires nested conditions
 func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOffset int) (start, end int) {
 	// Convert quiet hours (UTC) to a map for fast lookup
 	quietUTCMap := make(map[int]bool)

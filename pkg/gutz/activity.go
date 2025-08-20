@@ -192,14 +192,6 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		spansDSTTransitions = hasSpringDST && hasFallDST && totalDays > 90
 	}
 
-	d.logger.Debug("activity data summary", "username", username,
-		"total_timestamps_collected", len(allTimestamps),
-		"duplicates_removed", duplicates,
-		"unique_timestamps_used", totalActivity,
-		"oldest_activity", oldestActivity.Format("2006-01-02"),
-		"newest_activity", newestActivity.Format("2006-01-02"),
-		"total_days", totalDays)
-
 	// Check minimum threshold
 	if totalActivity < 3 {
 		d.logger.Debug("insufficient activity data", "username", username,
@@ -255,17 +247,10 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		}
 	}
 
-	d.logger.Debug("activity pattern summary", "username", username,
-		"total_activity", totalActivity,
-		"sleep_hours", quietHours,
-		"most_active_hours", mostActiveHours,
-		"max_activity_count", maxActivity)
-
 	hourlyActivity := make([]int, 24)
 	for hour := range 24 {
 		hourlyActivity[hour] = hourCounts[hour]
 	}
-	d.logger.Debug("hourly activity distribution", "username", username, "hours_utc", hourlyActivity)
 
 	// Find the middle of sleep hours
 	// FindSleepHours returns a continuous window of hours, potentially wrapping around midnight
@@ -501,10 +486,6 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 
 	// STEP 1: Find the best global lunch pattern in UTC (timezone-independent)
 	bestGlobalLunch := lunch.FindBestGlobalLunchPattern(halfHourCounts)
-	d.logger.Debug("best global lunch pattern", "username", username,
-		"start_utc", bestGlobalLunch.StartUTC,
-		"confidence", bestGlobalLunch.Confidence,
-		"drop_percent", bestGlobalLunch.DropPercent)
 
 	// DEBUG: Let's see what the half-hour data looks like around the detected lunch time
 	if bestGlobalLunch.StartUTC > 0 {
@@ -538,10 +519,11 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			"top_offset", candidates[0].Offset,
 			"top_confidence", candidates[0].Confidence)
 
-		for i, c := range candidates {
+		for i := range candidates {
 			if i >= 5 {
 				break
 			}
+			c := &candidates[i]
 			d.logger.Debug("timezone candidate", "username", username,
 				"rank", i+1,
 				"offset", c.Offset,
@@ -613,14 +595,8 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			}
 		}
 	}
-	d.logger.Debug("lunch detection attempt", "username", username,
-		"lunch_start", lunchStart, "lunch_end", lunchEnd, "confidence", lunchConfidence,
-		"work_start", activeStart, "work_end", activeEnd, "utc_offset", offsetInt)
-
 	// Detect peak productivity window using 30-minute buckets for better precision
 	peakStart, peakEnd, peakCount := timezone.DetectPeakProductivityWithHalfHours(halfHourCounts, offsetInt)
-	d.logger.Debug("peak productivity detected", "username", username,
-		"peak_start", peakStart, "peak_end", peakEnd, "activity_count", peakCount)
 
 	// DISABLED: Work schedule validation corrections were causing more harm than good
 	// The corrections were sometimes moving people further from their actual timezone
@@ -631,10 +607,6 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// based on work/lunch schedules, as people have varying work patterns.
 	//
 	// Log the work schedule for debugging but don't apply corrections
-	d.logger.Debug("work schedule detected", "username", username,
-		"work_start", activeStart, "work_end", activeEnd,
-		"lunch_start", lunchStart, "lunch_end", lunchEnd,
-		"detected_offset", offsetInt)
 
 	// Process top organizations
 	type orgActivity struct {
@@ -669,17 +641,10 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// This often indicates we've detected the wrong timezone
 	suspiciousWorkHours := false
 	alternativeTimezone := ""
-
-	d.logger.Info("checking work hours for suspicion", "username", username,
-		"activeStart", activeStart, "midQuiet", midQuiet, "offsetInt", offsetInt)
-
 	if activeStart < 6 {
 		// Work starting before 6am is very unusual
 		suspiciousWorkHours = true
 		confidence = 0.4 // Lower confidence
-
-		d.logger.Info("suspicious early work detected", "username", username,
-			"work_start", activeStart, "midQuiet", midQuiet)
 
 		// If sleep is around 19-23 UTC, could be:
 		// - UTC+8 (China) - would make work start at 11am instead of 3am
@@ -887,7 +852,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		Timezone:         detectedTimezone,
 		ActivityTimezone: detectedTimezone, // Pure activity-based result
 		SleepHoursUTC:    refinedSleepHours,
-		SleepRanges:      sleepRanges, // Pre-calculated sleep ranges in local time
+		SleepRanges:      sleepRanges,  // Pre-calculated sleep ranges in local time
 		SleepBucketsUTC:  sleepBuckets, // 30-minute resolution sleep periods
 		ActiveHoursLocal: struct {
 			Start float64 `json:"start"`

@@ -346,7 +346,7 @@ func fetchWebsiteContent(ctx context.Context, websiteURL string, logger *slog.Lo
 			// Retry on server errors and rate limiting
 			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
 				body, _ := io.ReadAll(resp.Body)
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 			}
 			return nil

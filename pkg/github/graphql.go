@@ -416,7 +416,7 @@ func (c *GraphQLClient) executeQuery(ctx context.Context, query string, variable
 		return nil, fmt.Errorf("marshaling query: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.github.com/graphql", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.github.com/graphql", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}

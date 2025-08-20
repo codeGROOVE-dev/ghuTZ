@@ -30,7 +30,7 @@ type CacheEntry struct {
 type OtterCache struct {
 	cache      otter.Cache[string, CacheEntry]
 	logger     *slog.Logger
-	saveCancel context.CancelFunc
+	saveCancel context.CancelFunc // Cancel func for lifecycle management, not embedded context
 	dir        string
 	saveWg     sync.WaitGroup
 	ttl        time.Duration

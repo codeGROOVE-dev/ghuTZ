@@ -8,14 +8,6 @@ import (
 	"github.com/codeGROOVE-dev/guTZ/pkg/lunch"
 )
 
-// max returns the maximum of two integers.
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // GlobalLunchPattern represents the best lunch pattern found globally in UTC.
 type GlobalLunchPattern struct {
 	StartUTC    float64

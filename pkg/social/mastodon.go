@@ -116,7 +116,7 @@ func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger 
 			// Retry on server errors and rate limiting
 			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
 				body, _ := io.ReadAll(resp.Body)
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 			}
 			return nil
@@ -277,7 +277,7 @@ func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.
 			// Retry on server errors and rate limiting
 			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
 				body, _ := io.ReadAll(resp.Body)
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 			}
 			return nil

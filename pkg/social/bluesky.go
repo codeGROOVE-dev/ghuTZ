@@ -149,7 +149,7 @@ func fetchBlueSkyProfile(ctx context.Context, handle string, logger *slog.Logger
 			// Retry on server errors and rate limiting
 			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
 				body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 			}
 			return nil

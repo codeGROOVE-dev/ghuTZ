@@ -627,14 +627,16 @@ func extractRepositoryContributions(userCtx *UserContext) []repoContribution {
 	contributedRepos := make(map[string]int)
 	
 	// Extract from PRs
-	for _, pr := range userCtx.PullRequests {
+	for i := range userCtx.PullRequests {
+		pr := &userCtx.PullRequests[i]
 		if pr.RepoName != "" && !strings.HasPrefix(pr.RepoName, userCtx.Username+"/") {
 			contributedRepos[pr.RepoName]++
 		}
 	}
 	
 	// Extract from Issues
-	for _, issue := range userCtx.Issues {
+	for i := range userCtx.Issues {
+		issue := &userCtx.Issues[i]
 		if issue.RepoName != "" && !strings.HasPrefix(issue.RepoName, userCtx.Username+"/") {
 			contributedRepos[issue.RepoName]++
 		}

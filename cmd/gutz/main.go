@@ -138,14 +138,16 @@ func main() {
 
 			// Check if this offset matches one of our analyzed candidates
 			foundCandidate := false
-			for _, candidate := range result.TimezoneCandidates {
+			for i := range result.TimezoneCandidates {
+				candidate := &result.TimezoneCandidates[i]
 				if int(candidate.Offset) != *forceOffset {
 					continue
 				}
 				// We have data for this timezone! Use the pre-calculated values
 				// Find the rank of this candidate (1-based)
 				rank := 0
-				for i, c := range result.TimezoneCandidates {
+				for i := range result.TimezoneCandidates {
+					c := &result.TimezoneCandidates[i]
 					if c.Offset == candidate.Offset {
 						rank = i + 1
 						break
