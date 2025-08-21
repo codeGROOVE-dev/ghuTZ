@@ -21,6 +21,9 @@ function updateURL(username) {
     // Handle empty username (go to homepage)
     const newURL = username ? '/' + username : '/';
     window.history.replaceState({}, '', newURL);
+    
+    // Update the page title
+    document.title = username ? `guTZ: ${username}` : 'guTZ';
 }
 
 async function detectUser(username) {
