@@ -50,20 +50,10 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 
 		lunchLocalStart := math.Mod(testLunchStart+float64(testOffset)+24, 24)
 
-		// Work start time (needed to validate lunch)
+		// Work start time - use the activeStart which is calculated based on sustained activity
+		// activeStart is in UTC, convert to local time for this offset
 		testWorkStart := (activeStart + testOffset + 24) % 24
-
-		// Find first SIGNIFICANT activity in this timezone (more accurate than activeStart which uses initial offset)
-		// Look for sustained activity (>5 events) not just any blip
-		firstActivityLocal := 24.0
-		for utcHour := range 24 {
-			if hourCounts[utcHour] > 5 { // Changed from > 0 to > 5 for significant activity
-				localHour := float64((utcHour + testOffset + 24) % 24)
-				if localHour < firstActivityLocal {
-					firstActivityLocal = localHour
-				}
-			}
-		}
+		firstActivityLocal := float64(testWorkStart)
 
 		// Lunch is only reasonable if:
 		// 1. Detected in the 10am-2:30pm window
@@ -837,9 +827,16 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f adjustments=%v\n",
 				username, testOffset, testConfidence, adjustments)
 		}
+		
+		// Debug for stevebeattie - log UTC-7, UTC-8, UTC-9
+		if username == "stevebeattie" && (testOffset == -7 || testOffset == -8 || testOffset == -9) {
+			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f adjustments=%v\n",
+				username, testOffset, testConfidence, adjustments)
+		}
 
-		// Add to candidates if confidence is reasonable (at least 10%)
-		if testConfidence >= 10 {
+		// Add to candidates if confidence is reasonable (at least 5%)
+		// Lowered threshold to ensure we get multiple candidates for better Gemini analysis
+		if testConfidence >= 5 {
 			candidate := Candidate{
 				Timezone:            fmt.Sprintf("UTC%+d", testOffset),
 				Offset:              float64(testOffset),

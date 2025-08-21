@@ -116,8 +116,9 @@ function displayResults(data) {
         }
     }
     
-    // Set required fields
-    document.getElementById('displayUsername').textContent = data.username;
+    // Set required fields with GitHub profile link
+    const usernameElement = document.getElementById('displayUsername');
+    usernameElement.innerHTML = `<a href="https://github.com/${data.username}" target="_blank" style="color: inherit; text-decoration: none;">${data.username}</a>`;
     
     // Show timezone with current local time and UTC offset
     const currentTime = getCurrentTimeInTimezone(data.timezone);
@@ -331,40 +332,64 @@ function displayResults(data) {
     if (locationText) {
         let locationHTML = locationText;
         
-        // Check for verification discrepancy - only show if distance > 50 miles
-        if (data.verification && data.verification.claimed_location && data.verification.location_distance_miles > 50) {
-            let claimHTML = ` — user claims `;
-            
-            // Check if we have a Gemini mismatch reason to show as tooltip
-            let hasTooltip = data.gemini_suspicious_mismatch && data.gemini_mismatch_reason;
-            
-            if (hasTooltip) {
-                // Create tooltip container for claimed location
-                claimHTML += `<span class="tooltip-container">`;
-                claimHTML += `<span style="text-decoration: underline; text-decoration-style: dotted; cursor: help;">`;
-                claimHTML += data.verification.claimed_location;
-                claimHTML += `</span>`;
-                claimHTML += `<span class="tooltip">${data.gemini_mismatch_reason}</span>`;
-                claimHTML += `</span>`;
-            } else {
-                claimHTML += data.verification.claimed_location;
+        // Check for verification discrepancy
+        // Show claimed location if:
+        // 1. Distance > 50 miles OR
+        // 2. Distance is -1 (geocoding failed) OR  
+        // 3. No detected location but claimed location exists
+        if (data.verification && data.verification.claimed_location) {
+            const showClaimed = 
+                data.verification.location_distance_miles > 50 || 
+                data.verification.location_distance_miles === -1 ||
+                !locationText;
+                
+            if (showClaimed) {
+                let claimHTML = ` — user claims `;
+                
+                // Check if we have a Gemini mismatch reason to show as tooltip
+                let hasTooltip = data.gemini_suspicious_mismatch && data.gemini_mismatch_reason;
+                
+                if (hasTooltip) {
+                    // Create tooltip container for claimed location
+                    claimHTML += `<span class="tooltip-container">`;
+                    claimHTML += `<span style="text-decoration: underline; text-decoration-style: dotted; cursor: help;">`;
+                    claimHTML += data.verification.claimed_location;
+                    claimHTML += `</span>`;
+                    claimHTML += `<span class="tooltip">${data.gemini_mismatch_reason}</span>`;
+                    claimHTML += `</span>`;
+                } else {
+                    claimHTML += data.verification.claimed_location;
+                }
+                
+                // Only show distance if it's a valid positive number
+                if (data.verification.location_distance_miles > 0) {
+                    claimHTML += ` (${Math.round(data.verification.location_distance_miles)} mi away)`;
+                } else if (data.verification.location_distance_miles === -1) {
+                    // Geocoding failed - can't determine distance
+                    claimHTML += ` (location unrecognized)`;
+                }
+                
+                // Apply color based on mismatch level
+                if (data.verification.location_mismatch === 'major' || data.gemini_suspicious_mismatch) {
+                    // Red for >1000 miles or suspicious mismatch
+                    claimHTML = `<span style="color: #dc2626;">${claimHTML}</span>`;
+                } else if (data.verification.location_mismatch === 'minor') {
+                    // Black (normal) for >250 miles
+                    claimHTML = `<span>${claimHTML}</span>`;
+                } else if (data.verification.location_distance_miles === -1) {
+                    // Gray for unrecognized locations
+                    claimHTML = `<span style="color: #6b7280;">${claimHTML}</span>`;
+                }
+                locationHTML += claimHTML;
             }
-            
-            if (data.verification.location_distance_miles > 0) {
-                claimHTML += ` (${Math.round(data.verification.location_distance_miles)} mi away)`;
-            }
-            
-            // Apply color based on mismatch level
-            if (data.verification.location_mismatch === 'major' || data.gemini_suspicious_mismatch) {
-                // Red for >1000 miles or suspicious mismatch
-                claimHTML = `<span style="color: #dc2626;">${claimHTML}</span>`;
-            } else if (data.verification.location_mismatch === 'minor') {
-                // Black (normal) for >250 miles
-                claimHTML = `<span>${claimHTML}</span>`;
-            }
-            locationHTML += claimHTML;
         }
         
+        document.getElementById('location').innerHTML = locationHTML;
+        document.getElementById('locationRow').style.display = 'table-row';
+    } else if (data.verification && data.verification.claimed_location) {
+        // No detected location but user claims a location
+        let locationHTML = 'Unknown — user claims ';
+        locationHTML += `<span style="color: #6b7280;">${data.verification.claimed_location}</span>`;
         document.getElementById('location').innerHTML = locationHTML;
         document.getElementById('locationRow').style.display = 'table-row';
     }

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,11 +33,14 @@ var (
 	timezoneDataAttrRegex = regexp.MustCompile(`data-timezone="([^"]+)"`)
 	timezoneJSONRegex     = regexp.MustCompile(`"timezone":"([^"]+)"`)
 	timezoneFieldRegex    = regexp.MustCompile(`timezone:([^,}]+)`)
+	// GitHub profile timezone element pattern - extracts the UTC offset hours
+	profileTimezoneRegex = regexp.MustCompile(`<profile-timezone[^>]*data-hours-ahead-of-utc="([^"]+)"`)
 )
 
 // UserContext holds all fetched data for a user to avoid redundant API calls.
 type UserContext struct {
 	User             *github.User
+	GitHubTimezone   string // Timezone from GitHub profile (e.g., "UTC-12")
 	FromCache        map[string]bool
 	Username         string
 	ProfileHTML      string
@@ -687,7 +691,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		d.mergeActivityData(result, activityResult)
 		// Add verification
 		if userCtx.User != nil {
-			result.Verification = d.verifyLocationAndTimezone(ctx, userCtx.User, result.LocationName, result.Timezone)
+			result.Verification = d.verifyLocationAndTimezone(ctx, userCtx.User, result.Location, result.Timezone, userCtx.GitHubTimezone)
 		}
 		return result, nil
 	}
@@ -851,11 +855,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		d.mergeActivityData(result, activityResult)
 		// Add verification
 		if userCtx.User != nil {
-			detectedLocation := result.GeminiSuggestedLocation
-			if detectedLocation == "" {
-				detectedLocation = result.LocationName
-			}
-			result.Verification = d.verifyLocationAndTimezone(ctx, userCtx.User, detectedLocation, result.Timezone)
+			result.Verification = d.verifyLocationAndTimezone(ctx, userCtx.User, result.Location, result.Timezone, userCtx.GitHubTimezone)
 		}
 		if activityResult != nil {
 			d.logger.Info("timezone detected with Gemini + activity", "username", username,
@@ -872,7 +872,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		activityResult.Name = fullName
 		// Add verification for activity-only result
 		if userCtx.User != nil {
-			activityResult.Verification = d.verifyLocationAndTimezone(ctx, userCtx.User, activityResult.LocationName, activityResult.Timezone)
+			activityResult.Verification = d.verifyLocationAndTimezone(ctx, userCtx.User, activityResult.Location, activityResult.Timezone, userCtx.GitHubTimezone)
 		}
 		return activityResult, nil
 	}
@@ -1027,7 +1027,44 @@ func (d *Detector) tryProfileScrapingWithContext(_ context.Context, userCtx *Use
 		}
 	}
 
-	// Try extracting timezone from HTML using pre-compiled regex patterns
+	// First check for GitHub's profile-timezone element (most reliable)
+	if matches := profileTimezoneRegex.FindStringSubmatch(html); len(matches) > 1 {
+		hoursStr := strings.TrimSpace(matches[1])
+		if hours, err := strconv.ParseFloat(hoursStr, 64); err == nil {
+			// Convert hours to UTC offset format
+			// GitHub uses negative for west of UTC (e.g., -12.0 for UTC-12)
+			// Handle fractional hours (e.g., India is UTC+5.5, Nepal is UTC+5.75)
+			var tz string
+			if hours == 0 {
+				tz = "UTC"
+			} else if hours < 0 {
+				// Check if it's a fractional hour
+				if hours != float64(int(hours)) {
+					// Format with decimal for fractional hours
+					tz = fmt.Sprintf("UTC%.1f", hours)
+				} else {
+					tz = fmt.Sprintf("UTC%d", int(hours))
+				}
+			} else {
+				// Positive offset
+				if hours != float64(int(hours)) {
+					// Format with decimal for fractional hours
+					tz = fmt.Sprintf("UTC+%.1f", hours)
+				} else {
+					tz = fmt.Sprintf("UTC+%d", int(hours))
+				}
+			}
+			
+			// Store the GitHub timezone in userCtx for verification
+			userCtx.GitHubTimezone = tz
+			
+			// Don't return this as the detected timezone - it's the user's claimed timezone
+			// But we'll use it for verification later
+			d.logger.Debug("found GitHub profile timezone", "username", userCtx.Username, "timezone", tz, "hours_offset", hoursStr)
+		}
+	}
+	
+	// Try extracting timezone from HTML using other pre-compiled regex patterns
 	patterns := []*regexp.Regexp{
 		timezoneDataAttrRegex,
 		timezoneFieldRegex,

@@ -265,6 +265,7 @@ func (*Client) isTransientError(err error) bool {
 	transientIndicators := []string{
 		"rate limit", "quota", "timeout", "deadline", "unavailable",
 		"internal server error", "502", "503", "504",
+		"error 500", "status: internal", "an internal error has occurred",
 	}
 
 	for _, indicator := range transientIndicators {

@@ -342,7 +342,14 @@ func printLocation(result *gutz.Result) {
 	case result.Location != nil:
 		locationStr = fmt.Sprintf("%.3f, %.3f", result.Location.Latitude, result.Location.Longitude)
 	default:
-		// No location information available
+		// No detected location, but check if there's a claimed location
+		if result.Verification != nil && result.Verification.ClaimedLocation != "" {
+			// Show claimed location when we have no detected location
+			fmt.Printf("📍 Location:      Unknown — user claims %s\n", result.Verification.ClaimedLocation)
+			return
+		}
+		// No location information at all
+		return
 	}
 
 	if locationStr != "" {
@@ -352,12 +359,13 @@ func printLocation(result *gutz.Result) {
 		if result.Verification != nil && result.Verification.ClaimedLocation != "" {
 			// Check if we should show the claim
 			// 1. If distance > 50 miles, definitely show
-			// 2. If LocationMismatch is flagged, show
-			// 3. If Gemini says it's suspicious, show
-			// 4. If location strings differ but distance is 0, check if cities match
+			// 2. If distance is -1 (couldn't geocode), definitely show
+			// 3. If LocationMismatch is flagged, show
+			// 4. If Gemini says it's suspicious, show
+			// 5. If location strings differ but distance is 0, check if cities match
 			showClaim := false
 			
-			if result.Verification.LocationDistanceMiles > 50 {
+			if result.Verification.LocationDistanceMiles > 50 || result.Verification.LocationDistanceMiles == -1 {
 				showClaim = true
 			} else if result.Verification.LocationMismatch != "" {
 				showClaim = true
@@ -376,6 +384,9 @@ func printLocation(result *gutz.Result) {
 				if result.Verification.LocationDistanceMiles > 0 {
 					distStr := fmt.Sprintf(" (%.0f mi away)", result.Verification.LocationDistanceMiles)
 					claimStr += distStr
+				} else if result.Verification.LocationDistanceMiles == -1 {
+					// Location couldn't be geocoded
+					claimStr += " (location unrecognized)"
 				}
 				
 				// Determine severity based on both detectors
