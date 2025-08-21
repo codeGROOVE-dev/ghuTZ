@@ -412,6 +412,7 @@ function displayResults(data) {
     // Show results first so map container has proper dimensions
     document.getElementById('result').classList.add('show');
 
+    // Use the location (which is now always the best detected location from Gemini)
     if (data.location) {
         const mapRow = document.getElementById('mapRow');
         if (mapRow) {

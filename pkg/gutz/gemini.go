@@ -539,33 +539,39 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	if geminiResult.Response != nil {
 		result.GeminiSuspiciousMismatch = geminiResult.Response.SuspiciousMismatch
 		result.GeminiMismatchReason = geminiResult.Response.MismatchReason
+		
+		// Overwrite detectedLocation with Gemini's detected coordinates
+		if geminiResult.Response.Latitude != 0 && geminiResult.Response.Longitude != 0 {
+			detectedLocation = &Location{
+				Latitude:  geminiResult.Response.Latitude,
+				Longitude: geminiResult.Response.Longitude,
+			}
+			result.LocationName = geminiResult.Response.DetectedLocation
+			result.GeminiSuggestedLocation = geminiResult.Response.DetectedLocation
+			d.logger.Debug("Updated detectedLocation with Gemini GPS coordinates",
+				"lat", geminiResult.Response.Latitude,
+				"lng", geminiResult.Response.Longitude,
+				"location", geminiResult.Response.DetectedLocation)
+		}
+	}
+	
+	// If Gemini provided a location string but no coordinates, try to geocode it
+	if detectedLocation == nil && geminiResult.Location != "" && geminiResult.Location != "unknown" {
+		if coords, err := d.geocodeLocation(ctx, geminiResult.Location); err == nil {
+			detectedLocation = coords
+			result.LocationName = geminiResult.Location
+			result.GeminiSuggestedLocation = geminiResult.Location
+			d.logger.Debug("Updated detectedLocation via geocoding Gemini location", "location", geminiResult.Location)
+		}
 	}
 
-	// Use location in priority order:
-	// 1. User's profile location (if available and geocodable)
-	// 2. Gemini GPS coordinates (if valid)
-	// 3. Gemini location string via geocoding API
-	//nolint:gocritic // if-else chain is appropriate here for priority-based location selection
+	// Set the final location
 	if detectedLocation != nil {
 		result.Location = detectedLocation
-	} else if geminiResult.Response != nil && geminiResult.Response.Latitude != 0 && geminiResult.Response.Longitude != 0 {
-		// Use GPS coordinates directly from Gemini, skipping geocoding API
-		result.Location = &Location{
-			Latitude:  geminiResult.Response.Latitude,
-			Longitude: geminiResult.Response.Longitude,
-		}
-		result.LocationName = geminiResult.Response.DetectedLocation
-		d.logger.Debug("Using GPS coordinates from Gemini",
-			"lat", geminiResult.Response.Latitude,
-			"lng", geminiResult.Response.Longitude,
-			"location", geminiResult.Response.DetectedLocation)
-	} else if geminiResult.Location != "" && geminiResult.Location != "unknown" {
-		// Fall back to geocoding API if no GPS coordinates
-		if coords, err := d.geocodeLocation(ctx, geminiResult.Location); err == nil {
-			result.Location = coords
-			result.LocationName = geminiResult.Location
-			d.logger.Debug("Used geocoding API for location", "location", geminiResult.Location)
-		}
+		d.logger.Debug("Using final detected location",
+			"lat", detectedLocation.Latitude,
+			"lng", detectedLocation.Longitude,
+			"location", result.LocationName)
 	}
 
 	if activityResult != nil {
