@@ -102,16 +102,16 @@ func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
 }
 
 // calculateTimezoneOffsetDiff calculates the difference in UTC offsets between two timezones.
-func (d *Detector) calculateTimezoneOffsetDiff(tz1, tz2 string) int {
-	offset1 := getTimezoneOffset(tz1)
-	offset2 := getTimezoneOffset(tz2)
+func (*Detector) calculateTimezoneOffsetDiff(tz1, tz2 string) int {
+	offset1 := timezoneOffset(tz1)
+	offset2 := timezoneOffset(tz2)
 	// Round the difference to nearest hour for comparison
 	diff := offset1 - offset2
 	return int(math.Round(diff))
 }
 
-// getTimezoneOffset returns the UTC offset in hours for a timezone.
-func getTimezoneOffset(tz string) float64 {
+// timezoneOffset returns the UTC offset in hours for a timezone.
+func timezoneOffset(tz string) float64 {
 	// Try to load the timezone
 	loc, err := time.LoadLocation(tz)
 	if err == nil {

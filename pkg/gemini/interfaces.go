@@ -1,7 +1,7 @@
 package gemini
 
-// CacheInterface defines the cache operations needed by the Gemini client.
-type CacheInterface interface {
+// Cache defines the cache operations needed by the Gemini client.
+type Cache interface {
 	APICall(key string, requestPayload []byte) ([]byte, bool)
 	SetAPICall(key string, requestPayload []byte, responseData []byte) error
 }

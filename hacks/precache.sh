@@ -37,8 +37,16 @@ for REPO in triage-party; do
     gh api "repos/google/$REPO/commits" --paginate --jq '.[].author.login // empty' | head -100 >> "$TEMP_USERS" 2>/dev/null || true
 done
 
+
+# Get contributors for each repo
+for REPO in krata; do
+    echo "Fetching contributors for edera-dev/$REPO..."
+    gh api "repos/edera-dev/$REPO/contributors" --paginate --jq '.[].login' >> "$TEMP_USERS" 2>/dev/null || true
+    gh api "repos/edera-dev/$REPO/commits" --paginate --jq '.[].author.login // empty' | head -100 >> "$TEMP_USERS" 2>/dev/null || true
+done
+
 # De-duplicate
-UNIQUE_USERS=$(sort -u "$TEMP_USERS" | grep -v '^$' | grep -v 'null')
+UNIQUE_USERS=$(sort -u "$TEMP_USERS" | grep -v '^$' | grep -v 'null' | sort -r)
 USER_COUNT=$(echo "$UNIQUE_USERS" | wc -l | tr -d ' ')
 
 echo "Found $USER_COUNT unique users"
@@ -63,5 +71,5 @@ for USER in $UNIQUE_USERS; do
         -H 'TE: trailers' \
         --data-raw "{\"username\":\"$USER\"}"
     echo
-    sleep 5
+    sleep 1
 done

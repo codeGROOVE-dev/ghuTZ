@@ -126,7 +126,15 @@ func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *De
 		geminiModel:   optHolder.geminiModel,
 		gcpProject:    optHolder.gcpProject,
 		logger:        logger,
-		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+				DisableKeepAlives:   false, // Enable keep-alive for connection reuse
+			},
+		},
 		forceActivity: optHolder.forceActivity,
 		cache:         cache,
 	}
@@ -648,8 +656,8 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) (*User
 	return userCtx, nil
 }
 
-// getCreatedAtFromUser safely extracts the created_at time from a user, returning nil if not available.
-func getCreatedAtFromUser(user *github.User) *time.Time {
+// createdAtFromUser safely extracts the created_at time from a user, returning nil if not available.
+func createdAtFromUser(user *github.User) *time.Time {
 	if user == nil || user.CreatedAt.IsZero() {
 		return nil
 	}
@@ -792,18 +800,17 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 			}
 			
 			// Calculate location distance if different
-			if verification.ClaimedLocation != "" && geminiResult.Location != nil {
-				claimedCoords, err := d.geocodeLocation(ctx, verification.ClaimedLocation)
-				if err == nil && claimedCoords != nil {
-					distance := haversineDistance(claimedCoords.Latitude, claimedCoords.Longitude,
-						geminiResult.Location.Latitude, geminiResult.Location.Longitude)
-					if distance > 0 {
-						verification.LocationDistanceMiles = distance
-						if distance > 1000 {
-							verification.LocationMismatch = "major"
-						} else if distance > 250 {
-							verification.LocationMismatch = "minor"
-						}
+			// Use the already geocoded coordinates from locationResult to avoid redundant API call
+			if verification.ClaimedLocation != "" && geminiResult.Location != nil && locationResult.Location != nil {
+				// We already have the claimed location's coordinates from earlier geocoding
+				distance := haversineDistance(locationResult.Location.Latitude, locationResult.Location.Longitude,
+					geminiResult.Location.Latitude, geminiResult.Location.Longitude)
+				if distance > 0 {
+					verification.LocationDistanceMiles = distance
+					if distance > 1000 {
+						verification.LocationMismatch = "major"
+					} else if distance > 250 {
+						verification.LocationMismatch = "minor"
 					}
 				}
 			}
@@ -1135,7 +1142,7 @@ func (d *Detector) tryLocationFieldWithContext(ctx context.Context, userCtx *Use
 		LocationName: userCtx.User.Location,
 		Confidence:   0.8,
 		Method:       "location_field",
-		CreatedAt:    getCreatedAtFromUser(userCtx.User),
+		CreatedAt:    createdAtFromUser(userCtx.User),
 	}
 }
 

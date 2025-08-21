@@ -497,7 +497,13 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		d.logger.Warn("🚩 Gemini API Analysis Failed", "username", userCtx.Username,
 			"error", err,
 			"data_sources", dataSources,
-			"context_keys", getContextDataKeys(contextData),
+			"context_keys", func() []string {
+				keys := make([]string, 0, len(contextData))
+				for k := range contextData {
+					keys = append(keys, k)
+				}
+				return keys
+			}(),
 			"fallback", "using activity-only patterns")
 		return nil
 	}
@@ -506,7 +512,12 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		d.logger.Warn("🚩 Gemini Analysis Rejected: Low Confidence", "username", userCtx.Username,
 			"confidence", geminiResult.Confidence,
 			"timezone_detected", geminiResult.Timezone,
-			"reasoning", truncateString(geminiResult.Reasoning, 100),
+			"reasoning", func() string {
+				if len(geminiResult.Reasoning) <= 100 {
+					return geminiResult.Reasoning
+				}
+				return geminiResult.Reasoning[:100] + "..."
+			}(),
 			"threshold", 0.3)
 		return nil
 	}
@@ -532,7 +543,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		GeminiReasoning:         geminiResult.Reasoning,
 		GeminiPrompt:            geminiResult.Prompt,
 		DataSources:             dataSources,
-		CreatedAt:               getCreatedAtFromUser(userCtx.User),
+		CreatedAt:               createdAtFromUser(userCtx.User),
 	}
 
 	// Add suspicious mismatch detection from Gemini
@@ -592,7 +603,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		// Check if Gemini's timezone differs significantly from activity-based detection
 		if len(activityResult.TimezoneCandidates) > 0 {
 			// Get the UTC offset from Gemini's timezone
-			geminiOffset := getUTCOffsetFromTimezone(geminiResult.Timezone)
+			geminiOffset := utcOffsetFromTimezone(geminiResult.Timezone)
 
 			// Get the top activity-based candidate offset
 			topActivityOffset := activityResult.TimezoneCandidates[0].Offset
@@ -620,7 +631,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 
 // getUTCOffsetFromTimezone returns the UTC offset in hours for a given timezone string.
 // It handles IANA timezone strings like "America/New_York" or "Europe/London".
-func getUTCOffsetFromTimezone(tzString string) float64 {
+func utcOffsetFromTimezone(tzString string) float64 {
 	// Try to load the timezone
 	loc, err := time.LoadLocation(tzString)
 	if err != nil {
@@ -817,18 +828,4 @@ func isValidEmail(email string) bool {
 }
 
 // getContextDataKeys extracts the keys from context data for debugging.
-func getContextDataKeys(contextData map[string]any) []string {
-	keys := make([]string, 0, len(contextData))
-	for k := range contextData {
-		keys = append(keys, k)
-	}
-	return keys
-}
 
-// truncateString truncates a string to maxLen characters.
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}

@@ -49,7 +49,7 @@ func NewClient(apiKey, model, gcpProject string) *Client {
 }
 
 // CallWithSDK calls the Gemini API using the official SDK.
-func (c *Client) CallWithSDK(ctx context.Context, prompt string, cache CacheInterface, logger Logger) (*Response, error) {
+func (c *Client) CallWithSDK(ctx context.Context, prompt string, cache Cache, logger Logger) (*Response, error) {
 	// Check cache first
 	if cachedResponse := c.checkCache(prompt, cache, logger); cachedResponse != nil {
 		return cachedResponse, nil
@@ -75,7 +75,7 @@ func (c *Client) CallWithSDK(ctx context.Context, prompt string, cache CacheInte
 }
 
 // checkCache checks for cached responses and returns them if valid.
-func (c *Client) checkCache(prompt string, cache CacheInterface, logger Logger) *Response {
+func (c *Client) checkCache(prompt string, cache Cache, logger Logger) *Response {
 	if cache == nil {
 		return nil
 	}
@@ -113,7 +113,7 @@ func (c *Client) createClient(ctx context.Context, logger Logger) (*genai.Client
 		}
 		logger.Info("Using Gemini API with API key")
 	} else {
-		projectID := c.getProjectID()
+		projectID := c.projectID()
 		config = &genai.ClientConfig{
 			Backend:  genai.BackendVertexAI,
 			Project:  projectID,
@@ -129,8 +129,8 @@ func (c *Client) createClient(ctx context.Context, logger Logger) (*genai.Client
 	return client, nil
 }
 
-// getProjectID determines the GCP project ID to use.
-func (c *Client) getProjectID() string {
+// projectID determines the GCP project ID to use.
+func (c *Client) projectID() string {
 	if c.gcpProject != "" {
 		return c.gcpProject
 	}
@@ -277,7 +277,7 @@ func (*Client) isTransientError(err error) bool {
 }
 
 // processResponseAndCache validates response, extracts content, and caches result.
-func (c *Client) processResponseAndCache(resp *genai.GenerateContentResponse, prompt string, cache CacheInterface, logger Logger) (*Response, error) {
+func (c *Client) processResponseAndCache(resp *genai.GenerateContentResponse, prompt string, cache Cache, logger Logger) (*Response, error) {
 	if resp == nil || len(resp.Candidates) == 0 {
 		return nil, errors.New("empty response from Gemini API")
 	}

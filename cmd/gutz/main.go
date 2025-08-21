@@ -333,7 +333,7 @@ func isUSStateCode(code string) bool {
 }
 
 func printLocation(result *gutz.Result) {
-	locationStr := ""
+	var locationStr string
 	switch {
 	case result.GeminiSuggestedLocation != "":
 		locationStr = result.GeminiSuggestedLocation

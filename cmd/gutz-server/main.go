@@ -69,7 +69,8 @@ func (rl *rateLimiter) allow(ip string) bool {
 		}
 	}
 
-	if len(valid) >= 65 {
+	// Rate limit: 15 requests per minute per IP
+	if len(valid) >= 15 {
 		rl.requests[ip] = valid
 		return false
 	}

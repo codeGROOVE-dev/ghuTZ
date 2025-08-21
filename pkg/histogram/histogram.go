@@ -57,8 +57,8 @@ type ActivityHistogram struct {
 	LunchEnd       float64
 }
 
-// getOrgColorFunc returns a color function for an organization.
-func getOrgColorFunc(org string, topOrgs []OrgActivity) *color.Color {
+// orgColorFunc returns a color function for an organization.
+func orgColorFunc(org string, topOrgs []OrgActivity) *color.Color {
 	// Define colors for top 3 orgs only
 	colors := []*color.Color{
 		color.New(color.FgBlue),   // Blue for top org
@@ -292,7 +292,7 @@ func buildOrganizationBar(result *Result, barLength, count, utcHour int) string 
 			segmentLength = remaining
 		}
 
-		colorFunc := getOrgColorFunc(topOrg.Name, result.TopOrganizations)
+		colorFunc := orgColorFunc(topOrg.Name, result.TopOrganizations)
 		bar.WriteString(colorFunc.Sprint(strings.Repeat("█", segmentLength)))
 		remaining -= segmentLength
 	}
