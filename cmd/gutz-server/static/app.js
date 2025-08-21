@@ -124,8 +124,8 @@ function displayResults(data) {
     const utcOffsetStr = getUTCOffsetString(data.timezone);
     let timezoneHTML = `${data.timezone} (${currentTime}, ${utcOffsetStr})`;
     
-    // Check for verification discrepancy
-    if (data.verification && data.verification.claimed_timezone) {
+    // Check for verification discrepancy - only show if timezone offset differs
+    if (data.verification && data.verification.claimed_timezone && data.verification.timezone_offset_diff > 0) {
         let claimHTML = ` — user claims `;
         
         // Check if we have a Gemini mismatch reason to show as tooltip
@@ -176,10 +176,9 @@ function displayResults(data) {
     const utcOffset = getUTCOffsetFromTimezone(data.timezone, data.activity_timezone);
     
     if (data.active_hours_local && (data.active_hours_local.start || data.active_hours_local.end)) {
-        // Note: Despite the field name "local", these are actually UTC values that need conversion
-        // For UTC-4 timezone: UTC 21:00 -> Local 17:00 (5pm), UTC 09:00 -> Local 05:00 (5am)
-        const localStart = (data.active_hours_local.start + utcOffset + 24) % 24;
-        const localEnd = (data.active_hours_local.end + utcOffset + 24) % 24;
+        // These are now actual local values, no conversion needed
+        const localStart = data.active_hours_local.start;
+        const localEnd = data.active_hours_local.end;
         
         // Get relative time deltas using the converted local times
         const startDelta = getRelativeTimeDelta(localStart, data.timezone);
@@ -195,20 +194,16 @@ function displayResults(data) {
     }
 
     if (data.lunch_hours_local && data.lunch_hours_local.confidence > 0) {
-        // Note: Despite the field name "local", these are actually UTC values that need conversion
-        const localLunchStart = (data.lunch_hours_local.start + utcOffset + 24) % 24;
-        const localLunchEnd = (data.lunch_hours_local.end + utcOffset + 24) % 24;
-        const lunchText = formatLunchHours(localLunchStart, localLunchEnd);
+        // These are now actual local values, no conversion needed
+        const lunchText = formatLunchHours(data.lunch_hours_local.start, data.lunch_hours_local.end);
         const confidenceText = Math.round(data.lunch_hours_local.confidence * 100) + '% confidence';
         document.getElementById('lunchHours').textContent = lunchText + ' (' + confidenceText + ')';
         document.getElementById('lunchRow').style.display = 'table-row';
     }
 
-    if (data.peak_productivity && data.peak_productivity.count > 0) {
-        // Peak productivity is also in UTC and needs conversion
-        const localPeakStart = (data.peak_productivity.start + utcOffset + 24) % 24;
-        const localPeakEnd = (data.peak_productivity.end + utcOffset + 24) % 24;
-        const peakText = formatHour(localPeakStart) + '-' + formatHour(localPeakEnd);
+    if (data.peak_productivity_local && data.peak_productivity_local.count > 0) {
+        // Using the local version which is already converted
+        const peakText = formatHour(data.peak_productivity_local.start) + '-' + formatHour(data.peak_productivity_local.end);
         document.getElementById('peakHours').textContent = peakText;
         document.getElementById('peakRow').style.display = 'table-row';
     }
@@ -336,8 +331,8 @@ function displayResults(data) {
     if (locationText) {
         let locationHTML = locationText;
         
-        // Check for verification discrepancy
-        if (data.verification && data.verification.claimed_location) {
+        // Check for verification discrepancy - only show if distance > 50 miles
+        if (data.verification && data.verification.claimed_location && data.verification.location_distance_miles > 50) {
             let claimHTML = ` — user claims `;
             
             // Check if we have a Gemini mismatch reason to show as tooltip
@@ -471,11 +466,35 @@ function getUTCOffsetFromTimezone(timezone, activityTimezone) {
     // Try standard timezone
     if (timezone) {
         try {
+            // Better way to get timezone offset - use Intl.DateTimeFormat
             const now = new Date();
-            const tzDate = new Date(now.toLocaleString("en-US", {timeZone: timezone}));
-            const utcDate = new Date(now.toLocaleString("en-US", {timeZone: "UTC"}));
-            return Math.round((tzDate - utcDate) / (1000 * 60 * 60));
+            const formatter = new Intl.DateTimeFormat('en-US', {
+                timeZone: timezone,
+                timeZoneName: 'short'
+            });
+            
+            // Parse the timezone offset from the formatted date
+            const parts = formatter.formatToParts(now);
+            const timeZoneName = parts.find(part => part.type === 'timeZoneName')?.value || '';
+            
+            // Try to extract offset from timezone abbreviation (e.g., "PST", "EDT", "GMT+12")
+            const offsetMatch = timeZoneName.match(/GMT([+-]\d+)/);
+            if (offsetMatch) {
+                return parseInt(offsetMatch[1]);
+            }
+            
+            // Alternative method: compare UTC and local times
+            const utcTime = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 
+                                     now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds());
+            const tzTime = new Date(now.toLocaleString("en-US", {timeZone: timezone})).getTime();
+            const offset = Math.round((tzTime - utcTime) / (1000 * 60 * 60));
+            
+            // Sanity check - offset should be between -12 and +14
+            if (offset >= -12 && offset <= 14) {
+                return offset;
+            }
         } catch (e) {
+            console.error('Error calculating timezone offset for', timezone, ':', e);
             // Fallback for UTC+X format
             if (timezone.startsWith('UTC')) {
                 const offsetStr = timezone.replace('UTC', '').replace('GMT', '');

@@ -261,14 +261,15 @@ type Result struct {
 	GeminiPrompt               string                 `json:"gemini_prompt,omitempty"`
 	ActivityDateRange          DateRange              `json:"activity_date_range,omitempty"`
 	SleepHoursUTC              []int                  `json:"sleep_hours_utc,omitempty"`
-	SleepRanges                []SleepRange           `json:"sleep_ranges,omitempty"`
+	SleepRangesLocal           []SleepRange           `json:"sleep_ranges_local,omitempty"`
 	TopOrganizations           []OrgActivity          `json:"top_organizations"`
 	SleepBucketsUTC            []float64              `json:"sleep_buckets_utc,omitempty"`
 	TimezoneCandidates         []timezone.Candidate   `json:"timezone_candidates,omitempty"`
 	DataSources                []string               `json:"data_sources,omitempty"`
 	LunchHoursUTC              LunchBreak             `json:"lunch_hours_utc,omitempty"`
 	LunchHoursLocal            LunchBreak             `json:"lunch_hours_local,omitempty"`
-	PeakProductivity           PeakTime               `json:"peak_productivity"`
+	PeakProductivityUTC        PeakTime               `json:"peak_productivity_utc"`
+	PeakProductivityLocal      PeakTime               `json:"peak_productivity_local"`
 	ActiveHoursLocal           ActiveHours            `json:"active_hours_local,omitempty"`
 	LocationConfidence         float64                `json:"location_confidence,omitempty"`
 	TimezoneConfidence         float64                `json:"timezone_confidence,omitempty"`

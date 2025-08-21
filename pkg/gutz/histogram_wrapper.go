@@ -13,8 +13,10 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, timezone string) 
 		TopOrganizations:           convertOrgActivities(result.TopOrganizations),
 		QuietHoursUTC:              result.SleepHoursUTC,
 		SleepBucketsUTC:            result.SleepBucketsUTC,
-		PeakProductivity:           convertPeakProductivity(result.PeakProductivity),
+		PeakProductivityUTC:        convertPeakProductivity(result.PeakProductivityUTC),
+		PeakProductivityLocal:      convertPeakProductivity(result.PeakProductivityLocal),
 		LunchHoursUTC:              convertLunchBreak(result.LunchHoursUTC),
+		LunchHoursLocal:            convertLunchBreak(result.LunchHoursLocal),
 	}
 
 	return histogram.GenerateHistogram(histResult, hourCounts, timezone)

@@ -22,6 +22,7 @@ import (
 	"github.com/codeGROOVE-dev/guTZ/pkg/github"
 	"github.com/codeGROOVE-dev/guTZ/pkg/httpcache"
 	"github.com/codeGROOVE-dev/guTZ/pkg/lunch"
+	"github.com/codeGROOVE-dev/guTZ/pkg/tzconvert"
 	"github.com/codeGROOVE-dev/retry"
 )
 
@@ -261,12 +262,13 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 		"has_candidates", activityResult.TimezoneCandidates != nil)
 	result.ActivityTimezone = activityResult.ActivityTimezone
 	result.SleepHoursUTC = activityResult.SleepHoursUTC
-	result.SleepRanges = activityResult.SleepRanges
+	result.SleepRangesLocal = activityResult.SleepRangesLocal
 	result.SleepBucketsUTC = activityResult.SleepBucketsUTC
 	result.ActiveHoursLocal = activityResult.ActiveHoursLocal
 	result.LunchHoursUTC = activityResult.LunchHoursUTC
 	result.LunchHoursLocal = activityResult.LunchHoursLocal
-	result.PeakProductivity = activityResult.PeakProductivity
+	result.PeakProductivityUTC = activityResult.PeakProductivityUTC
+	result.PeakProductivityLocal = activityResult.PeakProductivityLocal
 	result.TopOrganizations = activityResult.TopOrganizations
 	result.HourlyActivityUTC = activityResult.HourlyActivityUTC
 	result.HalfHourlyActivityUTC = activityResult.HalfHourlyActivityUTC
@@ -336,8 +338,16 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 						End:        candidate.LunchEndUTC,
 						Confidence: candidate.LunchConfidence,
 					}
-					// Set LunchHoursLocal to the same values (like ActiveHoursLocal, it's actually UTC)
-					result.LunchHoursLocal = result.LunchHoursUTC
+					// Convert lunch hours from UTC to local
+					result.LunchHoursLocal = struct {
+						Start      float64 `json:"start"`
+						End        float64 `json:"end"`
+						Confidence float64 `json:"confidence"`
+					}{
+						Start:      tzconvert.UTCToLocal(candidate.LunchStartUTC, newOffset),
+						End:        tzconvert.UTCToLocal(candidate.LunchEndUTC, newOffset),
+						Confidence: candidate.LunchConfidence,
+					}
 					lunchFound = true
 					break
 				}
@@ -362,8 +372,16 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 				End:        lunchEnd,
 				Confidence: lunchConfidence,
 			}
-			// Set LunchHoursLocal to the same values (like ActiveHoursLocal, it's actually UTC)
-			result.LunchHoursLocal = result.LunchHoursUTC
+			// Convert lunch hours from UTC to local
+			result.LunchHoursLocal = struct {
+				Start      float64 `json:"start"`
+				End        float64 `json:"end"`
+				Confidence float64 `json:"confidence"`
+			}{
+				Start:      tzconvert.UTCToLocal(lunchStart, newOffset),
+				End:        tzconvert.UTCToLocal(lunchEnd, newOffset),
+				Confidence: lunchConfidence,
+			}
 		}
 	}
 }
@@ -684,7 +702,9 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		
 		// Always run Gemini analysis for better detection, even when location field succeeds
 		d.logger.Debug("running additional Gemini analysis for better detection", "username", username)
-		if geminiResult := d.tryUnifiedGeminiAnalysisWithContext(ctx, userCtx, activityResult); geminiResult != nil {
+		geminiResult := d.tryUnifiedGeminiAnalysisWithContext(ctx, userCtx, activityResult)
+		if geminiResult != nil {
+			d.logger.Info("Gemini returned result", "timezone", geminiResult.Timezone)
 			// Always prefer Gemini's detected values when available - they're more accurate
 			// Store the location-field values as the "claimed" ones for verification
 			verification := &VerificationResult{
@@ -704,6 +724,55 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 			// Preserve timezone candidates from activity analysis - Gemini doesn't generate these
 			// locationResult.TimezoneCandidates already has the candidates from mergeActivityData
 			locationResult.Method = "gemini_enhanced" // Update method to indicate Gemini enhanced the detection
+			
+			// Find the matching timezone candidate to use its pre-calculated values
+			newOffset := tzconvert.ParseTimezoneOffset(locationResult.Timezone)
+			d.logger.Info("looking for matching candidate after Gemini",
+				"timezone", locationResult.Timezone,
+				"offset", newOffset,
+				"num_candidates", len(locationResult.TimezoneCandidates))
+			
+			// Try to find a matching candidate with the same offset
+			candidateFound := false
+			for _, candidate := range locationResult.TimezoneCandidates {
+				if int(candidate.Offset) == newOffset {
+					d.logger.Info("found matching candidate",
+						"offset", newOffset,
+						"lunch_local", candidate.LunchLocalTime)
+					
+					// Use the pre-calculated lunch hours from the candidate
+					if candidate.LunchStartUTC > 0 && candidate.LunchEndUTC > 0 {
+						locationResult.LunchHoursUTC = struct {
+							Start      float64 `json:"start"`
+							End        float64 `json:"end"`
+							Confidence float64 `json:"confidence"`
+						}{
+							Start:      candidate.LunchStartUTC,
+							End:        candidate.LunchEndUTC,
+							Confidence: candidate.LunchConfidence,
+						}
+						locationResult.LunchHoursLocal = struct {
+							Start      float64 `json:"start"`
+							End        float64 `json:"end"`
+							Confidence float64 `json:"confidence"`
+						}{
+							Start:      tzconvert.UTCToLocal(candidate.LunchStartUTC, newOffset),
+							End:        tzconvert.UTCToLocal(candidate.LunchEndUTC, newOffset),
+							Confidence: candidate.LunchConfidence,
+						}
+					}
+					
+					// Note: Work hours aren't stored in candidates, keep existing values
+					
+					candidateFound = true
+					break
+				}
+			}
+			
+			if !candidateFound {
+				d.logger.Info("no matching candidate found, keeping existing values",
+					"offset", newOffset)
+			}
 			
 			// Calculate timezone offset difference for verification display
 			if verification.ClaimedTimezone != "" && verification.ClaimedTimezone != geminiResult.Timezone {
@@ -736,6 +805,11 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 			}
 			
 			locationResult.Verification = verification
+		} else {
+			d.logger.Info("Gemini returned nil result")
+		}
+		
+		if geminiResult != nil {
 			d.logger.Info("Gemini enhanced location detection", 
 				"claimed", userCtx.User.Location,
 				"detected", geminiResult.GeminiSuggestedLocation,

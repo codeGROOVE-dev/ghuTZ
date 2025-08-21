@@ -187,9 +187,9 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 						contextData["lunch_confidence"] = activityResult.LunchHoursUTC.Confidence
 					}
 
-					if activityResult.PeakProductivity.Count > 0 {
-						peakStartUTC := int(activityResult.PeakProductivity.Start)
-						peakEndUTC := int(activityResult.PeakProductivity.End)
+					if activityResult.PeakProductivityUTC.Count > 0 {
+						peakStartUTC := int(activityResult.PeakProductivityUTC.Start)
+						peakEndUTC := int(activityResult.PeakProductivityUTC.End)
 						contextData["peak_productivity_utc"] = []int{peakStartUTC, peakEndUTC}
 					}
 				}
@@ -577,13 +577,14 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	if activityResult != nil {
 		result.ActiveHoursLocal = activityResult.ActiveHoursLocal
 		result.SleepHoursUTC = activityResult.SleepHoursUTC
-		result.SleepRanges = activityResult.SleepRanges
+		result.SleepRangesLocal = activityResult.SleepRangesLocal
 		result.SleepBucketsUTC = activityResult.SleepBucketsUTC
 		result.HourlyActivityUTC = activityResult.HourlyActivityUTC
 		result.HalfHourlyActivityUTC = activityResult.HalfHourlyActivityUTC
 		result.LunchHoursUTC = activityResult.LunchHoursUTC
 		result.LunchHoursLocal = activityResult.LunchHoursLocal
-		result.PeakProductivity = activityResult.PeakProductivity
+		result.PeakProductivityUTC = activityResult.PeakProductivityUTC
+		result.PeakProductivityLocal = activityResult.PeakProductivityLocal
 		result.TopOrganizations = activityResult.TopOrganizations
 		result.HourlyOrganizationActivity = activityResult.HourlyOrganizationActivity
 		result.ActivityDateRange = activityResult.ActivityDateRange

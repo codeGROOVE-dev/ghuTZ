@@ -149,9 +149,9 @@ func (d *Detector) buildContextData(userCtx *UserContext, activityResult *Result
 					contextData["lunch_confidence"] = activityResult.LunchHoursUTC.Confidence
 				}
 
-				if activityResult.PeakProductivity.Count > 0 {
-					peakStartUTC := int(activityResult.PeakProductivity.Start)
-					peakEndUTC := int(activityResult.PeakProductivity.End)
+				if activityResult.PeakProductivityUTC.Count > 0 {
+					peakStartUTC := int(activityResult.PeakProductivityUTC.Start)
+					peakEndUTC := int(activityResult.PeakProductivityUTC.End)
 					contextData["peak_productivity_utc"] = []int{peakStartUTC, peakEndUTC}
 				}
 			}
@@ -267,8 +267,11 @@ func createTestActivityResult() *Result {
 		LunchHoursUTC: LunchBreak{
 			Start: 21.5, End: 22.5, Confidence: 0.8,
 		},
-		PeakProductivity: PeakTime{
+		PeakProductivityUTC: PeakTime{
 			Start: 2, End: 2.5, Count: 22,
+		},
+		PeakProductivityLocal: PeakTime{
+			Start: 16, End: 16.5, Count: 22, // UTC-10, so 2 UTC = 16 local
 		},
 		HourlyActivityUTC: map[int]int{
 			0: 21, 1: 25, 2: 25, 3: 18, 4: 19, 5: 15, 6: 8, 7: 8,

@@ -491,10 +491,10 @@ func printWorkSchedule(result *gutz.Result) {
 	}
 
 	// Add peak productivity time
-	if result.PeakProductivity.Count > 0 {
+	if result.PeakProductivityLocal.Count > 0 {
 		fmt.Printf("\n🔥 Activity Peak: %s → %s (%s)",
-			formatHour(convertUTCToLocal(result.PeakProductivity.Start, result.Timezone)),
-			formatHour(convertUTCToLocal(result.PeakProductivity.End, result.Timezone)),
+			formatHour(result.PeakProductivityLocal.Start),
+			formatHour(result.PeakProductivityLocal.End),
 			result.Timezone)
 	}
 

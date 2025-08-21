@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -407,8 +408,50 @@ func (c *GraphQLClient) FetchComments(ctx context.Context, username string, curs
 // NOTE: FetchCommitActivities was removed because GitHub's GraphQL search API
 // doesn't support COMMIT type. Use REST API for commit search instead.
 
-// executeQuery executes a GraphQL query.
+// executeQuery executes a GraphQL query with retry logic for transient server errors.
 func (c *GraphQLClient) executeQuery(ctx context.Context, query string, variables map[string]any) (*GraphQLResponse, error) {
+	// Retry up to 3 times for transient GraphQL server errors
+	const maxRetries = 3
+	var lastErr error
+	
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			// Exponential backoff: 1s, 2s, 4s
+			backoff := time.Second * (1 << (attempt - 1))
+			c.logger.Debug("retrying GraphQL query after transient error",
+				"attempt", attempt+1,
+				"backoff", backoff,
+				"last_error", lastErr)
+			
+			select {
+			case <-time.After(backoff):
+				// Continue with retry
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		
+		resp, err := c.executeQueryOnce(ctx, query, variables)
+		if err != nil {
+			// Check if this is a transient error that should be retried
+			if strings.Contains(err.Error(), "GraphQL server error (transient)") {
+				lastErr = err
+				continue // Retry
+			}
+			// Non-transient error, return immediately
+			return nil, err
+		}
+		
+		// Success
+		return resp, nil
+	}
+	
+	// All retries exhausted
+	return nil, fmt.Errorf("GraphQL query failed after %d retries: %w", maxRetries, lastErr)
+}
+
+// executeQueryOnce executes a single GraphQL query attempt.
+func (c *GraphQLClient) executeQueryOnce(ctx context.Context, query string, variables map[string]any) (*GraphQLResponse, error) {
 	payload := map[string]any{
 		"query":     query,
 		"variables": variables,
@@ -444,7 +487,22 @@ func (c *GraphQLClient) executeQuery(ctx context.Context, query string, variable
 	}
 
 	if len(graphqlResp.Errors) > 0 {
-		return nil, fmt.Errorf("GraphQL error: %s", graphqlResp.Errors[0].Message)
+		// Check if this is a server error that should be retried
+		errMsg := graphqlResp.Errors[0].Message
+		if strings.Contains(errMsg, "Something went wrong") || 
+		   strings.Contains(errMsg, "server error") ||
+		   strings.Contains(errMsg, "Internal server error") ||
+		   strings.Contains(errMsg, "timeout") ||
+		   strings.Contains(errMsg, "Timeout") {
+			// Log the error with request ID if present
+			c.logger.Warn("GraphQL server error (may be transient)", 
+				"error", errMsg,
+				"type", graphqlResp.Errors[0].Type)
+			// Return an error that indicates this could be retried
+			// The HTTP layer doesn't see this as an error (200 OK), so we need to handle it here
+			return nil, fmt.Errorf("GraphQL server error (transient): %s", errMsg)
+		}
+		return nil, fmt.Errorf("GraphQL error: %s", errMsg)
 	}
 
 	return &graphqlResp, nil

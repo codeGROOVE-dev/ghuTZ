@@ -18,8 +18,10 @@ type Result struct {
 	TopOrganizations           []OrgActivity          `json:"top_organizations"`
 	QuietHoursUTC              []int                  `json:"quiet_hours_utc"`
 	SleepBucketsUTC            []float64              `json:"sleep_buckets_utc,omitempty"`
-	PeakProductivity           PeakProductivity       `json:"peak_productivity,omitempty"`
+	PeakProductivityUTC        PeakProductivity       `json:"peak_productivity_utc,omitempty"`
+	PeakProductivityLocal      PeakProductivity       `json:"peak_productivity_local,omitempty"`
 	LunchHoursUTC              LunchBreak             `json:"lunch_hours_utc,omitempty"`
+	LunchHoursLocal            LunchBreak             `json:"lunch_hours_local,omitempty"`
 }
 
 // OrgActivity represents activity for an organization.
@@ -219,19 +221,17 @@ func determineHourType(result *Result, bucket, localTime float64, localHour int,
 	}
 
 	// Check for peak time
-	if result.PeakProductivity.Count > 0 {
-		peakStart := convertUTCToLocal(result.PeakProductivity.Start, timezone)
-		peakEnd := convertUTCToLocal(result.PeakProductivity.End, timezone)
+	if result.PeakProductivityLocal.Count > 0 {
+		peakStart := result.PeakProductivityLocal.Start
+		peakEnd := result.PeakProductivityLocal.End
 		if localTime >= peakStart && localTime < peakEnd {
 			return "^", color.New(color.FgYellow)
 		}
 	}
 
-	// Check for lunch time
-	if result.LunchHoursUTC.Start != 0 || result.LunchHoursUTC.End != 0 {
-		lunchStart := convertUTCToLocal(result.LunchHoursUTC.Start, timezone)
-		lunchEnd := convertUTCToLocal(result.LunchHoursUTC.End, timezone)
-		if localTime >= lunchStart && localTime < lunchEnd {
+	// Check for lunch time (using local version which is already converted)
+	if result.LunchHoursLocal.Start != 0 || result.LunchHoursLocal.End != 0 {
+		if localTime >= result.LunchHoursLocal.Start && localTime < result.LunchHoursLocal.End {
 			return "L", color.New(color.FgGreen)
 		}
 	}

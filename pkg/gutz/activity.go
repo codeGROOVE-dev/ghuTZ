@@ -15,6 +15,7 @@ import (
 	"github.com/codeGROOVE-dev/guTZ/pkg/lunch"
 	"github.com/codeGROOVE-dev/guTZ/pkg/sleep"
 	"github.com/codeGROOVE-dev/guTZ/pkg/timezone"
+	"github.com/codeGROOVE-dev/guTZ/pkg/tzconvert"
 )
 
 // GlobalLunchPattern represents the best lunch pattern found globally in UTC
@@ -835,9 +836,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	}
 
 	// Active hours are already in UTC from calculateTypicalActiveHours
-	// No conversion needed - just use them directly
-	activeStartUTC := float64(activeStart)
-	activeEndUTC := float64(activeEnd)
+	// No conversion needed for storage
 
 	// Detect sleep periods using 30-minute resolution with buffer
 	sleepBuckets := sleep.DetectSleepPeriodsWithHalfHours(halfHourCounts)
@@ -854,14 +853,14 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		Timezone:         detectedTimezone,
 		ActivityTimezone: detectedTimezone, // Pure activity-based result
 		SleepHoursUTC:    refinedSleepHours,
-		SleepRanges:      sleepRanges,  // Pre-calculated sleep ranges in local time
+		SleepRangesLocal: sleepRanges,  // Pre-calculated sleep ranges in local time
 		SleepBucketsUTC:  sleepBuckets, // 30-minute resolution sleep periods
 		ActiveHoursLocal: struct {
 			Start float64 `json:"start"`
 			End   float64 `json:"end"`
 		}{
-			Start: activeStartUTC, // NOTE: Despite field name "Local", storing UTC for consistency
-			End:   activeEndUTC,   // Frontend converts to local for display
+			Start: tzconvert.UTCToLocal(float64(activeStart), offsetInt),
+			End:   tzconvert.UTCToLocal(float64(activeEnd), offsetInt),
 		},
 		TopOrganizations:           topOrgs,
 		Confidence:                 confidence,
@@ -892,17 +891,36 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		Confidence: lunchConfidence,
 	}
 
-	// Store lunch hours in "Local" (actually UTC like ActiveHoursLocal for consistency)
-	result.LunchHoursLocal = result.LunchHoursUTC
+	// Store lunch hours in Local (converted from UTC)
+	result.LunchHoursLocal = struct {
+		Start      float64 `json:"start"`
+		End        float64 `json:"end"`
+		Confidence float64 `json:"confidence"`
+	}{
+		Start:      tzconvert.UTCToLocal(lunchStart, offsetInt),
+		End:        tzconvert.UTCToLocal(lunchEnd, offsetInt),
+		Confidence: lunchConfidence,
+	}
 
 	// Store peak productivity window in UTC
-	result.PeakProductivity = struct {
+	result.PeakProductivityUTC = struct {
 		Start float64 `json:"start"`
 		End   float64 `json:"end"`
 		Count int     `json:"count"`
 	}{
 		Start: peakStart, // Already in UTC
 		End:   peakEnd,   // Already in UTC
+		Count: peakCount,
+	}
+
+	// Store peak productivity window in Local (converted from UTC)
+	result.PeakProductivityLocal = struct {
+		Start float64 `json:"start"`
+		End   float64 `json:"end"`
+		Count int     `json:"count"`
+	}{
+		Start: tzconvert.UTCToLocal(peakStart, offsetInt),
+		End:   tzconvert.UTCToLocal(peakEnd, offsetInt),
 		Count: peakCount,
 	}
 
