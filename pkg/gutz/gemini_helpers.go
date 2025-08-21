@@ -13,7 +13,7 @@ import (
 
 // Constants for data limits and thresholds.
 const (
-	maxUserRepos          = 20
+	maxUserRepos          = 40
 	maxStarredRepos       = 15
 	maxExternalContribs   = 15
 	maxRecentPRs          = 10
@@ -21,7 +21,7 @@ const (
 	maxRecentCommits      = 10
 	maxTextSamples        = 8
 	maxLocationIndicators = 5
-	maxTopCandidates      = 3
+	maxTopCandidates      = 4
 	maxDetailedCandidates = 3
 	commitMessageMaxLen   = 132
 	websiteContentMaxLen  = 4000
@@ -232,7 +232,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	// Timezone candidates are critical constraints that must be respected.
 	if candidates, ok := contextData["timezone_candidates"].([]timezone.Candidate); ok && len(candidates) > 0 { //nolint:nestif // Complex but necessary for accurate timezone detection
 		// Summary line shows all viable candidates.
-		sb.WriteString("Top 3 candidates: ")
+		sb.WriteString("Top 4 candidates: ")
 		for i := range candidates {
 			if i >= maxTopCandidates {
 				break

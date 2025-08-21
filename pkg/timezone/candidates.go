@@ -728,25 +728,25 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		switch testOffset {
 		case -8: // Pacific Standard Time
 			testConfidence += 4.5 // Highest concentration: Silicon Valley effect
-			adjustments = append(adjustments, "+4.5 (Pacific - 37% of US tech)")
+			adjustments = append(adjustments, "+4.5 (UTC-8 common for US tech)")
 		case -7: // Pacific Daylight / Mountain Standard
 			// Could be Pacific (summer) or Mountain (winter)
 			// Weight toward Pacific since it's 4.6x larger than Mountain
 			testConfidence += 3.5 // Weighted average
-			adjustments = append(adjustments, "+3.5 (PDT/MST - mixed Pacific/Mountain)")
+			adjustments = append(adjustments, "+3.5 (UTC-7 common for US tech)")
 		case -5: // Eastern Standard / Central Daylight
 			// Could be Eastern (winter) or Central (summer)
 			// Eastern is 1.8x larger than Central
 			testConfidence += 3.5 // Weighted average
-			adjustments = append(adjustments, "+3.5 (EST/CDT - mixed Eastern/Central)")
+			adjustments = append(adjustments, "+3.5 (UTC-5 common for US tech)")
 		case -4: // Eastern Daylight Time
 			testConfidence += 4.0 // Second highest: NYC, Boston, DC
-			adjustments = append(adjustments, "+4.0 (Eastern - 35% of US tech)")
+			adjustments = append(adjustments, "+4.0 (UTC-4 common for US tech)")
 		case -6: // Central Standard / Mountain Daylight
 			// Could be Central (winter) or Mountain (summer)
 			// Central is 2.5x larger than Mountain
 			testConfidence += 2.0 // Weighted average
-			adjustments = append(adjustments, "+2.0 (CST/MDT - mixed Central/Mountain)")
+			adjustments = append(adjustments, "+2.0 (UTC-6 US tech hub)")
 		case -3: // Brazil/Argentina Time
 			testConfidence += 2.0 // Major South American tech hubs
 			adjustments = append(adjustments, "+2.0 (Brazil/Argentina tech hubs)")
