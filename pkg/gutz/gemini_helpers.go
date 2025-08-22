@@ -240,7 +240,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 				break
 			}
 		}
-		
+
 		sb.WriteString("Top candidates: ")
 		for i := range candidates {
 			if i >= maxToShow {
@@ -293,7 +293,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 				break
 			}
 		}
-		
+
 		for i := range candidates {
 			if i >= maxDetailed {
 				break

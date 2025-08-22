@@ -550,7 +550,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	if geminiResult.Response != nil {
 		result.GeminiSuspiciousMismatch = geminiResult.Response.SuspiciousMismatch
 		result.GeminiMismatchReason = geminiResult.Response.MismatchReason
-		
+
 		// Overwrite detectedLocation with Gemini's detected coordinates
 		if geminiResult.Response.Latitude != 0 && geminiResult.Response.Longitude != 0 {
 			detectedLocation = &Location{
@@ -565,7 +565,7 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 				"location", geminiResult.Response.DetectedLocation)
 		}
 	}
-	
+
 	// If Gemini provided a location string but no coordinates, try to geocode it
 	if detectedLocation == nil && geminiResult.Location != "" && geminiResult.Location != "unknown" {
 		if coords, err := d.geocodeLocation(ctx, geminiResult.Location); err == nil {
@@ -828,4 +828,3 @@ func isValidEmail(email string) bool {
 }
 
 // getContextDataKeys extracts the keys from context data for debugging.
-

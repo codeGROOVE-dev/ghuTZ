@@ -844,13 +844,13 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f adjustments=%v\n",
 				username, testOffset, testConfidence, adjustments)
 		}
-		
+
 		// Debug for stevebeattie - log UTC-7, UTC-8, UTC-9
 		if username == "stevebeattie" && (testOffset == -7 || testOffset == -8 || testOffset == -9) {
 			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f adjustments=%v\n",
 				username, testOffset, testConfidence, adjustments)
 		}
-		
+
 		// Debug for mattmoor - show all timezones to see if profile timezone is included
 		if username == "mattmoor" {
 			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f isProfile=%v adjustments=%v\n",
@@ -874,11 +874,11 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 				WorkStartLocal:      testWorkStart,
 				SleepMidLocal:       sleepLocalMid,
 				LunchDipStrength:    lunchDipStrength,
-				LunchStartUTC:       testLunchStart, // Store for reuse
-				LunchEndUTC:         testLunchEnd,   // Store for reuse
-				LunchConfidence:     testLunchConf,  // Store for reuse
-				ScoringDetails:      adjustments,    // Include scoring details for Gemini
-				IsProfile:          isProfileTimezone, // Mark if this is the profile timezone
+				LunchStartUTC:       testLunchStart,    // Store for reuse
+				LunchEndUTC:         testLunchEnd,      // Store for reuse
+				LunchConfidence:     testLunchConf,     // Store for reuse
+				ScoringDetails:      adjustments,       // Include scoring details for Gemini
+				IsProfile:           isProfileTimezone, // Mark if this is the profile timezone
 			}
 			candidates = append(candidates, candidate)
 		}
@@ -904,7 +904,7 @@ func parseUTCOffsetString(tz string) int {
 	if tz == "UTC" {
 		return 0
 	}
-	
+
 	// Handle UTC+/- format with possible decimals
 	if strings.HasPrefix(tz, "UTC+") {
 		offsetStr := strings.TrimPrefix(tz, "UTC+")

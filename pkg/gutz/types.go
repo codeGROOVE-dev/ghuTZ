@@ -245,40 +245,40 @@ type OrgActivity struct {
 // Result represents timezone detection results.
 type Result struct {
 	DetectionTime              time.Time              `json:"detection_time"`
-	Location                   *Location              `json:"location,omitempty"`
+	CreatedAt                  *time.Time             `json:"created_at,omitempty"`
 	HourlyOrganizationActivity map[int]map[string]int `json:"hourly_organization_activity,omitempty"`
 	HourlyActivityUTC          map[int]int            `json:"hourly_activity_utc"`
 	HalfHourlyActivityUTC      map[float64]int        `json:"-"`
-	Method                     string                 `json:"method"`
-	LocationName               string                 `json:"location_name,omitempty"`
-	GeminiSuggestedLocation    string                 `json:"gemini_suggested_location,omitempty"`
-	Name                       string                 `json:"name,omitempty"`
-	Timezone                   string                 `json:"timezone"`
+	Location                   *Location              `json:"location,omitempty"`
+	Verification               *VerificationResult    `json:"verification,omitempty"`
 	GeminiReasoning            string                 `json:"gemini_reasoning,omitempty"`
+	Name                       string                 `json:"name,omitempty"`
+	GeminiSuggestedLocation    string                 `json:"gemini_suggested_location,omitempty"`
 	Username                   string                 `json:"username"`
-	CreatedAt                  *time.Time             `json:"created_at,omitempty"`
+	Timezone                   string                 `json:"timezone"`
+	LocationName               string                 `json:"location_name,omitempty"`
 	ActivityTimezone           string                 `json:"activity_timezone,omitempty"`
 	GeminiPrompt               string                 `json:"gemini_prompt,omitempty"`
+	Method                     string                 `json:"method"`
+	GeminiMismatchReason       string                 `json:"gemini_mismatch_reason,omitempty"`
 	ActivityDateRange          DateRange              `json:"activity_date_range,omitempty"`
 	SleepHoursUTC              []int                  `json:"sleep_hours_utc,omitempty"`
-	SleepRangesLocal           []SleepRange           `json:"sleep_ranges_local,omitempty"`
 	TopOrganizations           []OrgActivity          `json:"top_organizations"`
-	SleepBucketsUTC            []float64              `json:"sleep_buckets_utc,omitempty"`
 	TimezoneCandidates         []timezone.Candidate   `json:"timezone_candidates,omitempty"`
 	DataSources                []string               `json:"data_sources,omitempty"`
-	LunchHoursUTC              LunchBreak             `json:"lunch_hours_utc,omitempty"`
+	SleepRangesLocal           []SleepRange           `json:"sleep_ranges_local,omitempty"`
+	SleepBucketsUTC            []float64              `json:"sleep_buckets_utc,omitempty"`
 	LunchHoursLocal            LunchBreak             `json:"lunch_hours_local,omitempty"`
-	PeakProductivityUTC        PeakTime               `json:"peak_productivity_utc"`
 	PeakProductivityLocal      PeakTime               `json:"peak_productivity_local"`
+	PeakProductivityUTC        PeakTime               `json:"peak_productivity_utc"`
+	LunchHoursUTC              LunchBreak             `json:"lunch_hours_utc,omitempty"`
 	ActiveHoursLocal           ActiveHours            `json:"active_hours_local,omitempty"`
 	LocationConfidence         float64                `json:"location_confidence,omitempty"`
 	TimezoneConfidence         float64                `json:"timezone_confidence,omitempty"`
 	Confidence                 float64                `json:"confidence"`
-	GeminiActivityMismatch     bool                   `json:"gemini_activity_mismatch,omitempty"`
-	Verification               *VerificationResult    `json:"verification,omitempty"`
-	GeminiSuspiciousMismatch   bool                   `json:"gemini_suspicious_mismatch,omitempty"`
-	GeminiMismatchReason       string                 `json:"gemini_mismatch_reason,omitempty"`
 	GeminiActivityOffsetHours  float64                `json:"gemini_activity_offset_hours,omitempty"`
+	GeminiActivityMismatch     bool                   `json:"gemini_activity_mismatch,omitempty"`
+	GeminiSuspiciousMismatch   bool                   `json:"gemini_suspicious_mismatch,omitempty"`
 }
 
 // Location represents geographic coordinates.

@@ -137,7 +137,7 @@ func main() {
 		logger.Error("Failed to build cache", "error", err)
 		return
 	}
-	
+
 	var diskCache *diskCacheHandler
 	if *cacheDir != "" {
 		diskCache = &diskCacheHandler{dir: *cacheDir, logger: logger}
@@ -161,7 +161,7 @@ func main() {
 	// Add trusted origins if needed for cross-origin access
 	// antiCSRF.AddTrustedOrigin("https://example.com")
 	// antiCSRF.AddTrustedOrigin("https://*.example.com")
-	
+
 	srv := &http.Server{
 		Addr:              ":" + *port,
 		Handler:           server.wrap(antiCSRF.Handler(mux)),
@@ -203,7 +203,7 @@ func (s *server) wrap(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := fmt.Sprintf("%d-%d", time.Now().Unix(), time.Now().Nanosecond())
 		w.Header().Set("X-Request-ID", requestID)
-		
+
 		defer func() {
 			if err := recover(); err != nil {
 				s.logger.Error("Panic", "error", err, "path", r.URL.Path, "request_id", requestID)
@@ -217,13 +217,13 @@ func (s *server) wrap(handler http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=(), payment=(), usb=(), bluetooth=()")
-		
-		w.Header().Set("Content-Security-Policy", 
+
+		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; "+
-			"script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; "+
-			"style-src 'self' 'unsafe-inline' https://unpkg.com; "+
-			"img-src 'self' data: https:; "+
-			"connect-src 'self'")
+				"script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; "+
+				"style-src 'self' 'unsafe-inline' https://unpkg.com; "+
+				"img-src 'self' data: https:; "+
+				"connect-src 'self'")
 
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, private")
@@ -260,7 +260,7 @@ func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Template error", http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "text/html")
 	if err := tmpl.Execute(w, struct{ Username string }{username}); err != nil {
 		s.logger.Error("Template execution failed", "error", err)
@@ -355,7 +355,7 @@ func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request)
 
 func (s *server) handleCleanup(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	if s.diskCache == nil {
 		if err := json.NewEncoder(w).Encode(map[string]string{"status": "no cache"}); err != nil {
 			s.logger.Error("Failed to encode response", "error", err)
@@ -400,12 +400,12 @@ func (d *diskCacheHandler) load(username string) []byte {
 	if err != nil {
 		return nil
 	}
-	
+
 	info, err := os.Stat(d.path(username))
 	if err != nil || time.Since(info.ModTime()) > 30*24*time.Hour {
 		return nil
 	}
-	
+
 	r, err := gzip.NewReader(bytes.NewReader(compressedData))
 	if err != nil {
 		return nil
@@ -415,12 +415,12 @@ func (d *diskCacheHandler) load(username string) []byte {
 			d.logger.Debug("Failed to close gzip reader", "error", err)
 		}
 	}()
-	
+
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil
 	}
-	
+
 	return data
 }
 
@@ -430,7 +430,7 @@ func (d *diskCacheHandler) save(username string, data []byte) {
 		d.logger.Debug("Failed to create cache dir", "error", err)
 		return
 	}
-	
+
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write(data); err != nil {
@@ -438,10 +438,10 @@ func (d *diskCacheHandler) save(username string, data []byte) {
 		return
 	}
 	if err := gz.Close(); err != nil {
-		d.logger.Debug("Failed to close gzip", "error", err) 
+		d.logger.Debug("Failed to close gzip", "error", err)
 		return
 	}
-	
+
 	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
 		d.logger.Debug("Failed to write cache", "error", err)
 	}
@@ -450,7 +450,7 @@ func (d *diskCacheHandler) save(username string, data []byte) {
 func (d *diskCacheHandler) cleanup() int {
 	count := 0
 	cutoff := time.Now().Add(-28 * 24 * time.Hour)
-	
+
 	if err := filepath.Walk(d.dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -469,6 +469,6 @@ func (d *diskCacheHandler) cleanup() int {
 	}); err != nil {
 		d.logger.Error("Cache cleanup walk failed", "error", err)
 	}
-	
+
 	return count
 }

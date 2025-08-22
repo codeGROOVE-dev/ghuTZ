@@ -12,25 +12,25 @@ import (
 
 // VerificationResult contains the results of verifying profile vs detected location/timezone.
 type VerificationResult struct {
-	ProfileLocation      string  `json:"profile_location,omitempty"`
-	ProfileTimezone      string  `json:"profile_timezone,omitempty"`     // From GitHub profile UTC offset  
-	ProfileLocationTimezone string  `json:"profile_location_timezone,omitempty"` // From geocoding location (DST-aware)
-	ProfileLocationDiff  int     `json:"profile_location_diff,omitempty"` // Hours diff between profile timezone and profile location timezone
-	ActivityOffsetDiff   int     `json:"activity_offset_diff,omitempty"` // Hours diff from pure activity-based offset
-	LocationDistanceMiles float64 `json:"location_distance_miles,omitempty"`
-	TimezoneOffsetDiff   int     `json:"timezone_offset_diff,omitempty"` // Hours diff from detected
-	LocationMismatch     string  `json:"location_mismatch,omitempty"` // "major" (>1000mi), "minor" (>250mi), or ""
-	TimezoneMismatch     string  `json:"timezone_mismatch,omitempty"` // "major" (>3tz), "minor" (>1tz), or ""
-	ActivityMismatch     bool    `json:"activity_mismatch,omitempty"` // True if activity differs by >4 hours from claimed/implied
+	ProfileLocation         string  `json:"profile_location,omitempty"`
+	ProfileTimezone         string  `json:"profile_timezone,omitempty"`
+	ProfileLocationTimezone string  `json:"profile_location_timezone,omitempty"`
+	LocationMismatch        string  `json:"location_mismatch,omitempty"`
+	TimezoneMismatch        string  `json:"timezone_mismatch,omitempty"`
+	ProfileLocationDiff     int     `json:"profile_location_diff,omitempty"`
+	ActivityOffsetDiff      int     `json:"activity_offset_diff,omitempty"`
+	LocationDistanceKm      float64 `json:"location_distance_km,omitempty"`
+	TimezoneOffsetDiff      int     `json:"timezone_offset_diff,omitempty"`
+	ActivityMismatch        bool    `json:"activity_mismatch,omitempty"`
 }
 
 // verifyLocationAndTimezone checks for discrepancies between profile and detected location/timezone.
 func (d *Detector) verifyLocationAndTimezone(ctx context.Context, profile *github.User, detectedLocation *Location, detectedTimezone string, profileTimezone string, profileLocationTimezone string, activityTimezone string) *VerificationResult {
 	result := &VerificationResult{
-		ProfileTimezone: profileTimezone,
+		ProfileTimezone:         profileTimezone,
 		ProfileLocationTimezone: profileLocationTimezone,
 	}
-	
+
 	// Calculate difference between profile timezone and profile location timezone if both exist
 	if profileTimezone != "" && profileLocationTimezone != "" {
 		profileLocationDiff := d.calculateTimezoneOffsetDiff(profileTimezone, profileLocationTimezone)
@@ -49,12 +49,12 @@ func (d *Detector) verifyLocationAndTimezone(ctx context.Context, profile *githu
 		result.ProfileLocation = profile.Location
 		if detectedLocation != nil {
 			distance := d.calculateLocationDistanceFromCoords(ctx, profile.Location, detectedLocation.Latitude, detectedLocation.Longitude)
-			result.LocationDistanceMiles = distance
+			result.LocationDistanceKm = distance
 			// Only set mismatch if we could calculate a valid distance
 			if distance > 0 {
 				if distance > 1000 {
 					result.LocationMismatch = "major"
-				} else if distance > 250 {
+				} else if distance > 400 {
 					result.LocationMismatch = "minor"
 				}
 			}
@@ -62,7 +62,7 @@ func (d *Detector) verifyLocationAndTimezone(ctx context.Context, profile *githu
 		} else {
 			// No detected location, so we can't calculate distance
 			// Set to -1 to indicate the claimed location should be shown
-			result.LocationDistanceMiles = -1
+			result.LocationDistanceKm = -1
 		}
 	}
 
@@ -72,7 +72,7 @@ func (d *Detector) verifyLocationAndTimezone(ctx context.Context, profile *githu
 	if timezoneToCheck == "" {
 		timezoneToCheck = profileLocationTimezone
 	}
-	
+
 	if timezoneToCheck != "" && detectedTimezone != "" {
 		offsetDiff := d.calculateTimezoneOffsetDiff(timezoneToCheck, detectedTimezone)
 		if offsetDiff != 0 {
@@ -82,7 +82,7 @@ func (d *Detector) verifyLocationAndTimezone(ctx context.Context, profile *githu
 			} else if abs(offsetDiff) > 1 {
 				result.TimezoneMismatch = "minor"
 			}
-			
+
 			d.logger.Debug("timezone mismatch detected",
 				"username", profile.Login,
 				"profile_tz", profileTimezone,
@@ -91,7 +91,7 @@ func (d *Detector) verifyLocationAndTimezone(ctx context.Context, profile *githu
 				"diff_hours", offsetDiff)
 		}
 	}
-	
+
 	// Check activity timezone discrepancy (pure activity-based offset)
 	if activityTimezone != "" {
 		// Compare activity timezone to profile timezone or profile location timezone (whichever exists)
@@ -99,11 +99,11 @@ func (d *Detector) verifyLocationAndTimezone(ctx context.Context, profile *githu
 		if compareToTimezone == "" {
 			compareToTimezone = profileLocationTimezone
 		}
-		
+
 		if compareToTimezone != "" {
 			activityDiff := d.calculateTimezoneOffsetDiff(activityTimezone, compareToTimezone)
 			result.ActivityOffsetDiff = abs(activityDiff)
-			
+
 			// Flag as activity mismatch if difference is >4 hours
 			if abs(activityDiff) > 4 {
 				result.ActivityMismatch = true
@@ -135,9 +135,9 @@ func (d *Detector) calculateLocationDistanceFromCoords(ctx context.Context, prof
 	return haversineDistance(coords.Latitude, coords.Longitude, detectedLat, detectedLon)
 }
 
-// haversineDistance calculates the distance in miles between two coordinates.
+// haversineDistance calculates the distance in kilometers between two coordinates.
 func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
-	const earthRadiusMiles = 3959.0 // Earth's radius in miles
+	const earthRadiusKm = 6371.0 // Earth's radius in kilometers
 
 	// Convert to radians
 	lat1Rad := lat1 * math.Pi / 180
@@ -151,7 +151,7 @@ func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
 			math.Sin(deltaLon/2)*math.Sin(deltaLon/2)
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 
-	return earthRadiusMiles * c
+	return earthRadiusKm * c
 }
 
 // calculateTimezoneOffsetDiff calculates the difference in UTC offsets between two timezones.

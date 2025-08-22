@@ -17,13 +17,13 @@ import (
 //   - utcOffset: The timezone offset from UTC (negative for west, positive for east)
 //     Examples: -4 for EDT, -7 for PDT, 0 for GMT, 8 for CST (China)
 //
-// Returns: Local hour (0-24), properly wrapped for day boundaries
+// Returns: Local hour (0-24), properly wrapped for day boundaries.
 func UTCToLocal(utcHour float64, utcOffset int) float64 {
 	// Add the offset to convert from UTC to local
 	// For UTC-4: UTC 15:00 + (-4) = 11:00 local
 	// For UTC+8: UTC 02:00 + 8 = 10:00 local
 	localHour := utcHour + float64(utcOffset)
-	
+
 	// Wrap around 24-hour clock
 	return math.Mod(localHour+24, 24)
 }
@@ -36,13 +36,13 @@ func UTCToLocal(utcHour float64, utcOffset int) float64 {
 //   - localHour: Hour in local time (0-24, can include fractional hours)
 //   - utcOffset: The timezone offset from UTC (negative for west, positive for east)
 //
-// Returns: UTC hour (0-24), properly wrapped for day boundaries
+// Returns: UTC hour (0-24), properly wrapped for day boundaries.
 func LocalToUTC(localHour float64, utcOffset int) float64 {
 	// Subtract the offset to convert from local to UTC
 	// For UTC-4: Local 11:00 - (-4) = 15:00 UTC
 	// For UTC+8: Local 10:00 - 8 = 02:00 UTC
 	utcHour := localHour - float64(utcOffset)
-	
+
 	// Wrap around 24-hour clock
 	return math.Mod(utcHour+24, 24)
 }
@@ -54,7 +54,7 @@ func LocalToUTC(localHour float64, utcOffset int) float64 {
 //   - startUTC, endUTC: Start and end hours in UTC
 //   - utcOffset: The timezone offset from UTC
 //
-// Returns: Start and end hours in local time
+// Returns: Start and end hours in local time.
 func ConvertRangeUTCToLocal(startUTC, endUTC float64, utcOffset int) (localStart, localEnd float64) {
 	return UTCToLocal(startUTC, utcOffset), UTCToLocal(endUTC, utcOffset)
 }
@@ -66,7 +66,7 @@ func ConvertRangeUTCToLocal(startUTC, endUTC float64, utcOffset int) (localStart
 //   - startLocal, endLocal: Start and end hours in local time
 //   - utcOffset: The timezone offset from UTC
 //
-// Returns: Start and end hours in UTC
+// Returns: Start and end hours in UTC.
 func ConvertRangeLocalToUTC(startLocal, endLocal float64, utcOffset int) (utcStart, utcEnd float64) {
 	return LocalToUTC(startLocal, utcOffset), LocalToUTC(endLocal, utcOffset)
 }
@@ -86,22 +86,23 @@ func ParseTimezoneOffset(timezone string) int {
 		if len(timezone) == 3 {
 			return 0 // Plain "UTC"
 		}
-		
+
 		// Parse the offset
 		offsetStr := timezone[3:]
 		if len(offsetStr) == 0 {
 			return 0
 		}
-		
+
 		// Handle the sign
 		sign := 1
-		if offsetStr[0] == '-' {
+		switch offsetStr[0] {
+		case '-':
 			sign = -1
 			offsetStr = offsetStr[1:]
-		} else if offsetStr[0] == '+' {
+		case '+':
 			offsetStr = offsetStr[1:]
 		}
-		
+
 		// Parse the number
 		offset := 0
 		for _, ch := range offsetStr {
@@ -110,16 +111,16 @@ func ParseTimezoneOffset(timezone string) int {
 			}
 			offset = offset*10 + int(ch-'0')
 		}
-		
+
 		return sign * offset
 	}
-	
+
 	// Try loading as IANA timezone
 	loc, err := time.LoadLocation(timezone)
 	if err != nil {
 		return 0 // Invalid timezone
 	}
-	
+
 	// Get current offset
 	_, offset := time.Now().In(loc).Zone()
 	return offset / 3600 // Convert seconds to hours

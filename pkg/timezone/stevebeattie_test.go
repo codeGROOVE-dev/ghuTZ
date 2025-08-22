@@ -77,7 +77,7 @@ func TestSteveBeattiePacificTimezone(t *testing.T) {
 		18.5: 11,
 		19.0: 7,
 		19.5: 6,
-		20.0: 5,  // Lunch dip at noon PDT
+		20.0: 5, // Lunch dip at noon PDT
 		20.5: 5,
 		21.0: 6,
 		21.5: 5,

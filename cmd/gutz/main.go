@@ -135,7 +135,7 @@ func main() {
 	// Handle forced offset BEFORE printing results
 	displayResult := result
 	displayTimezone := result.Timezone
-	
+
 	if *forceOffset >= -12 && *forceOffset <= 14 && result.HourlyActivityUTC != nil {
 		// Convert forced offset to UTC+/- format
 		if *forceOffset >= 0 {
@@ -188,7 +188,7 @@ func main() {
 			// The lunch hours are in UTC so they'll show at different local times
 			displayResult = &modifiedResult
 		}
-		
+
 		// Update the timezone in displayResult for correct display
 		displayResult.Timezone = displayTimezone
 	}
@@ -202,7 +202,7 @@ func main() {
 		fmt.Print(histogramOutput)
 	}
 
-	// Show timezone candidates in verbose mode  
+	// Show timezone candidates in verbose mode
 	if *verbose && result.TimezoneCandidates != nil && len(result.TimezoneCandidates) > 0 {
 		fmt.Println("\n📊 Timezone Candidates (Activity Analysis)")
 		fmt.Println(strings.Repeat("─", 50))
@@ -214,7 +214,7 @@ func main() {
 			if candidate.Offset == 0 {
 				offsetStr = "UTC+0"
 			}
-			
+
 			fmt.Printf("%d. %s (%.1f%% confidence)\n", i+1, offsetStr, candidate.Confidence)
 			fmt.Printf("   Evening activity: %d events\n", candidate.EveningActivity)
 			fmt.Printf("   Lunch: %s\n", formatCandidateLunch(candidate))
@@ -251,31 +251,32 @@ func printResult(result *gutz.Result) {
 }
 
 // extractMainLocation extracts the main city/state from a location string
-// Examples: 
-//   "Raleigh, NC, United States" -> "Raleigh, NC"
-//   "Raleigh, NC" -> "Raleigh, NC"
-//   "London, United Kingdom" -> "London"
+// Examples:
+//
+//	"Raleigh, NC, United States" -> "Raleigh, NC"
+//	"Raleigh, NC" -> "Raleigh, NC"
+//	"London, United Kingdom" -> "London"
 func extractMainLocation(location string) string {
 	if location == "" {
 		return ""
 	}
-	
+
 	parts := strings.Split(location, ",")
 	if len(parts) == 0 {
 		return location
 	}
-	
+
 	// Trim spaces from all parts
 	for i := range parts {
 		parts[i] = strings.TrimSpace(parts[i])
 	}
-	
+
 	// If last part is a country name, remove it
 	if len(parts) > 1 {
 		lastPart := parts[len(parts)-1]
 		// Common country names to strip
 		countries := []string{
-			"United States", "USA", "US", "United Kingdom", "UK", 
+			"United States", "USA", "US", "United Kingdom", "UK",
 			"Canada", "Australia", "Germany", "France", "India",
 			"China", "Japan", "Brazil", "Mexico", "Spain", "Italy",
 		}
@@ -286,7 +287,7 @@ func extractMainLocation(location string) string {
 			}
 		}
 	}
-	
+
 	// For US locations, keep city and state (first 2 parts)
 	// For others, keep just the city (first part)
 	if len(parts) >= 2 {
@@ -295,11 +296,11 @@ func extractMainLocation(location string) string {
 			return parts[0] + ", " + parts[1]
 		}
 	}
-	
+
 	return parts[0]
 }
 
-// isUSStateCode checks if a string is a valid US state code
+// isUSStateCode checks if a string is a valid US state code.
 func isUSStateCode(code string) bool {
 	states := []string{
 		"AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
@@ -341,28 +342,28 @@ func printLocation(result *gutz.Result) {
 
 	if locationStr != "" {
 		fmt.Printf("📍 Location:      %s\n", locationStr)
-		
+
 		// Display profile location if it differs significantly
 		if result.Verification != nil && result.Verification.ProfileLocation != "" {
 			// Only show if there's a meaningful difference
 			showProfileLocation := false
 			distanceStr := ""
-			
-			if result.Verification.LocationDistanceMiles > 50 {
+
+			if result.Verification.LocationDistanceKm > 80 {
 				showProfileLocation = true
-				if result.Verification.LocationDistanceMiles > 620 {
-					// Red warning for >620 miles
-					distanceStr = fmt.Sprintf(" \033[31m⚠️ %.0f mi\033[0m", result.Verification.LocationDistanceMiles)
+				if result.Verification.LocationDistanceKm > 1000 {
+					// Red warning for >1000 km
+					distanceStr = fmt.Sprintf(" \033[31m⚠️ %.0f km away\033[0m", result.Verification.LocationDistanceKm)
 				} else {
-					distanceStr = fmt.Sprintf(" (%.0f mi)", result.Verification.LocationDistanceMiles)
+					distanceStr = fmt.Sprintf(" (%.0f km away)", result.Verification.LocationDistanceKm)
 				}
-			} else if result.Verification.LocationDistanceMiles == 0 {
+			} else if result.Verification.LocationDistanceKm == 0 {
 				// Couldn't geocode but locations differ textually
 				if locationStr != result.Verification.ProfileLocation {
 					showProfileLocation = true
 				}
 			}
-			
+
 			if showProfileLocation {
 				fmt.Printf("                  └─ Profile Location: %s%s\n", result.Verification.ProfileLocation, distanceStr)
 			}
@@ -404,10 +405,10 @@ func printTimezone(result *gutz.Result) {
 		if tz == "" {
 			return
 		}
-		
+
 		localTime, offsetHours := getCurrentTime(tz)
 		utcStr := fmt.Sprintf("UTC%+d", offsetHours)
-		
+
 		if isPrimary {
 			// Primary detected timezone
 			fmt.Printf("🕐 Timezone:      %s (%s, now %s)\n", tz, utcStr, localTime)
@@ -436,13 +437,13 @@ func printTimezone(result *gutz.Result) {
 		if result.Verification.ProfileTimezone != "" && result.Verification.ProfileTimezone != result.Timezone {
 			formatTimezoneRow("Profile Timezone", result.Verification.ProfileTimezone, false)
 		}
-		
+
 		// Profile Location (from geocoding the location string)
 		if result.Verification.ProfileLocationTimezone != "" && result.Verification.ProfileLocationTimezone != result.Timezone {
 			formatTimezoneRow("Profile Location", result.Verification.ProfileLocationTimezone, false)
 		}
 	}
-	
+
 	// Activity Pattern
 	if result.ActivityTimezone != "" && result.ActivityTimezone != result.Timezone {
 		formatTimezoneRow("Activity Pattern", result.ActivityTimezone, false)
@@ -608,11 +609,11 @@ func formatCandidateLunch(candidate timezone.Candidate) string {
 	if candidate.LunchStartUTC == 0 && candidate.LunchEndUTC == 0 {
 		return "Not detected"
 	}
-	
+
 	// Convert UTC lunch to local time for this candidate
 	localStart := math.Mod(candidate.LunchStartUTC+candidate.Offset+24, 24)
 	localEnd := math.Mod(candidate.LunchEndUTC+candidate.Offset+24, 24)
-	
+
 	return fmt.Sprintf("%.1f-%.1f local (%.0f%% conf)", localStart, localEnd, candidate.LunchConfidence*100)
 }
 
