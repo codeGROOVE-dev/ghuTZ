@@ -126,10 +126,7 @@ Seriously though, if they have a .ca e-mail address or .ca website, they almost 
 
 8. PROFILE LOCATION TRUST:
 	- 🚨 CRITICAL: If the user's GitHub profile location is specific (city, state) and matches the detected timezone from activity patterns, USE THAT EXACT LOCATION
-	- Trust specific cities over generic regions:
-	  • "Kirkland, WA" → Use Kirkland, WA (not "San Francisco Bay Area")
-	  • "Raleigh, NC" → Use Raleigh, NC (not "Eastern US")
-	  • "Austin, TX" → Use Austin, TX (not "Central US")
+	- Trust specific detected cities over generic regions listed in the region
 	- Only override the profile location if:
 	  • It's vague ("Earth", "Internet", "Remote")
 	  • It's fictional ("Gotham", "Hogwarts", "Mars")
