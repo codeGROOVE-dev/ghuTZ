@@ -118,8 +118,37 @@ func TestCalculateTypicalActiveHours(t *testing.T) {
 			},
 			quietHours:    []int{6, 7, 8, 9, 10, 11}, // Midnight-5am CST
 			utcOffset:     -6,                        // CST (UTC-6)
-			expectedStart: 13.0,                      // Algorithm finds 7am CST start
+			expectedStart: 14.0,                      // Algorithm finds 8am CST start (14.0 and 14.5 both have 3+ events)
 			expectedEnd:   0.0,                       // End of bucket 23.5 (wraps to 0.0)
+		},
+		{
+			name: "mattmoor bug fix - isolated 3+ events should not start active period",
+			// This tests the specific bug where 04:00 had 4 events but 04:30 had only 1 event
+			// The algorithm should ignore this and find the true start at 08:30-09:00
+			halfHourlyActivity: map[float64]int{
+				// Isolated early morning activity (should be ignored)
+				4.0: 4, 4.5: 1, // 04:00 has 4 events but 04:30 has only 1 (not consecutive)
+				5.0: 0, 5.5: 6, // 05:30 has 6 events but 06:00 has 2 (not consecutive)
+				6.0: 2, 6.5: 0,
+				7.0: 1, 7.5: 3, // 07:30 has 3 events but 08:00 has 2 (not consecutive)
+				8.0: 2, 8.5: 4, // 08:30 has 4 events but 09:00 has 13 (consecutive!)
+				// True start of sustained activity
+				9.0: 13, 9.5: 14, // 09:00 and 09:30 both have 3+ events (consecutive start)
+				10.0: 11, 10.5: 5,
+				11.0: 6, 11.5: 7,
+				12.0: 15, 12.5: 4, // Lunch dip
+				13.0: 2, 13.5: 2,
+				14.0: 4, 14.5: 6,
+				15.0: 0, 15.5: 5,
+				16.0: 5, 16.5: 4,
+				// End of activity
+				17.0: 2, 17.5: 1, // Less than 3 events
+				18.0: 1, 18.5: 0,
+			},
+			quietHours:    []int{18, 19, 20, 21, 22, 23, 0, 1, 2, 3},
+			utcOffset:     -7,   // PDT
+			expectedStart: 8.5,  // Should start at 08:30, not 04:00
+			expectedEnd:   17.0, // End at last bucket with activity
 		},
 	}
 

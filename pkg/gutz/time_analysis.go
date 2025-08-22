@@ -31,6 +31,16 @@ func calculateTypicalActiveHoursUTC(halfHourlyActivityUTC map[float64]int, quiet
 			continue // Must start with a noticeable bucket (3+ events)
 		}
 
+		// CRITICAL: Enforce "two consecutive periods with 3+ events" rule
+		// Check if the next bucket also has 3+ events
+		nextBucket := startBucket + 0.5
+		if nextBucket >= 24.0 {
+			nextBucket -= 24.0 // Wrap around
+		}
+		if halfHourlyActivityUTC[nextBucket] < 3 {
+			continue // Must have two consecutive 3+ periods to start
+		}
+
 		// Try to extend from this start bucket (with wraparound support)
 		currentEndBucket := startBucket + 0.5     // End of the first bucket
 		lastNoticeableBucket := startBucket + 0.5 // Track end of last noticeable bucket
