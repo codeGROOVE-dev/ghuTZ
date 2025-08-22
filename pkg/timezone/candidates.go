@@ -261,24 +261,56 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		// Work hours - 8 points max, with STRONG penalties for too-early starts
 		// CRITICAL: Use firstActivityLocal which is calculated per-timezone, not testWorkStart
 		if firstActivityLocal < 24 {
-			actualWorkStart := int(firstActivityLocal)
+			// Use more precise work start time (with half-hour granularity)
+			preciseWorkStart := firstActivityLocal
 
 			// ALWAYS penalize very early starts, regardless of workReasonable flag
 			switch {
-			case actualWorkStart <= 4:
+			case preciseWorkStart <= 4.0:
 				// 4am or earlier is completely absurd - MASSIVE penalty
 				testConfidence -= 50
-				adjustments = append(adjustments, fmt.Sprintf("-50 (impossible %dam work start)", actualWorkStart))
-				if actualWorkStart < 2 {
+				adjustments = append(adjustments, fmt.Sprintf("-50 (impossible %.1fam work start)", preciseWorkStart))
+				if preciseWorkStart < 2.0 {
 					testConfidence -= 30 // Additional penalty for midnight starts
-					adjustments = append(adjustments, fmt.Sprintf("-30 (extra penalty for midnight-%dam)", actualWorkStart))
+					adjustments = append(adjustments, fmt.Sprintf("-30 (extra penalty for midnight-%.1fam)", preciseWorkStart))
 				}
-			case actualWorkStart == 5:
-				// 5am is extremely early - STRONG penalty
-				testConfidence -= 25
-				adjustments = append(adjustments, "-25 (extremely early 5am start)")
+			case preciseWorkStart >= 5.0 && preciseWorkStart < 5.5:
+				// 5:00am is early but some people (especially East Coast) do start then
+				penalty := -10.0
+				// Check if this person has good afternoon productivity to offset early start
+				afternoonProductivity := 0
+				for localHour := 13; localHour <= 16; localHour++ {
+					utcHour := (localHour - testOffset + 24) % 24
+					afternoonProductivity += hourCounts[utcHour]
+				}
+				if afternoonProductivity > 40 {
+					// If they have good afternoon productivity (40+ events 1-4pm), reduce penalty
+					penalty = -5.0
+					adjustments = append(adjustments, "-5 (early 5:00am start but good afternoon productivity)")
+				} else {
+					adjustments = append(adjustments, "-10 (early 5:00am start)")
+				}
+				testConfidence += penalty
+			case preciseWorkStart >= 5.5 && preciseWorkStart < 6.0:
+				// 5:30am is more reasonable for early risers
+				penalty := -5.0
+				// Check afternoon productivity for additional leniency
+				afternoonProductivity := 0
+				for localHour := 13; localHour <= 16; localHour++ {
+					utcHour := (localHour - testOffset + 24) % 24
+					afternoonProductivity += hourCounts[utcHour]
+				}
+				if afternoonProductivity > 40 {
+					// Very lenient for good afternoon productivity
+					penalty = -2.0
+					adjustments = append(adjustments, "-2 (5:30am start with good afternoon productivity)")
+				} else {
+					adjustments = append(adjustments, "-5 (5:30am start)")
+				}
+				testConfidence += penalty
 			case workReasonable:
 				// Only give bonuses for reasonable starts (6am+)
+				actualWorkStart := int(preciseWorkStart) // Convert back to int for existing logic
 				switch {
 				case actualWorkStart >= 7 && actualWorkStart <= 9:
 					testConfidence += 12 // Good work start (7-9am) - increased from 8 to 12
@@ -295,6 +327,7 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 				}
 			default:
 				// Work hours detected but not reasonable - apply penalties
+				actualWorkStart := int(preciseWorkStart) // Convert back to int for existing logic
 				testConfidence -= 5
 				adjustments = append(adjustments, fmt.Sprintf("-5 (unreasonable work hours %dam)", actualWorkStart))
 			}
@@ -463,6 +496,65 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			penalty := -25.0
 			testConfidence += penalty
 			adjustments = append(adjustments, fmt.Sprintf("-25 (night activity %.1f > day %.1f avg/hr)", nightAvg, dayAvg))
+		}
+
+		// PENALTY for unreasonable overnight vs afternoon productivity (1:00-2:30am vs 2:00-3:30pm local)
+		// This is a strong signal that the timezone is wrong - very few people are more productive at 1-2:30am than 2-3:30pm
+		overnightActivity := 0
+		afternoonActivity := 0
+		
+		// Count overnight activity (1:00-2:30am local)
+		for localHour := 1; localHour <= 2; localHour++ {
+			utcHour := (localHour - testOffset + 24) % 24
+			overnightActivity += hourCounts[utcHour]
+			// Also check 2:30 (2.5 hour)
+			if localHour == 2 {
+				utcHalfHour := (1.5 - float64(testOffset) + 24)
+				for utcHalfHour >= 24 {
+					utcHalfHour -= 24
+				}
+				for utcHalfHour < 0 {
+					utcHalfHour += 24
+				}
+				overnightActivity += halfHourCounts[utcHalfHour]
+			}
+		}
+		
+		// Count afternoon activity (2:00-3:30pm local) 
+		for localHour := 14; localHour <= 15; localHour++ {
+			utcHour := (localHour - testOffset + 24) % 24
+			afternoonActivity += hourCounts[utcHour]
+			// Also check 3:30 (15.5 hour)
+			if localHour == 15 {
+				utcHalfHour := (14.5 - float64(testOffset) + 24)
+				for utcHalfHour >= 24 {
+					utcHalfHour -= 24
+				}
+				for utcHalfHour < 0 {
+					utcHalfHour += 24
+				}
+				afternoonActivity += halfHourCounts[utcHalfHour]
+			}
+		}
+		
+		// Only penalize if overnight productivity exceeds afternoon productivity AND there's significant overnight activity
+		if overnightActivity > 10 && overnightActivity > afternoonActivity {
+			productivity_ratio := float64(overnightActivity) / math.Max(float64(afternoonActivity), 1.0)
+			var penalty float64
+			if productivity_ratio > 2.0 {
+				// Overnight is more than 2x afternoon productivity - very suspicious
+				penalty = -30.0
+				adjustments = append(adjustments, fmt.Sprintf("-30 (overnight %d >> afternoon %d events - %.1fx more productive)", overnightActivity, afternoonActivity, productivity_ratio))
+			} else if productivity_ratio > 1.5 {
+				// Overnight is 1.5x+ afternoon productivity - suspicious
+				penalty = -15.0
+				adjustments = append(adjustments, fmt.Sprintf("-15 (overnight %d > afternoon %d events - %.1fx more productive)", overnightActivity, afternoonActivity, productivity_ratio))
+			} else {
+				// Overnight is moderately higher than afternoon
+				penalty = -5.0
+				adjustments = append(adjustments, fmt.Sprintf("-5 (overnight %d > afternoon %d events - %.1fx more productive)", overnightActivity, afternoonActivity, productivity_ratio))
+			}
+			testConfidence += penalty
 		}
 
 		// Pacific timezone pattern recognition - 25 points max (increased)
@@ -790,14 +882,14 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			testConfidence -= 10 // Significant penalty - very few developers
 			adjustments = append(adjustments, "-10 (Atlantic ocean low population)")
 		case 0, 1: // UTC+0/UTC+1 (UK/Ireland/Portugal in GMT/BST, Western/Central Europe)
-			// Significant boost for UTC+0/+1 - major developer population
+			// Moderate boost for UTC+0/+1 - major developer population but not overwhelming
 			// UK uses UTC+0 in winter (GMT) and UTC+1 in summer (BST)
 			// Central Europe uses UTC+1 in winter and UTC+2 in summer
-			testConfidence += 12.0 // Significant boost for UK/Western Europe population
+			testConfidence += 8.0 // Reduced from 12 to 8 - still significant but more balanced
 			if testOffset == 0 {
-				adjustments = append(adjustments, "+12 (UK/Western Europe GMT/winter time)")
+				adjustments = append(adjustments, "+8 (UK/Western Europe GMT/winter time)")
 			} else {
-				adjustments = append(adjustments, "+12 (UK BST/Central Europe winter time)")
+				adjustments = append(adjustments, "+8 (UK BST/Central Europe winter time)")
 			}
 
 			// Check for European commute pattern (quiet hour at 17-18 local)
@@ -890,6 +982,12 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 
 		// Debug for stevebeattie - log UTC-7, UTC-8, UTC-9
 		if username == "stevebeattie" && (testOffset == -7 || testOffset == -8 || testOffset == -9) {
+			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f adjustments=%v\n",
+				username, testOffset, testConfidence, adjustments)
+		}
+
+		// Debug for tstromberg - log UTC+0, UTC-4, UTC-5 to see overnight penalty
+		if username == "tstromberg" && (testOffset == 0 || testOffset == -4 || testOffset == -5) {
 			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f adjustments=%v\n",
 				username, testOffset, testConfidence, adjustments)
 		}

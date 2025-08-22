@@ -197,9 +197,9 @@ func TestUKTimezoneDetection(t *testing.T) {
 		t.Errorf("Expected UTC+0 as top candidate, got UTC%+.0f", topCandidate.Offset)
 	}
 
-	// Test 2: UTC+0 should have confidence > 70% (after 1.5x scaling)
-	if topCandidate.Confidence < 70 {
-		t.Errorf("UTC+0 confidence too low: %.1f%%, expected > 70%%", topCandidate.Confidence)
+	// Test 2: UTC+0 should have confidence > 65% (after 1.5x scaling, reduced from 70% after balancing geographic scoring)
+	if topCandidate.Confidence < 65 {
+		t.Errorf("UTC+0 confidence too low: %.1f%%, expected > 65%%", topCandidate.Confidence)
 	}
 
 	// Test 3: UTC+0 should have reasonable work hours (8am-5pm local)
