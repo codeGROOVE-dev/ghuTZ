@@ -137,14 +137,26 @@ func CalculateSleepRangesFromBuckets(sleepBucketsUTC []float64, tz string) []Sle
 		return nil
 	}
 
-	// Convert UTC sleep buckets to local times
-	var localSleepBuckets []float64
-	for _, utcBucket := range sleepBucketsUTC {
-		localBucket := convertUTCToLocalFloat(utcBucket, tz)
-		localSleepBuckets = append(localSleepBuckets, localBucket)
-	}
+	localSleepBuckets := convertBucketsToLocal(sleepBucketsUTC, tz)
 
 	// Check for wraparound case first (evening >= 22 and morning <= 6)
+	if wraparoundRange := tryCreateWraparoundRange(localSleepBuckets); wraparoundRange != nil {
+		return []SleepRange{*wraparoundRange}
+	}
+
+	// Process as normal consecutive ranges
+	return groupConsecutiveBuckets(localSleepBuckets)
+}
+
+func convertBucketsToLocal(sleepBucketsUTC []float64, tz string) []float64 {
+	localSleepBuckets := make([]float64, len(sleepBucketsUTC))
+	for i, utcBucket := range sleepBucketsUTC {
+		localSleepBuckets[i] = convertUTCToLocalFloat(utcBucket, tz)
+	}
+	return localSleepBuckets
+}
+
+func tryCreateWraparoundRange(localSleepBuckets []float64) *SleepRange {
 	var eveningBuckets, morningBuckets []float64
 	for _, bucket := range localSleepBuckets {
 		if bucket >= 22 {
@@ -153,54 +165,45 @@ func CalculateSleepRangesFromBuckets(sleepBucketsUTC []float64, tz string) []Sle
 			morningBuckets = append(morningBuckets, bucket)
 		}
 	}
-	
-	// If we have both evening and morning buckets, create a wraparound range
-	if len(eveningBuckets) > 0 && len(morningBuckets) > 0 {
-		sort.Float64s(eveningBuckets)
-		sort.Float64s(morningBuckets)
-		
-		sleepStart := eveningBuckets[0] // First evening bucket
-		sleepEnd := morningBuckets[len(morningBuckets)-1] + 0.5 // Last morning bucket + 0.5
-		
-		wraparoundDuration := (24 - sleepStart) + sleepEnd
-		if wraparoundDuration >= 4 && wraparoundDuration <= 12 {
-			return []SleepRange{{
-				Start:    sleepStart,
-				End:      sleepEnd,
-				Duration: wraparoundDuration,
-			}}
+
+	if len(eveningBuckets) == 0 || len(morningBuckets) == 0 {
+		return nil
+	}
+
+	sort.Float64s(eveningBuckets)
+	sort.Float64s(morningBuckets)
+
+	sleepStart := eveningBuckets[0]
+	sleepEnd := morningBuckets[len(morningBuckets)-1] + 0.5
+	duration := (24 - sleepStart) + sleepEnd
+
+	if duration >= 4 && duration <= 12 {
+		return &SleepRange{
+			Start:    sleepStart,
+			End:      sleepEnd,
+			Duration: duration,
 		}
 	}
+	return nil
+}
 
-	// Sort buckets for normal consecutive processing
+func groupConsecutiveBuckets(localSleepBuckets []float64) []SleepRange {
 	sort.Float64s(localSleepBuckets)
-
-	// Group consecutive buckets into ranges
-	var ranges []SleepRange
 	if len(localSleepBuckets) == 0 {
-		return ranges
+		return nil
 	}
 
+	var ranges []SleepRange
 	currentStart := localSleepBuckets[0]
 	currentEnd := localSleepBuckets[0] + 0.5
 
 	for i := 1; i < len(localSleepBuckets); i++ {
 		bucket := localSleepBuckets[i]
-		// Check if this bucket is consecutive (within 0.5 hours)
-		if math.Abs(bucket-currentEnd) < 0.1 { // Using small epsilon for float comparison
+		if math.Abs(bucket-currentEnd) < 0.1 {
 			currentEnd = bucket + 0.5
 		} else {
-			// Gap found, save current range if it's long enough
-			duration := currentEnd - currentStart
-			if duration <= 0 {
-				duration = (24 - currentStart) + currentEnd
-			}
-			if duration >= 4 && duration <= 12 {
-				ranges = append(ranges, SleepRange{
-					Start:    currentStart,
-					End:      currentEnd,
-					Duration: duration,
-				})
+			if range_ := createRangeIfValid(currentStart, currentEnd); range_ != nil {
+				ranges = append(ranges, *range_)
 			}
 			currentStart = bucket
 			currentEnd = bucket + 0.5
@@ -208,19 +211,26 @@ func CalculateSleepRangesFromBuckets(sleepBucketsUTC []float64, tz string) []Sle
 	}
 
 	// Add the last range
-	duration := currentEnd - currentStart
-	if duration <= 0 {
-		duration = (24 - currentStart) + currentEnd
-	}
-	if duration >= 4 && duration <= 12 {
-		ranges = append(ranges, SleepRange{
-			Start:    currentStart,
-			End:      currentEnd,
-			Duration: duration,
-		})
+	if range_ := createRangeIfValid(currentStart, currentEnd); range_ != nil {
+		ranges = append(ranges, *range_)
 	}
 
 	return ranges
+}
+
+func createRangeIfValid(start, end float64) *SleepRange {
+	duration := end - start
+	if duration <= 0 {
+		duration = (24 - start) + end
+	}
+	if duration >= 4 && duration <= 12 {
+		return &SleepRange{
+			Start:    start,
+			End:      end,
+			Duration: duration,
+		}
+	}
+	return nil
 }
 
 // CalculateSleepRanges converts UTC sleep hours to local time and groups them into ranges.
