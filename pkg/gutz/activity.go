@@ -312,38 +312,38 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		minHour := 24
 		maxHour := -1
 		hasWrap := false
-		
+
 		// Check if we have a wraparound (e.g., hours like 22, 23, 0, 1, 2)
 		for i := 1; i < len(quietHours); i++ {
-			if quietHours[i] < quietHours[i-1] && quietHours[i-1] - quietHours[i] > 12 {
+			if quietHours[i] < quietHours[i-1] && quietHours[i-1]-quietHours[i] > 12 {
 				hasWrap = true
 				break
 			}
 		}
-		
+
 		if hasWrap {
 			// Handle wraparound case - find the continuous range
 			// Find the start of the sleep period (first hour after the gap)
 			startIdx := 0
 			for i := 1; i < len(quietHours); i++ {
-				if quietHours[i-1] > quietHours[i] && quietHours[i-1] - quietHours[i] > 12 {
+				if quietHours[i-1] > quietHours[i] && quietHours[i-1]-quietHours[i] > 12 {
 					startIdx = i
 					break
 				}
 			}
-			
+
 			// Reorder the array to be continuous
 			reordered := append(quietHours[startIdx:], quietHours[:startIdx]...)
 			startHour := reordered[0]
 			endHour := reordered[len(reordered)-1]
-			
+
 			// Calculate midpoint
 			if endHour < startHour {
 				// Still wrapped after reordering
 				totalHours := (24 - startHour) + endHour + 1
 				midQuiet = float64(startHour) + float64(totalHours)/2.0
 			} else {
-				midQuiet = float64(startHour) + float64(endHour - startHour)/2.0
+				midQuiet = float64(startHour) + float64(endHour-startHour)/2.0
 			}
 		} else {
 			// No wraparound - simple case
@@ -355,9 +355,9 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 					maxHour = h
 				}
 			}
-			midQuiet = float64(minHour) + float64(maxHour - minHour)/2.0
+			midQuiet = float64(minHour) + float64(maxHour-minHour)/2.0
 		}
-		
+
 		if midQuiet >= 24 {
 			midQuiet -= 24
 		}
@@ -774,7 +774,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		}
 	} else {
 		// Check local work start time (convert from UTC to local)
-		localWorkStart := int(activeStartUTC + float64(offsetInt) + 24) % 24
+		localWorkStart := int(activeStartUTC+float64(offsetInt)+24) % 24
 		if localWorkStart > 11 {
 			// Work starting after 11am local time is unusual (unless part-time)
 			suspiciousWorkHours = true
@@ -951,7 +951,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 
 	// Detect sleep periods using 30-minute resolution with buffer
 	sleepBuckets := sleep.DetectSleepPeriodsWithHalfHours(halfHourCounts)
-	d.logger.Debug("detected sleep buckets", 
+	d.logger.Debug("detected sleep buckets",
 		"username", username,
 		"sleepBuckets", sleepBuckets,
 		"numBuckets", len(sleepBuckets))

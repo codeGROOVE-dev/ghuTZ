@@ -47,8 +47,8 @@ func TestCalculateTypicalActiveHours(t *testing.T) {
 			},
 			quietHours:    []int{3, 4, 5, 6, 7, 8}, // 11pm-4am EDT (sleep)
 			utcOffset:     -4,                      // EDT (UTC-4)
-			expectedStart: 14.0,                      // 10am EDT (14 UTC) - based on sustained activity
-			expectedEnd:   2.0,                       // 10pm EDT - end of bucket 1.5 which has 4 events
+			expectedStart: 14.0,                    // 10am EDT (14 UTC) - based on sustained activity
+			expectedEnd:   2.0,                     // 10pm EDT - end of bucket 1.5 which has 4 events
 		},
 		{
 			name: "mattmoor Pacific time data (UTC-7)",
@@ -83,8 +83,8 @@ func TestCalculateTypicalActiveHours(t *testing.T) {
 			},
 			quietHours:    []int{1, 2, 3}, // Sleep hours in UTC
 			utcOffset:     -7,             // PDT (UTC-7)
-			expectedStart: 9.0,              // Algorithm finds main sustained block
-			expectedEnd:   13.0,             // End of bucket 12.5 which has 8 events
+			expectedStart: 9.0,            // Algorithm finds main sustained block
+			expectedEnd:   13.0,           // End of bucket 12.5 which has 8 events
 		},
 		{
 			name: "dlorenc Central time data (UTC-6)",
@@ -118,8 +118,8 @@ func TestCalculateTypicalActiveHours(t *testing.T) {
 			},
 			quietHours:    []int{6, 7, 8, 9, 10, 11}, // Midnight-5am CST
 			utcOffset:     -6,                        // CST (UTC-6)
-			expectedStart: 13.0,                        // Algorithm finds 7am CST start
-			expectedEnd:   0.0,                         // End of bucket 23.5 (wraps to 0.0)
+			expectedStart: 13.0,                      // Algorithm finds 7am CST start
+			expectedEnd:   0.0,                       // End of bucket 23.5 (wraps to 0.0)
 		},
 	}
 
@@ -131,8 +131,8 @@ func TestCalculateTypicalActiveHours(t *testing.T) {
 				t.Errorf("Expected start hour %.1f UTC, got %.1f UTC", tt.expectedStart, start)
 
 				// Convert to local time for debugging
-				startLocal := math.Mod(start + float64(tt.utcOffset) + 24, 24)
-				expectedLocal := math.Mod(tt.expectedStart + float64(tt.utcOffset) + 24, 24)
+				startLocal := math.Mod(start+float64(tt.utcOffset)+24, 24)
+				expectedLocal := math.Mod(tt.expectedStart+float64(tt.utcOffset)+24, 24)
 				t.Logf("Got start: %.1f UTC (%.1f local), expected: %.1f UTC (%.1f local)",
 					start, startLocal, tt.expectedStart, expectedLocal)
 			}
@@ -141,8 +141,8 @@ func TestCalculateTypicalActiveHours(t *testing.T) {
 				t.Errorf("Expected end hour %.1f UTC, got %.1f UTC", tt.expectedEnd, end)
 
 				// Convert to local time for debugging
-				endLocal := math.Mod(end + float64(tt.utcOffset) + 24, 24)
-				expectedLocal := math.Mod(tt.expectedEnd + float64(tt.utcOffset) + 24, 24)
+				endLocal := math.Mod(end+float64(tt.utcOffset)+24, 24)
+				expectedLocal := math.Mod(tt.expectedEnd+float64(tt.utcOffset)+24, 24)
 				t.Logf("Got end: %.1f UTC (%.1f local), expected: %.1f UTC (%.1f local)",
 					end, endLocal, tt.expectedEnd, expectedLocal)
 			}

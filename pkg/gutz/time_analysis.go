@@ -9,7 +9,7 @@ package gutz
 func calculateTypicalActiveHoursUTC(halfHourlyActivityUTC map[float64]int, quietHoursUTC []int) (startUTC, endUTC float64) {
 	// Note: quietHoursUTC parameter kept for backward compatibility but not used
 	// Active hours are determined purely by activity patterns, not by quiet hours
-	
+
 	if len(halfHourlyActivityUTC) == 0 {
 		return 14.0, 22.0 // Default UTC work hours
 	}
@@ -32,10 +32,10 @@ func calculateTypicalActiveHoursUTC(halfHourlyActivityUTC map[float64]int, quiet
 		}
 
 		// Try to extend from this start bucket (with wraparound support)
-		currentEndBucket := startBucket + 0.5 // End of the first bucket
+		currentEndBucket := startBucket + 0.5     // End of the first bucket
 		lastNoticeableBucket := startBucket + 0.5 // Track end of last noticeable bucket
-		noticeableCount := 1 // Count of buckets with 3+ contributions in this period
-		gapLength := 0       // Current consecutive gap length (buckets with <3 contributions)
+		noticeableCount := 1                      // Count of buckets with 3+ contributions in this period
+		gapLength := 0                            // Current consecutive gap length (buckets with <3 contributions)
 
 		// Search up to 48 half-hour buckets to allow wraparound
 		for i := 1; i < 48; i++ {
@@ -48,7 +48,7 @@ func calculateTypicalActiveHoursUTC(halfHourlyActivityUTC map[float64]int, quiet
 			if hasNoticeableActivity {
 				// Found noticeable activity, reset gap and extend period to END of this bucket
 				gapLength = 0
-				currentEndBucket = testBucket + 0.5 // Use bucket END time, not start
+				currentEndBucket = testBucket + 0.5     // Use bucket END time, not start
 				lastNoticeableBucket = testBucket + 0.5 // Track bucket END for gap handling
 				noticeableCount++
 			} else {

@@ -111,7 +111,7 @@ func (d *Detector) collectActivityTimestamps(ctx context.Context, username strin
 func (d *Detector) collectSupplementalTimestamps(ctx context.Context, username string,
 	allTimestamps []timestampEntry, targetDataPoints int,
 ) []timestampEntry {
-	const minDaysSpan = 35 // Need at least 5 weeks for good pattern detection
+	const minDaysSpan = 30 // Need at least 4 weeks for good pattern detection
 
 	// Deduplicate timestamps first to get accurate count
 	uniqueTimestamps := make(map[time.Time]bool)
@@ -124,44 +124,39 @@ func (d *Detector) collectSupplementalTimestamps(ctx context.Context, username s
 	}
 	allTimestamps = uniqueEntries
 
-	// Calculate current time span
-	var timeSpanDays int
-	if len(allTimestamps) > 0 {
-		var oldest, newest time.Time
-		for i, ts := range allTimestamps {
-			if i == 0 || ts.time.Before(oldest) {
-				oldest = ts.time
-			}
-			if i == 0 || ts.time.After(newest) {
-				newest = ts.time
-			}
+	// First, count how many events we have in the last 3 months from first-page data
+	threeMonthsAgo := time.Now().AddDate(0, -3, 0)
+	recentEvents := 0
+	for _, ts := range allTimestamps {
+		if ts.time.After(threeMonthsAgo) {
+			recentEvents++
 		}
-		timeSpanDays = int(newest.Sub(oldest).Hours() / 24)
 	}
 
-	needSupplemental := len(allTimestamps) < targetDataPoints || timeSpanDays < minDaysSpan
-
-	if !needSupplemental {
-		return allTimestamps
-	}
-
-	constraints := []string{}
-	if len(allTimestamps) < targetDataPoints {
-		constraints = append(constraints, fmt.Sprintf("need %d more data points", targetDataPoints-len(allTimestamps)))
-	}
-	if timeSpanDays < minDaysSpan {
-		constraints = append(constraints, fmt.Sprintf("need %d more days coverage", minDaysSpan-timeSpanDays))
-	}
+	d.logger.Debug("recent activity check", "username", username,
+		"events_last_3_months", recentEvents,
+		"target", targetDataPoints,
+		"need_second_page", recentEvents < targetDataPoints)
 
 	d.logger.Info("📊 Fetching supplemental data", "username", username,
 		"current_count", len(allTimestamps),
 		"target_count", targetDataPoints,
-		"current_days", timeSpanDays,
-		"target_days", minDaysSpan,
-		"constraints", strings.Join(constraints, ", "))
+		"recent_events_3mo", recentEvents)
 
-	// Fetch ALL additional data from all sources (first page only for performance)
-	additionalData := d.fetchSupplementalActivityWithDepth(ctx, username, 1)
+	// Always fetch first page of supplemental data for proper time span analysis
+	// Only fetch additional pages if we need more recent data
+	maxPages := 1
+	if recentEvents < targetDataPoints {
+		maxPages = 2 // Fetch deeper if we need more recent activity
+		d.logger.Debug("insufficient recent activity, fetching additional pages",
+			"username", username, "recent_events", recentEvents, "max_pages", maxPages)
+	} else {
+		d.logger.Debug("sufficient recent activity, limiting to first page",
+			"username", username, "recent_events", recentEvents, "max_pages", maxPages)
+	}
+
+	// Fetch supplemental data with appropriate depth
+	additionalData := d.fetchSupplementalActivityWithDepth(ctx, username, maxPages)
 
 	// Add all timestamps from supplemental data
 	allTimestamps = d.addSupplementalData(allTimestamps, additionalData, username)
@@ -398,8 +393,9 @@ func filterAndSortTimestamps(allTimestamps []timestampEntry, maxYears int) []tim
 // applyProgressiveTimeWindow applies a progressive time window strategy to get sufficient data.
 func applyProgressiveTimeWindow(allTimestamps []timestampEntry, targetMin int) []timestampEntry {
 	const maxTimeWindowDays = 365 * 5 // Maximum 5 years
-	const initialWindowDays = 35      // Start with 5 weeks (same as minDaysSpan)
-	const expansionFactor = 1.25      // Increase by 25% each iteration
+	const initialWindowDays = 30      // Start with 30 days for recency preference
+	const minTimeSpanDays = 30        // Minimum time span we want to achieve
+	const expansionFactor = 1.25      // Increase by 25% each iteration (30→37.5→46.9→58.6→73.3→91.6...)
 
 	// Progressive time window strategy
 	timeWindowDays := float64(initialWindowDays)
@@ -407,16 +403,57 @@ func applyProgressiveTimeWindow(allTimestamps []timestampEntry, targetMin int) [
 
 	for timeWindowDays <= maxTimeWindowDays {
 		cutoffTime := time.Now().AddDate(0, 0, -int(timeWindowDays))
-		filtered = []timestampEntry{}
 
+		// Use map to deduplicate timestamps during filtering
+		uniqueTimestamps := make(map[time.Time]timestampEntry)
 		for _, ts := range allTimestamps {
 			if ts.time.After(cutoffTime) {
-				filtered = append(filtered, ts)
+				// Keep the first occurrence of each timestamp
+				if _, exists := uniqueTimestamps[ts.time]; !exists {
+					uniqueTimestamps[ts.time] = ts
+				}
 			}
 		}
 
-		// If we have enough events or we've hit max window, stop
-		if len(filtered) >= targetMin || timeWindowDays >= maxTimeWindowDays {
+		// Convert back to slice
+		filtered = []timestampEntry{}
+		for _, ts := range uniqueTimestamps {
+			filtered = append(filtered, ts)
+		}
+
+		// Calculate actual time span of the filtered data
+		var actualSpanDays int
+		if len(filtered) > 0 {
+			var oldest, newest time.Time
+			for i, ts := range filtered {
+				if i == 0 || ts.time.Before(oldest) {
+					oldest = ts.time
+				}
+				if i == 0 || ts.time.After(newest) {
+					newest = ts.time
+				}
+			}
+			actualSpanDays = int(newest.Sub(oldest).Hours() / 24)
+		}
+
+		// Count data sources in filtered set for debugging
+		sourceCounts := make(map[string]int)
+		for _, ts := range filtered {
+			sourceCounts[ts.source]++
+		}
+
+		// Log detailed breakdown of what we have at this expansion step
+		fmt.Printf("DEBUG: Progressive expansion %d days -> %d events (%d day span)\n",
+			int(timeWindowDays), len(filtered), actualSpanDays)
+		for source, count := range sourceCounts {
+			fmt.Printf("  - %s: %d events\n", source, count)
+		}
+
+		// Stop if we have enough events AND sufficient time span, or hit max window
+		hasEnoughEvents := len(filtered) >= targetMin
+		hasEnoughTimeSpan := actualSpanDays >= minTimeSpanDays
+
+		if (hasEnoughEvents && hasEnoughTimeSpan) || timeWindowDays >= maxTimeWindowDays {
 			break
 		}
 

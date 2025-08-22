@@ -55,7 +55,7 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 
 		// Work start time - use the activeStart which is calculated based on sustained activity
 		// activeStart is in UTC, convert to local time for this offset
-		testWorkStart := math.Mod(activeStart + float64(testOffset) + 24, 24)
+		testWorkStart := math.Mod(activeStart+float64(testOffset)+24, 24)
 		firstActivityLocal := testWorkStart
 
 		// Lunch is only reasonable if:

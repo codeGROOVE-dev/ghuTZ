@@ -294,7 +294,7 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 
 	// Calculate timezone offset for the new timezone (needed for recalculation)
 	newOffset := offsetFromNamedTimezone(result.Timezone)
-	
+
 	// Always use the lunch times for the final chosen timezone
 	// First check if we already calculated lunch for this timezone in our candidates
 	// This is needed because Gemini might pick a named timezone like America/Los_Angeles
@@ -438,7 +438,7 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 			End:   tzconvert.UTCToLocal(result.ActiveHoursUTC.End, newOffset),
 		}
 	}
-	
+
 	// Recalculate PeakProductivityLocal with correct offset
 	if result.PeakProductivityUTC.Start != 0 || result.PeakProductivityUTC.End != 0 {
 		d.logger.Debug("recalculating PeakProductivityLocal with correct offset",
@@ -847,7 +847,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 				d.logger.Info("no matching candidate found, keeping existing values",
 					"offset", newOffset)
 			}
-			
+
 			// Recalculate ActiveHoursLocal and PeakProductivityLocal with the Gemini-corrected timezone
 			if locationResult.ActiveHoursUTC.Start != 0 || locationResult.ActiveHoursUTC.End != 0 {
 				d.logger.Debug("recalculating ActiveHoursLocal after Gemini correction",
@@ -863,7 +863,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 					End:   tzconvert.UTCToLocal(locationResult.ActiveHoursUTC.End, newOffset),
 				}
 			}
-			
+
 			// Recalculate PeakProductivityLocal with Gemini-corrected offset
 			if locationResult.PeakProductivityUTC.Start != 0 || locationResult.PeakProductivityUTC.End != 0 {
 				d.logger.Debug("recalculating PeakProductivityLocal after Gemini correction",

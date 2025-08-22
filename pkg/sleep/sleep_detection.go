@@ -234,7 +234,7 @@ func adjustPeriodEnd(period quietPeriod, halfHourCounts map[float64]int) quietPe
 		}
 
 		nextCount := halfHourCounts[nextBucket]
-		
+
 		// Only trim back if we see significant sustained activity (2+ events in next bucket)
 		// A single event might just be a bathroom break or late-night check
 		// We want to catch real wake-up patterns like 7+ events at 6:30am
