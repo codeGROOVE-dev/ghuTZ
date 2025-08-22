@@ -193,7 +193,7 @@ func groupConsecutiveBuckets(localSleepBuckets []float64) []SleepRange {
 		return nil
 	}
 
-	var ranges []SleepRange
+	var candidateRanges []SleepRange
 	currentStart := localSleepBuckets[0]
 	currentEnd := localSleepBuckets[0] + 0.5
 
@@ -202,20 +202,61 @@ func groupConsecutiveBuckets(localSleepBuckets []float64) []SleepRange {
 		if math.Abs(bucket-currentEnd) < 0.1 {
 			currentEnd = bucket + 0.5
 		} else {
-			if range_ := createRangeIfValid(currentStart, currentEnd); range_ != nil {
-				ranges = append(ranges, *range_)
+			// Save candidate range regardless of duration
+			duration := currentEnd - currentStart
+			if duration <= 0 {
+				duration = (24 - currentStart) + currentEnd
 			}
+			candidateRanges = append(candidateRanges, SleepRange{
+				Start:    currentStart,
+				End:      currentEnd,
+				Duration: duration,
+			})
 			currentStart = bucket
 			currentEnd = bucket + 0.5
 		}
 	}
 
-	// Add the last range
-	if range_ := createRangeIfValid(currentStart, currentEnd); range_ != nil {
-		ranges = append(ranges, *range_)
+	// Add the last range as candidate
+	duration := currentEnd - currentStart
+	if duration <= 0 {
+		duration = (24 - currentStart) + currentEnd
+	}
+	candidateRanges = append(candidateRanges, SleepRange{
+		Start:    currentStart,
+		End:      currentEnd,
+		Duration: duration,
+	})
+
+	// Apply validation rules based on number of candidate ranges
+	return validateSleepRanges(candidateRanges)
+}
+
+// validateSleepRanges applies duration validation based on context.
+func validateSleepRanges(candidateRanges []SleepRange) []SleepRange {
+	var validRanges []SleepRange
+
+	for _, r := range candidateRanges {
+		// Duration limits depend on whether we have multiple periods
+		minDuration := 4.0  // Default 4 hours minimum
+		maxDuration := 12.0 // Default 12 hours maximum
+
+		// For multiple rest periods (like afternoon naps), allow shorter periods
+		if len(candidateRanges) > 1 {
+			minDuration = 2.0 // Allow 2+ hour rest periods when there are multiple
+		}
+
+		// Very short periods (< 1 hour) are likely noise
+		if r.Duration < 1.0 {
+			continue
+		}
+
+		if r.Duration >= minDuration && r.Duration <= maxDuration {
+			validRanges = append(validRanges, r)
+		}
 	}
 
-	return ranges
+	return validRanges
 }
 
 func createRangeIfValid(start, end float64) *SleepRange {

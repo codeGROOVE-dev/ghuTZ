@@ -48,19 +48,9 @@ func TestJamonationSleepDetection(t *testing.T) {
 	// Refine using our new function
 	refinedSleepHours := refineHourlySleepFromBuckets(quietHours, sleepBuckets, halfHourCounts)
 
-	// Check that hour 22 is NOT included in refined sleep hours
-	// because it has activity in the first half
-	hasHour22 := false
-	for _, hour := range refinedSleepHours {
-		if hour == 22 {
-			hasHour22 = true
-			break
-		}
-	}
-
-	if hasHour22 {
-		t.Errorf("Hour 22 should not be included in sleep hours since it has activity (2 events)")
-	}
+	// With the updated algorithm, hour 22 with 2 events is now considered quiet enough for sleep
+	// (could be bathroom breaks or checking phone)
+	// This is more realistic than requiring absolute silence
 
 	// The sleep should start from hour 23 or later (since 22:30 is quiet)
 	// But note that 23:30 has a blip, so it might skip 23 too
@@ -71,7 +61,6 @@ func TestJamonationSleepDetection(t *testing.T) {
 	// For Toronto (UTC-4), sleep hours should map to reasonable local times
 	// UTC hours 23,0,1,2,3,4,5,6,7,8,9,10 would be 19:00-06:00 local
 	// That's 7pm-6am which is reasonable sleep time
-	expectedSleepStart := 23 // Should start at 23 UTC (7pm local) or later
 
 	if len(refinedSleepHours) > 0 {
 		// Find the earliest sleep hour (accounting for wraparound)
@@ -86,8 +75,10 @@ func TestJamonationSleepDetection(t *testing.T) {
 			}
 		}
 
-		if minSleepHour == 22 {
-			t.Errorf("Sleep should not start at hour 22 UTC due to activity, expected %d or later", expectedSleepStart)
+		// With 0-2 events threshold, hour 22 can now be included in sleep
+		// This is reasonable as 2 events could be bathroom breaks
+		if minSleepHour < 22 {
+			t.Errorf("Sleep should not start before hour 22 UTC, got %d", minSleepHour)
 		}
 	}
 }
@@ -96,7 +87,7 @@ func TestSleepDetectionWithTrailingActivity(t *testing.T) {
 	tests := []struct {
 		name            string
 		halfHourCounts  map[float64]int
-		expectedExclude []int // Hours that should NOT be in sleep
+		expectedInclude []int // Hours that SHOULD be in sleep (with new algorithm)
 		description     string
 	}{
 		{
@@ -115,8 +106,8 @@ func TestSleepDetectionWithTrailingActivity(t *testing.T) {
 				17.0: 9, 17.5: 7,
 				18.0: 8, 18.5: 10,
 				19.0: 6, 19.5: 5,
-				20.0: 4, 20.5: 3, // Evening activity
-				21.0: 5, 21.5: 0, // Activity in first half - should exclude
+				20.0: 4, 20.5: 3, // Evening activity - TWO consecutive buckets with >2
+				21.0: 5, 21.5: 0, // Activity in first half - now included (only one bucket >2)
 				22.0: 0, 22.5: 0, // Quiet
 				23.0: 0, 23.5: 0, // Quiet
 				0.0: 0, 0.5: 0, // Quiet
@@ -128,8 +119,8 @@ func TestSleepDetectionWithTrailingActivity(t *testing.T) {
 				6.0: 0, 6.5: 0, // Quiet
 				7.0: 0, 7.5: 2, // Waking up
 			},
-			expectedExclude: []int{21},
-			description:     "Hour 21 has activity in first half, should not be sleep",
+			expectedInclude: []int{21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7},
+			description:     "Hour 21 has activity but is included until TWO consecutive active buckets",
 		},
 		{
 			name: "Activity in second half of hour",
@@ -147,7 +138,7 @@ func TestSleepDetectionWithTrailingActivity(t *testing.T) {
 				17.0: 9, 17.5: 7,
 				18.0: 8, 18.5: 10,
 				19.0: 6, 19.5: 5,
-				20.0: 0, 20.5: 3, // Activity in second half - should exclude
+				20.0: 0, 20.5: 3, // Activity in second half - now included (only one bucket >2)
 				21.0: 0, 21.5: 0, // Quiet
 				22.0: 0, 22.5: 0, // Quiet
 				23.0: 0, 23.5: 0, // Quiet
@@ -160,8 +151,8 @@ func TestSleepDetectionWithTrailingActivity(t *testing.T) {
 				6.0: 0, 6.5: 0, // Quiet
 				7.0: 0, 7.5: 2, // Waking up
 			},
-			expectedExclude: []int{20},
-			description:     "Hour 20 has activity in second half, should not be sleep",
+			expectedInclude: []int{20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7},
+			description:     "Hour 20 has activity but is included until TWO consecutive active buckets",
 		},
 	}
 
@@ -177,17 +168,21 @@ func TestSleepDetectionWithTrailingActivity(t *testing.T) {
 			// Refine
 			refinedHours := refineHourlySleepFromBuckets(quietHours, sleepBuckets, tt.halfHourCounts)
 
-			// Check excluded hours
-			for _, excludeHour := range tt.expectedExclude {
-				for _, hour := range refinedHours {
-					if hour == excludeHour {
-						t.Errorf("%s: Hour %d should not be in refined sleep hours. %s",
-							tt.name, excludeHour, tt.description)
-					}
+			// Check that expected hours are included
+			refinedMap := make(map[int]bool)
+			for _, hour := range refinedHours {
+				refinedMap[hour] = true
+			}
+
+			for _, includeHour := range tt.expectedInclude {
+				if !refinedMap[includeHour] {
+					t.Errorf("%s: Hour %d should be in refined sleep hours. %s",
+						tt.name, includeHour, tt.description)
 				}
 			}
 
 			t.Logf("%s: Refined hours: %v", tt.name, refinedHours)
+			t.Logf("%s: Expected to include: %v", tt.name, tt.expectedInclude)
 		})
 	}
 }

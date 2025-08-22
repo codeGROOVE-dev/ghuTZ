@@ -18,6 +18,7 @@ type Result struct {
 	TopOrganizations           []OrgActivity          `json:"top_organizations"`
 	QuietHoursUTC              []int                  `json:"quiet_hours_utc"`
 	SleepBucketsUTC            []float64              `json:"sleep_buckets_utc,omitempty"`
+	SleepRangesLocal           []SleepRange           `json:"sleep_ranges_local,omitempty"`
 	PeakProductivityUTC        PeakProductivity       `json:"peak_productivity_utc,omitempty"`
 	PeakProductivityLocal      PeakProductivity       `json:"peak_productivity_local,omitempty"`
 	LunchHoursUTC              LunchBreak             `json:"lunch_hours_utc,omitempty"`
@@ -42,6 +43,13 @@ type LunchBreak struct {
 	Start      float64 `json:"start"`
 	End        float64 `json:"end"`
 	Confidence float64 `json:"confidence"`
+}
+
+// SleepRange represents a continuous rest/sleep period.
+type SleepRange struct {
+	Start    float64 `json:"start"`
+	End      float64 `json:"end"`
+	Duration float64 `json:"duration"`
 }
 
 // ActivityHistogram represents activity data with visual representation.
@@ -196,19 +204,21 @@ func generateHistogramLine(data *histogramData, bucket float64, count, utcHour i
 
 // determineHourType identifies what type of time period this bucket represents.
 func determineHourType(result *Result, bucket, localTime float64, localHour int, timezone string) (string, *color.Color) {
-	// Check for sleep time
-	if len(result.SleepBucketsUTC) > 0 {
-		for _, sleepBucket := range result.SleepBucketsUTC {
-			if bucket == sleepBucket {
-				return "z", color.New(color.FgBlue)
-			}
-		}
-	} else {
-		// Fall back to hourly quiet hours
-		for _, qh := range result.QuietHoursUTC {
-			localQuietTime := convertUTCToLocal(float64(qh), timezone)
-			if localHour == int(localQuietTime) {
-				return "z", color.New(color.FgBlue)
+	// Check for sleep time using SleepRangesLocal (unified approach)
+	if len(result.SleepRangesLocal) > 0 {
+		for _, sleepRange := range result.SleepRangesLocal {
+			// Check if this bucket's local time falls within any sleep range
+			// Handle wraparound case (e.g., 23:30 - 06:30)
+			if sleepRange.Start > sleepRange.End {
+				// Wraparound case: sleep range crosses midnight
+				if localTime >= sleepRange.Start || localTime < sleepRange.End {
+					return "z", color.New(color.FgBlue)
+				}
+			} else {
+				// Normal case: sleep range within same day
+				if localTime >= sleepRange.Start && localTime < sleepRange.End {
+					return "z", color.New(color.FgBlue)
+				}
 			}
 		}
 	}

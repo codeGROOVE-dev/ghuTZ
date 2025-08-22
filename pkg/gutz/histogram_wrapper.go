@@ -13,6 +13,7 @@ func GenerateHistogram(result *Result, timezone string) string {
 		TopOrganizations:           convertOrgActivities(result.TopOrganizations),
 		QuietHoursUTC:              result.SleepHoursUTC,
 		SleepBucketsUTC:            result.SleepBucketsUTC,
+		SleepRangesLocal:           convertSleepRanges(result.SleepRangesLocal),
 		PeakProductivityUTC:        convertPeakProductivity(result.PeakProductivityUTC),
 		PeakProductivityLocal:      convertPeakProductivity(result.PeakProductivityLocal),
 		LunchHoursUTC:              convertLunchBreak(result.LunchHoursUTC),
@@ -47,4 +48,16 @@ func convertLunchBreak(lunch LunchBreak) histogram.LunchBreak {
 		End:        lunch.End,
 		Confidence: lunch.Confidence,
 	}
+}
+
+func convertSleepRanges(ranges []SleepRange) []histogram.SleepRange {
+	result := make([]histogram.SleepRange, len(ranges))
+	for i, r := range ranges {
+		result[i] = histogram.SleepRange{
+			Start:    r.Start,
+			End:      r.End,
+			Duration: r.Duration,
+		}
+	}
+	return result
 }

@@ -529,9 +529,9 @@ func printWorkSchedule(result *gutz.Result) {
 			result.Timezone)
 	}
 
-	// Add sleep hours
-	if len(result.SleepHoursUTC) > 0 {
-		printSleepHours(result)
+	// Add rest hours
+	if len(result.SleepRangesLocal) > 0 {
+		printRestHours(result)
 	}
 
 	fmt.Println()
@@ -719,82 +719,21 @@ type sleepRange struct {
 	start, end int
 }
 
-func printSleepHours(result *gutz.Result) {
-	// Convert UTC sleep hours to local hours
-	localSleepHours := convertSleepHoursToLocal(result.SleepHoursUTC, result.Timezone)
-
-	// Group consecutive sleep hours into ranges
-	ranges := groupSleepHours(localSleepHours)
-
-	// Format and display valid sleep ranges
-	displaySleepRanges(ranges, result.Timezone)
-}
-
-func convertSleepHoursToLocal(sleepHoursUTC []int, timezone string) []int {
-	var localSleepHours []int
-	for _, utcHour := range sleepHoursUTC {
-		localHour := int(convertUTCToLocal(float64(utcHour), timezone))
-		localSleepHours = append(localSleepHours, localHour)
-	}
-	return localSleepHours
-}
-
-func groupSleepHours(localSleepHours []int) []sleepRange {
-	var ranges []sleepRange
-	if len(localSleepHours) == 0 {
-		return ranges
-	}
-
-	currentStart := localSleepHours[0]
-	currentEnd := localSleepHours[0]
-
-	for i := 1; i < len(localSleepHours); i++ {
-		hour := localSleepHours[i]
-
-		if isConsecutiveHour(currentEnd, hour) {
-			currentEnd = hour
-		} else {
-			// End current range and start new one
-			ranges = append(ranges, sleepRange{currentStart, (currentEnd + 1) % 24})
-			currentStart = hour
-			currentEnd = hour
-		}
-	}
-
-	// Add the final range
-	ranges = append(ranges, sleepRange{currentStart, (currentEnd + 1) % 24})
-	return ranges
-}
-
-func isConsecutiveHour(currentEnd, hour int) bool {
-	// Check if this hour is consecutive (handle day wraparound)
-	return hour == (currentEnd+1)%24 || (currentEnd == 23 && hour == 0)
-}
-
-func displaySleepRanges(ranges []sleepRange, timezone string) {
-	if len(ranges) == 0 {
+func printRestHours(result *gutz.Result) {
+	// Use pre-calculated rest ranges with 30-minute precision (already in local time)
+	if len(result.SleepRangesLocal) == 0 {
 		return
 	}
 
 	var rangeStrings []string
-	for _, r := range ranges {
-		// Calculate duration of this sleep range
-		duration := r.end - r.start
-		if duration <= 0 {
-			// Handle wraparound (e.g., 22:00 - 6:00)
-			duration = (24 - r.start) + r.end
-		}
-
-		// Only include ranges that are 4-12 hours (reasonable sleep periods)
-		if duration >= 4 && duration <= 12 {
-			rangeStrings = append(rangeStrings, fmt.Sprintf("%s - %s",
-				formatHour(float64(r.start)),
-				formatHour(float64(r.end))))
-		}
+	for _, r := range result.SleepRangesLocal {
+		rangeStrings = append(rangeStrings, fmt.Sprintf("%s - %s",
+			formatHour(r.Start),
+			formatHour(r.End)))
 	}
 
-	// Only print if we have valid sleep ranges
+	// Print rest ranges
 	if len(rangeStrings) > 0 {
-		fmt.Printf("\n💤 Sleep Time:    %s (%s)", strings.Join(rangeStrings, ", "), timezone)
+		fmt.Printf("\n💤 Rest Hours:    %s (%s)", strings.Join(rangeStrings, ", "), result.Timezone)
 	}
 }

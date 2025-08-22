@@ -198,12 +198,12 @@ function displayResults(data) {
         document.getElementById('peakRow').style.display = 'table-row';
     }
 
-    // Use pre-calculated sleep ranges from the server (much better than doing it in JS!)
-    if (data.sleep_ranges && data.sleep_ranges.length > 0) {
-        const sleepText = data.sleep_ranges.map(range => 
+    // Use pre-calculated rest ranges from the server (30-minute precision!)
+    if (data.sleep_ranges_local && data.sleep_ranges_local.length > 0) {
+        const restText = data.sleep_ranges_local.map(range => 
             formatHour(range.start) + '-' + formatHour(range.end)
         ).join(', ');
-        document.getElementById('sleepHours').textContent = sleepText;
+        document.getElementById('sleepHours').textContent = restText;
         document.getElementById('sleepRow').style.display = 'table-row';
     }
 

@@ -13,21 +13,103 @@ type quietPeriod struct {
 }
 
 // DetectSleepPeriodsWithHalfHours identifies sleep periods using 30-minute resolution data.
-// It requires at least 30 minutes of buffer between activity and sleep.
+// A rest period is defined as:
+// - 4+ hours of continuous buckets with 0-2 events
+// - Ends when we hit a bucket with 3+ events
+// - Maximum 12 hours per rest period.
 func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
-	// First pass: find truly quiet buckets (0-1 events)
-	quietBuckets := findQuietBuckets(halfHourCounts)
-	if len(quietBuckets) == 0 {
-		return []float64{}
+	// Find all potential rest periods
+	type restPeriod struct {
+		buckets []float64
+		start   float64
+		length  int
+	}
+	var allPeriods []restPeriod
+
+	// Scan through all 48 half-hour buckets (wrapping around midnight)
+	for startBucket := 0.0; startBucket < 24.0; startBucket += 0.5 {
+		// Skip if this bucket is active
+		if halfHourCounts[startBucket] > 2 {
+			continue
+		}
+
+		var currentPeriod []float64
+		bucket := startBucket
+		previousBucket := -1.0
+		previousCount := 0
+
+		// Build a continuous quiet period starting from this bucket
+		for len(currentPeriod) < 24 { // Max 12 hours (24 half-hour buckets)
+			count := halfHourCounts[bucket]
+
+			// Check if we should stop: two consecutive buckets with >2 events
+			if previousCount > 2 && count > 2 {
+				// Don't include the previous bucket - remove it if we added it
+				if len(currentPeriod) > 0 && currentPeriod[len(currentPeriod)-1] == previousBucket {
+					currentPeriod = currentPeriod[:len(currentPeriod)-1]
+				}
+				break
+			}
+
+			// Add this bucket to the period (we'll remove it later if needed)
+			currentPeriod = append(currentPeriod, bucket)
+
+			// Track previous bucket for consecutive check
+			previousBucket = bucket
+			previousCount = count
+
+			// Move to next bucket (with wraparound)
+			bucket += 0.5
+			if bucket >= 24.0 {
+				bucket -= 24.0
+			}
+
+			// Stop if we've circled back to where we started
+			if bucket == startBucket {
+				break
+			}
+		}
+
+		// If we found a rest period of 4+ hours (8+ buckets), save it
+		if len(currentPeriod) >= 8 {
+			allPeriods = append(allPeriods, restPeriod{
+				buckets: currentPeriod,
+				start:   startBucket,
+				length:  len(currentPeriod),
+			})
+		}
 	}
 
-	// Second pass: find continuous periods, allowing bridging of small gaps
-	periods := findContinuousPeriodsWithBridging(quietBuckets, halfHourCounts)
+	// Find the longest non-overlapping periods
+	var finalBuckets []float64
+	usedBuckets := make(map[float64]bool)
 
-	// Third pass: adjust boundaries to avoid activity
-	adjustedPeriods := applyActivityBuffers(periods, halfHourCounts)
+	// Sort periods by length (longest first)
+	sort.Slice(allPeriods, func(i, j int) bool {
+		return allPeriods[i].length > allPeriods[j].length
+	})
 
-	return convertPeriodsToSleepBuckets(adjustedPeriods)
+	// Take the longest periods that don't overlap
+	for _, period := range allPeriods {
+		hasOverlap := false
+		for _, bucket := range period.buckets {
+			if usedBuckets[bucket] {
+				hasOverlap = true
+				break
+			}
+		}
+
+		if !hasOverlap {
+			for _, bucket := range period.buckets {
+				usedBuckets[bucket] = true
+				finalBuckets = append(finalBuckets, bucket)
+			}
+		}
+	}
+
+	// Sort the final buckets for consistent output
+	sort.Float64s(finalBuckets)
+	return finalBuckets
 }
 
 // findQuietBuckets identifies all 30-minute slots with minimal activity.
@@ -35,14 +117,108 @@ func findQuietBuckets(halfHourCounts map[float64]int) []float64 {
 	var quietBuckets []float64
 	for bucket := 0.0; bucket < 24.0; bucket += 0.5 {
 		count, exists := halfHourCounts[bucket]
-		// Include buckets with 0-1 events as "quiet"
-		// We'll handle minor blips (2 events) separately in period detection
-		if !exists || count <= 1 {
+		// Include buckets with 0-2 events as "quiet"
+		// 2 events in 30 minutes is still very minimal activity
+		// For late evening/early morning (22:00-02:00 UTC), be even more lenient
+		threshold := 2
+		if bucket >= 22.0 || bucket <= 2.0 {
+			threshold = 3 // Allow up to 3 events in potential sleep transition times
+		}
+		if !exists || count <= threshold {
 			quietBuckets = append(quietBuckets, bucket)
 		}
 	}
 	sort.Float64s(quietBuckets)
-	return quietBuckets
+
+	// Filter out isolated quiet buckets that are likely light activity rather than sleep
+	// This helps avoid including evening/morning activity buckets that just happen to be quiet
+	filteredBuckets := filterIsolatedQuietBuckets(quietBuckets, halfHourCounts)
+
+	return filteredBuckets
+}
+
+// filterIsolatedQuietBuckets removes isolated quiet buckets that are likely light activity rather than sleep.
+func filterIsolatedQuietBuckets(quietBuckets []float64, halfHourCounts map[float64]int) []float64 {
+	if len(quietBuckets) == 0 {
+		return quietBuckets
+	}
+
+	var filtered []float64
+
+	for i, bucket := range quietBuckets {
+		count := halfHourCounts[bucket]
+
+		// Always include buckets with 0 events - they're truly quiet
+		if count == 0 {
+			filtered = append(filtered, bucket)
+			continue
+		}
+
+		// For buckets with 1-2 events, only include if part of a longer quiet period
+		// This filters out isolated light activity while keeping sustained quiet periods
+		consecutiveQuietCount := countConsecutiveQuietBuckets(bucket, i, quietBuckets)
+
+		// Include if part of a group of 3+ consecutive quiet buckets (1.5+ hours)
+		if consecutiveQuietCount >= 3 {
+			filtered = append(filtered, bucket)
+		}
+	}
+
+	return filtered
+}
+
+// countConsecutiveQuietBuckets counts how many consecutive quiet buckets surround the given bucket.
+func countConsecutiveQuietBuckets(bucket float64, index int, quietBuckets []float64) int {
+	count := 1
+
+	// Count consecutive quiet buckets before this one
+	for j := index - 1; j >= 0; j-- {
+		if quietBuckets[j] == bucket-float64(index-j)*0.5 {
+			count++
+		} else {
+			break
+		}
+	}
+
+	// Count consecutive quiet buckets after this one
+	for j := index + 1; j < len(quietBuckets); j++ {
+		if quietBuckets[j] == bucket+float64(j-index)*0.5 {
+			count++
+		} else {
+			break
+		}
+	}
+
+	return count
+}
+
+// isPartOfLongQuietPeriod checks if a bucket is part of an extended quiet period with mostly 0-event buckets.
+func isPartOfLongQuietPeriod(bucket float64, index int, quietBuckets []float64, halfHourCounts map[float64]int, minLength int) bool {
+	consecutiveCount := countConsecutiveQuietBuckets(bucket, index, quietBuckets)
+
+	if consecutiveCount < minLength {
+		return false
+	}
+
+	// Check that most of the surrounding quiet buckets have 0 events (true quiet)
+	zeroEventCount := 0
+	start := index - (consecutiveCount-1)/2
+	if start < 0 {
+		start = 0
+	}
+	end := start + consecutiveCount
+	if end > len(quietBuckets) {
+		end = len(quietBuckets)
+	}
+
+	for i := start; i < end; i++ {
+		if halfHourCounts[quietBuckets[i]] == 0 {
+			zeroEventCount++
+		}
+	}
+
+	// At least 70% of the period should have 0 events for it to be considered true sleep
+	return float64(zeroEventCount)/float64(consecutiveCount) >= 0.7
 }
 
 // findContinuousPeriodsWithBridging groups quiet buckets into periods, bridging minor gaps.
@@ -113,27 +289,32 @@ func tryBridgeGap(currentPeriod quietPeriod, bucket float64, halfHourCounts map[
 		actualGap = (24.0 - currentPeriod.end) + bucket - 0.5
 	}
 
-	// Only try to bridge if gap is reasonable (up to 1 hour = 2 buckets)
-	if actualGap <= 0 || actualGap > 1.0 {
+	// Allow bridging gaps up to 2 hours (4 buckets) if activity is minimal
+	if actualGap <= 0 || actualGap > 2.0 {
 		return bridgeResult{shouldBridge: false}
 	}
 
 	// Check all buckets in the gap
 	gapSize := 0
+	totalGapActivity := 0
 	for gb := gapStart; float64(gapSize)*0.5 < actualGap; gb += 0.5 {
 		if gb >= 24.0 {
 			gb -= 24.0
 		}
 		count := halfHourCounts[gb]
-		// Allow bridging if gap has ≤2 events per bucket
-		if count > 2 {
+		totalGapActivity += count
+		// Don't bridge if any single bucket has heavy activity (>5 events)
+		if count > 5 {
 			return bridgeResult{shouldBridge: false}
 		}
 		gapSize++
 	}
 
-	// Bridge if conditions are met and we have substantial sleep already
-	shouldBridge := currentPeriod.length >= 4
+	// Bridge if:
+	// 1. We have at least 2 hours of quiet already (currentPeriod.length >= 4)
+	// 2. The gap has minimal total activity (avg < 3 events per bucket)
+	avgActivityPerBucket := float64(totalGapActivity) / float64(gapSize)
+	shouldBridge := currentPeriod.length >= 4 && avgActivityPerBucket < 3.0
 	return bridgeResult{shouldBridge: shouldBridge, gapSize: gapSize}
 }
 
@@ -182,74 +363,6 @@ func mergeWraparoundPeriods(periods []quietPeriod) []quietPeriod {
 	}
 
 	return periods
-}
-
-// applyActivityBuffers adjusts period boundaries to avoid nearby activity.
-func applyActivityBuffers(periods []quietPeriod, halfHourCounts map[float64]int) []quietPeriod {
-	var adjustedPeriods []quietPeriod
-	for _, period := range periods {
-		adjusted := adjustPeriodStart(period, halfHourCounts)
-		adjusted = adjustPeriodEnd(adjusted, halfHourCounts)
-
-		// Only keep periods that are still at least 2 hours after buffer adjustment
-		if adjusted.length >= 4 {
-			adjustedPeriods = append(adjustedPeriods, adjusted)
-		}
-	}
-	return adjustedPeriods
-}
-
-// adjustPeriodStart moves start forward if there's activity in preceding buckets.
-func adjustPeriodStart(period quietPeriod, halfHourCounts map[float64]int) quietPeriod {
-	for period.length >= 4 {
-		bufferStart := period.start - 0.5
-		if bufferStart < 0 {
-			bufferStart += 24
-		}
-
-		count, exists := halfHourCounts[bufferStart]
-		// Increased threshold from 1 to 2 to tolerate minor blips
-		if !exists || count <= 2 {
-			break
-		}
-
-		period.start += 0.5
-		if period.start >= 24 {
-			period.start -= 24
-		}
-		period.length--
-	}
-	return period
-}
-
-// adjustPeriodEnd moves end backward if there's activity in following buckets.
-func adjustPeriodEnd(period quietPeriod, halfHourCounts map[float64]int) quietPeriod {
-	// Trim back if we're approaching sustained activity
-	// Look for the start of the "wake up" period where activity doesn't drop back to 0
-
-	for period.length >= 4 {
-		nextBucket := period.end + 0.5
-		if nextBucket >= 24 {
-			nextBucket -= 24
-		}
-
-		nextCount := halfHourCounts[nextBucket]
-
-		// Only trim back if we see significant sustained activity (2+ events in next bucket)
-		// A single event might just be a bathroom break or late-night check
-		// We want to catch real wake-up patterns like 7+ events at 6:30am
-		if nextCount < 2 {
-			// Next bucket has 0-1 events, don't trim
-			break
-		}
-		period.end -= 0.5
-		if period.end < 0 {
-			period.end += 24
-		}
-		period.length--
-	}
-
-	return period
 }
 
 // convertPeriodsToSleepBuckets converts quiet periods to a list of sleep buckets.

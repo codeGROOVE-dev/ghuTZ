@@ -456,6 +456,14 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 			Count: result.PeakProductivityUTC.Count,
 		}
 	}
+
+	// Recalculate SleepRangesLocal with correct timezone
+	if len(result.SleepBucketsUTC) > 0 {
+		d.logger.Debug("recalculating SleepRangesLocal with correct timezone",
+			"timezone", result.Timezone,
+			"sleepBucketsUTC", result.SleepBucketsUTC)
+		result.SleepRangesLocal = CalculateSleepRangesFromBuckets(result.SleepBucketsUTC, result.Timezone)
+	}
 }
 
 // fetchAllUserData fetches all data for a user at once to avoid redundant API calls.

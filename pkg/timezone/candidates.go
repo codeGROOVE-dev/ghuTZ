@@ -500,59 +500,48 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 
 		// PENALTY for unreasonable overnight vs afternoon productivity (1:00-2:30am vs 2:00-3:30pm local)
 		// This is a strong signal that the timezone is wrong - very few people are more productive at 1-2:30am than 2-3:30pm
-		overnightActivity := 0
-		afternoonActivity := 0
-		
-		// Count overnight activity (1:00-2:30am local)
-		for localHour := 1; localHour <= 2; localHour++ {
-			utcHour := (localHour - testOffset + 24) % 24
-			overnightActivity += hourCounts[utcHour]
-			// Also check 2:30 (2.5 hour)
-			if localHour == 2 {
-				utcHalfHour := (1.5 - float64(testOffset) + 24)
-				for utcHalfHour >= 24 {
-					utcHalfHour -= 24
+
+		// Helper function to get activity count for a local time range
+		getActivityInRange := func(startLocalHour, endLocalHour int, includeHalfHour bool) int {
+			activity := 0
+			for localHour := startLocalHour; localHour <= endLocalHour; localHour++ {
+				utcHour := (localHour - testOffset + 24) % 24
+				activity += hourCounts[utcHour]
+
+				// Include half-hour bucket if requested and this is the end hour
+				if includeHalfHour && localHour == endLocalHour {
+					utcHalfHour := float64(localHour-1) + 0.5 - float64(testOffset)
+					for utcHalfHour >= 24 {
+						utcHalfHour -= 24
+					}
+					for utcHalfHour < 0 {
+						utcHalfHour += 24
+					}
+					activity += halfHourCounts[utcHalfHour]
 				}
-				for utcHalfHour < 0 {
-					utcHalfHour += 24
-				}
-				overnightActivity += halfHourCounts[utcHalfHour]
 			}
+			return activity
 		}
-		
-		// Count afternoon activity (2:00-3:30pm local) 
-		for localHour := 14; localHour <= 15; localHour++ {
-			utcHour := (localHour - testOffset + 24) % 24
-			afternoonActivity += hourCounts[utcHour]
-			// Also check 3:30 (15.5 hour)
-			if localHour == 15 {
-				utcHalfHour := (14.5 - float64(testOffset) + 24)
-				for utcHalfHour >= 24 {
-					utcHalfHour -= 24
-				}
-				for utcHalfHour < 0 {
-					utcHalfHour += 24
-				}
-				afternoonActivity += halfHourCounts[utcHalfHour]
-			}
-		}
-		
+
+		overnightActivity := getActivityInRange(1, 2, true)   // 1:00-2:30am local
+		afternoonActivity := getActivityInRange(14, 15, true) // 2:00-3:30pm local
+
 		// Only penalize if overnight productivity exceeds afternoon productivity AND there's significant overnight activity
 		if overnightActivity > 10 && overnightActivity > afternoonActivity {
-			productivity_ratio := float64(overnightActivity) / math.Max(float64(afternoonActivity), 1.0)
+			productivityRatio := float64(overnightActivity) / math.Max(float64(afternoonActivity), 1.0)
 			var penalty float64
-			if productivity_ratio > 2.0 {
+			if productivityRatio > 2.0 {
 				// Overnight is more than 2x afternoon productivity - very suspicious
 				penalty = -30.0
-				adjustments = append(adjustments, fmt.Sprintf("-30 (overnight %d >> afternoon %d events - %.1fx more productive)", overnightActivity, afternoonActivity, productivity_ratio))
-			} else if productivity_ratio > 1.5 {
+				adjustments = append(adjustments, fmt.Sprintf("-30 (overnight %d >> afternoon %d events - %.1fx more productive)", overnightActivity, afternoonActivity, productivityRatio))
+			} else if productivityRatio > 1.5 {
 				// Overnight is 1.5x+ afternoon productivity - suspicious
 				penalty = -15.0
-				adjustments = append(adjustments, fmt.Sprintf("-15 (overnight %d > afternoon %d events - %.1fx more productive)", overnightActivity, afternoonActivity, productivity_ratio))
+				adjustments = append(adjustments, fmt.Sprintf("-15 (overnight %d > afternoon %d events - %.1fx more productive)", overnightActivity, afternoonActivity, productivityRatio))
 			} else {
 				// Overnight is moderately higher than afternoon
 				penalty = -5.0
-				adjustments = append(adjustments, fmt.Sprintf("-5 (overnight %d > afternoon %d events - %.1fx more productive)", overnightActivity, afternoonActivity, productivity_ratio))
+				adjustments = append(adjustments, fmt.Sprintf("-5 (overnight %d > afternoon %d events - %.1fx more productive)", overnightActivity, afternoonActivity, productivityRatio))
 			}
 			testConfidence += penalty
 		}
