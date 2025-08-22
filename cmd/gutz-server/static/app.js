@@ -36,7 +36,10 @@ async function detectUser(username) {
     submitBtn.disabled = true;
     submitBtn.innerHTML = 'TRACKING...';
     const loadingEl = document.getElementById('loading');
-    if (loadingEl) loadingEl.classList.add('show');
+    if (loadingEl) {
+        loadingEl.classList.add('show');
+        startRotatingMessages(loadingEl);
+    }
     errorDiv.classList.remove('show');
     resultDiv.classList.remove('show');
 
@@ -68,7 +71,10 @@ async function detectUser(username) {
         submitBtn.disabled = false;
         submitBtn.innerHTML = 'TRACK DEVELOPER';
         const loadingEl = document.getElementById('loading');
-        if (loadingEl) loadingEl.classList.remove('show');
+        if (loadingEl) {
+            loadingEl.classList.remove('show');
+            stopRotatingMessages();
+        }
     }
 }
 
@@ -933,3 +939,78 @@ document.addEventListener('keydown', (e) => {
         document.getElementById('detectForm').dispatchEvent(new Event('submit'));
     }
 });
+
+// Rotating messages functionality
+let rotatingInterval = null;
+let messageIndex = 0;
+let startTime = 0;
+
+const funkyMessages = [
+    '🔍 Stalking GitHub profiles...',
+    '📊 Crunching commit timestamps...',
+    '🔑 Examining SSH keys...',
+    '📱 Cyberstalking social media...',
+    '🏢 Interrogating organizations...',
+    '⭐ Judging starred repos...',
+    '📝 Reading personal gists...',
+    '🔀 Analyzing pull request drama...',
+    '🐛 Questioning bug reports...',
+    '💬 Eavesdropping on comments...',
+    '🌐 Geocoding secret hideouts...',
+    '🤖 Bribing AI overlords...',
+    '📧 Deciphering email patterns...',
+    '🐦 Infiltrating Twitter/X...',
+    '🦋 Hunting BlueSky butterflies...',
+    '🐘 Interrogating Mastodon elephants...',
+    '📄 Ransacking GitHub Pages...',
+    '🎯 Building evidence dossiers...',
+    '🧪 Brewing timezone potions...',
+    '🌙 Tracking nocturnal coding...',
+    '☕ Detecting caffeine patterns...',
+    '🍕 Calculating lunch algorithms...',
+    '⏰ Violating space-time...',
+    '🔮 Consulting crystal balls...',
+    '🎪 Performing timezone acrobatics...',
+    '🚀 Launching spy satellites...',
+    '🔬 Examining commit DNA...',
+    '🏃 Chasing timestamp rabbits...',
+    '🎨 Painting developer portraits...',
+    '🎭 Decoding repo drama...',
+    '🎲 Rolling temporal dice...',
+    '🌊 Surfing data tsunamis...',
+    '🔥 Igniting analysis engines...',
+    '⚡ Electrifying neural networks...',
+    '🎵 Composing code symphonies...',
+    '🍯 Following honey trails...',
+    '🔍 Enhancing... ENHANCE MORE!...',
+    '🎪 Juggling timezone possibilities...',
+    '🏗️ Building conspiracy theories...',
+    '🧬 Sequencing temporal DNA...'
+];
+
+function startRotatingMessages(loadingEl) {
+    startTime = Date.now();
+    messageIndex = 0;
+    
+    // Show initial message
+    updateMessage(loadingEl);
+    
+    // Rotate every 250ms
+    rotatingInterval = setInterval(() => {
+        updateMessage(loadingEl);
+    }, 250);
+}
+
+function updateMessage(loadingEl) {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const currentMessage = funkyMessages[messageIndex % funkyMessages.length];
+    loadingEl.innerHTML = `${currentMessage} (${elapsed}s)`;
+    messageIndex++;
+}
+
+function stopRotatingMessages() {
+    if (rotatingInterval) {
+        clearInterval(rotatingInterval);
+        rotatingInterval = null;
+    }
+}

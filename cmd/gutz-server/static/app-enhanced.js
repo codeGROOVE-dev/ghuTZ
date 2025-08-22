@@ -14,6 +14,62 @@ class LoadingStateManager {
         ];
         this.startTime = null;
         this.progressInterval = null;
+        this.messageIndex = 0;
+        this.lastMessageTime = 0;
+        
+        // Irreverent and sassy messages (5 words max)
+        this.funkyMessages = [
+            '🔍 Stalking GitHub profiles...',
+            '📊 Crunching commit timestamps...',
+            '🔑 Examining SSH keys...',
+            '📱 Cyberstalking social media...',
+            '🏢 Interrogating organizations...',
+            '⭐ Judging starred repos...',
+            '📝 Reading personal gists...',
+            '🔀 Analyzing pull request drama...',
+            '🐛 Questioning bug reports...',
+            '💬 Eavesdropping on comments...',
+            '🌐 Geocoding secret hideouts...',
+            '🤖 Bribing AI overlords...',
+            '📧 Deciphering email patterns...',
+            '🐦 Infiltrating Twitter/X...',
+            '🦋 Hunting BlueSky butterflies...',
+            '🐘 Interrogating Mastodon elephants...',
+            '📄 Ransacking GitHub Pages...',
+            '🎯 Building evidence dossiers...',
+            '🧪 Brewing timezone potions...',
+            '🌙 Tracking nocturnal coding...',
+            '☕ Detecting caffeine patterns...',
+            '🍕 Calculating lunch algorithms...',
+            '⏰ Violating space-time...',
+            '🔮 Consulting crystal balls...',
+            '🎪 Performing timezone acrobatics...',
+            '🚀 Launching spy satellites...',
+            '🔬 Examining commit DNA...',
+            '🏃 Chasing timestamp rabbits...',
+            '🎨 Painting developer portraits...',
+            '🎭 Decoding repo drama...',
+            '🎲 Rolling temporal dice...',
+            '🌊 Surfing data tsunamis...',
+            '🔥 Igniting analysis engines...',
+            '⚡ Electrifying neural networks...',
+            '🎵 Composing code symphonies...',
+            '🍯 Following honey trails...',
+            '🔍 Enhancing... ENHANCE MORE!...',
+            '🎪 Juggling timezone possibilities...',
+            '🏗️ Building conspiracy theories...',
+            '🧬 Sequencing temporal DNA...'
+        ];
+    }
+
+    getRotatingMessage() {
+        const now = Date.now();
+        // Rotate every 250ms as requested
+        if (now - this.lastMessageTime >= 250) {
+            this.messageIndex = (this.messageIndex + 1) % this.funkyMessages.length;
+            this.lastMessageTime = now;
+        }
+        return this.funkyMessages[this.messageIndex];
     }
 
     start() {
@@ -35,13 +91,20 @@ class LoadingStateManager {
     startProgressAnimation() {
         let dots = 0;
         this.progressInterval = setInterval(() => {
+            // Update rotating message every 250ms and render
+            this.render();
+            
+            // Update dots animation
             const activeStage = this.stages.find(s => s.status === 'in-progress');
             if (activeStage) {
-                const dotsStr = '.'.repeat((dots % 3) + 1);
-                document.getElementById('loading-dots').textContent = dotsStr;
+                const dotsEl = document.getElementById('loading-dots');
+                if (dotsEl) {
+                    const dotsStr = '.'.repeat((dots % 3) + 1);
+                    dotsEl.textContent = dotsStr;
+                }
                 dots++;
             }
-        }, 500);
+        }, 250); // Changed from 500ms to 250ms to match message rotation
     }
 
     stop() {
@@ -55,10 +118,11 @@ class LoadingStateManager {
         if (!loadingEl) return;
 
         const elapsed = this.startTime ? Math.floor((Date.now() - this.startTime) / 1000) : 0;
+        const currentMessage = this.getRotatingMessage();
         
         let html = `
             <div class="loading-stages">
-                <div class="elapsed-time">Searching for ${elapsed}s<span id="loading-dots">...</span></div>
+                <div class="elapsed-time">${currentMessage} (${elapsed}s)<span id="loading-dots">...</span></div>
                 <div class="stages-list">
         `;
 
