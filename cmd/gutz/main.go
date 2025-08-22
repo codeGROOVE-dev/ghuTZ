@@ -15,6 +15,7 @@ import (
 
 	"github.com/codeGROOVE-dev/guTZ/pkg/gutz"
 	"github.com/codeGROOVE-dev/guTZ/pkg/timezone"
+	"github.com/codeGROOVE-dev/guTZ/pkg/tzconvert"
 )
 
 var (
@@ -164,14 +165,56 @@ func main() {
 			fmt.Printf("\n🔧 Using forced offset %s for visualization (analyzed candidate #%d)\n",
 				displayTimezone, rank)
 
-			// Create a modified result with the candidate's lunch data
+			// Create a modified result with the candidate's lunch and peak data
 			modifiedResult := *result
+
+			// Update lunch hours in both UTC and local time
 			modifiedResult.LunchHoursUTC = gutz.LunchBreak{
 				Start:      candidate.LunchStartUTC,
 				End:        candidate.LunchEndUTC,
 				Confidence: candidate.LunchConfidence,
 			}
-			// Keep existing peak and quiet markers as they're still valid
+
+			// Convert active hours from UTC to local time using forced offset
+			modifiedResult.ActiveHoursLocal = struct {
+				Start float64 `json:"start"`
+				End   float64 `json:"end"`
+			}{
+				Start: tzconvert.UTCToLocal(result.ActiveHoursUTC.Start, *forceOffset),
+				End:   tzconvert.UTCToLocal(result.ActiveHoursUTC.End, *forceOffset),
+			}
+
+			// Convert lunch to local time for histogram display
+			lunchLocalStart := tzconvert.UTCToLocal(candidate.LunchStartUTC, *forceOffset)
+			lunchLocalEnd := tzconvert.UTCToLocal(candidate.LunchEndUTC, *forceOffset)
+			modifiedResult.LunchHoursLocal = gutz.LunchBreak{
+				Start:      lunchLocalStart,
+				End:        lunchLocalEnd,
+				Confidence: candidate.LunchConfidence,
+			}
+
+			// Recalculate peak productivity for the forced timezone offset
+			// Use the original half-hourly activity data to find the peak in the correct timezone
+			if result.HalfHourlyActivityUTC != nil {
+				peakStartUTC, peakEndUTC, peakCount := timezone.DetectPeakProductivityWithHalfHours(result.HalfHourlyActivityUTC, *forceOffset)
+
+				// Update peak productivity in UTC
+				modifiedResult.PeakProductivityUTC = gutz.PeakTime{
+					Start: peakStartUTC,
+					End:   peakEndUTC,
+					Count: peakCount,
+				}
+
+				// Convert peak to local time for histogram display
+				peakLocalStart := tzconvert.UTCToLocal(peakStartUTC, *forceOffset)
+				peakLocalEnd := tzconvert.UTCToLocal(peakEndUTC, *forceOffset)
+				modifiedResult.PeakProductivityLocal = gutz.PeakTime{
+					Start: peakLocalStart,
+					End:   peakLocalEnd,
+					Count: peakCount,
+				}
+			}
+
 			displayResult = &modifiedResult
 			foundCandidate = true
 			break
@@ -197,8 +240,8 @@ func main() {
 	printResult(displayResult)
 
 	// Show histogram if activity data is available
-	if displayResult.HourlyActivityUTC != nil {
-		histogramOutput := gutz.GenerateHistogram(displayResult, displayResult.HourlyActivityUTC, displayTimezone)
+	if displayResult.HalfHourlyActivityUTC != nil {
+		histogramOutput := gutz.GenerateHistogram(displayResult, displayTimezone)
 		fmt.Print(histogramOutput)
 	}
 
@@ -218,7 +261,7 @@ func main() {
 			fmt.Printf("%d. %s (%.1f%% confidence)\n", i+1, offsetStr, candidate.Confidence)
 			fmt.Printf("   Evening activity: %d events\n", candidate.EveningActivity)
 			fmt.Printf("   Lunch: %s\n", formatCandidateLunch(candidate))
-			fmt.Printf("   Work start: %d:00\n", candidate.WorkStartLocal)
+			fmt.Printf("   Work start: %.1f:00\n", candidate.WorkStartLocal)
 			if len(candidate.ScoringDetails) > 0 {
 				fmt.Printf("   Scoring details:\n")
 				for _, detail := range candidate.ScoringDetails {
@@ -464,8 +507,8 @@ func printWorkSchedule(result *gutz.Result) {
 	}
 
 	fmt.Printf("🏃 Active Time:   %s → %s (%s)",
-		formatHour(convertUTCToLocal(result.ActiveHoursLocal.Start, result.Timezone)),
-		formatHour(convertUTCToLocal(result.ActiveHoursLocal.End, result.Timezone)),
+		formatHour(result.ActiveHoursLocal.Start),
+		formatHour(result.ActiveHoursLocal.End),
 		result.Timezone)
 
 	if result.LunchHoursUTC.Confidence > 0 {

@@ -299,28 +299,71 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	}
 
 	// Find the middle of sleep hours
-	// FindSleepHours returns a continuous window of hours, potentially wrapping around midnight
-	// e.g., [22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] for 13 hours starting at 22:00
+	// FindSleepHours returns hours that may wrap around midnight
+	// e.g., [13, 2, 3, 4, 5, 6, 7, 8, 9] means sleep from 2:00 to 9:00 with 13 as an outlier
 	var midQuiet float64
 
 	if len(quietHours) == 0 {
 		// No quiet hours found - shouldn't happen but handle gracefully
 		midQuiet = 2.5 // Default to 2:30 AM UTC
 	} else {
-		// The sleep hours form a continuous window, so the midpoint is simply
-		// the start hour plus half the window size
-		startHour := quietHours[0]
-		windowSize := len(quietHours)
-
-		// Calculate midpoint accounting for wrap-around
-		midQuiet = float64(startHour) + float64(windowSize)/2.0
+		// Find the actual continuous sleep window
+		// When wrapped, the hours won't be in order, so we need to find the actual range
+		minHour := 24
+		maxHour := -1
+		hasWrap := false
+		
+		// Check if we have a wraparound (e.g., hours like 22, 23, 0, 1, 2)
+		for i := 1; i < len(quietHours); i++ {
+			if quietHours[i] < quietHours[i-1] && quietHours[i-1] - quietHours[i] > 12 {
+				hasWrap = true
+				break
+			}
+		}
+		
+		if hasWrap {
+			// Handle wraparound case - find the continuous range
+			// Find the start of the sleep period (first hour after the gap)
+			startIdx := 0
+			for i := 1; i < len(quietHours); i++ {
+				if quietHours[i-1] > quietHours[i] && quietHours[i-1] - quietHours[i] > 12 {
+					startIdx = i
+					break
+				}
+			}
+			
+			// Reorder the array to be continuous
+			reordered := append(quietHours[startIdx:], quietHours[:startIdx]...)
+			startHour := reordered[0]
+			endHour := reordered[len(reordered)-1]
+			
+			// Calculate midpoint
+			if endHour < startHour {
+				// Still wrapped after reordering
+				totalHours := (24 - startHour) + endHour + 1
+				midQuiet = float64(startHour) + float64(totalHours)/2.0
+			} else {
+				midQuiet = float64(startHour) + float64(endHour - startHour)/2.0
+			}
+		} else {
+			// No wraparound - simple case
+			for _, h := range quietHours {
+				if h < minHour {
+					minHour = h
+				}
+				if h > maxHour {
+					maxHour = h
+				}
+			}
+			midQuiet = float64(minHour) + float64(maxHour - minHour)/2.0
+		}
+		
 		if midQuiet >= 24 {
 			midQuiet -= 24
 		}
 
 		d.logger.Debug("sleep midpoint calculation", "username", username,
-			"quiet_hours", quietHours, "start_hour", startHour,
-			"window_size", windowSize, "midQuiet", midQuiet)
+			"quiet_hours", quietHours, "hasWrap", hasWrap, "midQuiet", midQuiet)
 	}
 
 	// Analyze the activity pattern to determine likely region
@@ -526,9 +569,13 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			"offset_hours", offsetInt)
 	}
 
-	// Calculate typical active hours in local time (excluding outliers)
-	// We need to convert from UTC to local time
-	activeStart, activeEnd := calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
+	// Calculate typical active hours in UTC (excluding outliers)
+	// This function returns UTC hours, conversion to local happens later
+	activeStartUTC, activeEndUTC := calculateTypicalActiveHoursUTC(halfHourCounts, quietHours)
+
+	d.logger.Info("active hours calculated", "username", username,
+		"activeStartUTC", activeStartUTC, "activeEndUTC", activeEndUTC, "offsetInt", offsetInt,
+		"quietHours", quietHours)
 
 	// STEP 1: Find the best global lunch pattern in UTC (timezone-independent)
 	bestGlobalLunch := lunch.FindBestGlobalLunchPattern(halfHourCounts)
@@ -547,7 +594,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 
 	// Evaluate timezone candidates using the new timezone package
 	candidates = timezone.EvaluateCandidates(username, hourCounts, halfHourCounts,
-		totalActivity, quietHours, midQuiet, activeStart, timezone.GlobalLunchPattern{
+		totalActivity, quietHours, midQuiet, activeStartUTC, timezone.GlobalLunchPattern{
 			StartUTC:    bestGlobalLunch.StartUTC,
 			EndUTC:      bestGlobalLunch.EndUTC,
 			Confidence:  bestGlobalLunch.Confidence,
@@ -608,6 +655,11 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				"new_timezone", detectedTimezone,
 				"new_confidence", confidence,
 				"initial_offset", int(offsetFromUTC))
+
+			// Active hours in UTC don't change with timezone - they're based on the actual activity pattern
+			// We only need to convert them to local time differently
+			d.logger.Info("using winning candidate timezone", "username", username,
+				"activeStartUTC", activeStartUTC, "activeEndUTC", activeEndUTC, "new_offset", offsetInt)
 		} else {
 			d.logger.Info("keeping initial offset", "username", username,
 				"initial_offset", offsetInt,
@@ -705,8 +757,8 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// This often indicates we've detected the wrong timezone
 	suspiciousWorkHours := false
 	alternativeTimezone := ""
-	if activeStart < 6 {
-		// Work starting before 6am is very unusual
+	if activeStartUTC < 6.0 {
+		// Work starting before 6am UTC is very unusual
 		suspiciousWorkHours = true
 		confidence = 0.4 // Lower confidence
 
@@ -717,18 +769,18 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			// Most likely China if work starts very early in Europe
 			alternativeTimezone = "UTC+8"
 			d.logger.Info("suspicious work hours detected - suggesting Asia", "username", username,
-				"work_start", activeStart, "detected_tz", detectedTimezone, "alternative", alternativeTimezone,
+				"work_start_utc", activeStartUTC, "detected_tz", detectedTimezone, "alternative", alternativeTimezone,
 				"midQuiet", midQuiet)
 		}
 	} else {
 		// Check local work start time (convert from UTC to local)
-		localWorkStart := (activeStart + offsetInt + 24) % 24
+		localWorkStart := int(activeStartUTC + float64(offsetInt) + 24) % 24
 		if localWorkStart > 11 {
 			// Work starting after 11am local time is unusual (unless part-time)
 			suspiciousWorkHours = true
 			confidence = 0.5
 			d.logger.Debug("late work start detected", "username", username,
-				"work_start_utc", activeStart, "work_start_local", localWorkStart, "detected_tz", detectedTimezone)
+				"work_start_utc", activeStartUTC, "work_start_local", localWorkStart, "detected_tz", detectedTimezone)
 		}
 	}
 
@@ -805,8 +857,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				offsetInt = potentialOffset
 				detectedTimezone = timezoneFromOffset(offsetInt)
 
-				// Recalculate work hours with corrected offset
-				activeStart, activeEnd = calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
+				// Active hours in UTC don't change - no need to recalculate
 
 				// Recalculate lunch with corrected offset
 				newLunchStart, newLunchEnd, newLunchConfidence := lunch.DetectLunchBreakNoonCentered(halfHourCounts, offsetInt)
@@ -825,7 +876,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 					// Revert if it didn't help
 					offsetInt -= suggestedOffsetCorrection
 					detectedTimezone = timezoneFromOffset(offsetInt)
-					activeStart, activeEnd = calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
+					// Active hours in UTC don't change - no need to recalculate
 					d.logger.Debug("lunch-based correction didn't improve, reverting", "username", username)
 				}
 
@@ -876,12 +927,11 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		if !isLikelyEuropean {
 			d.logger.Info("adjusting timezone from Europe to Asia due to unreasonable work hours",
 				"username", username, "original", detectedTimezone, "adjusted", alternativeTimezone,
-				"work_start", activeStart)
+				"work_start_utc", activeStartUTC)
 			detectedTimezone = alternativeTimezone
 			offsetInt = 8
 
-			// Recalculate work hours with new offset
-			activeStart, activeEnd = calculateTypicalActiveHours(hourCounts, quietHours, offsetInt)
+			// Active hours in UTC don't change - no need to recalculate
 
 			// Recalculate lunch with new offset
 			lunchStart, lunchEnd, lunchConfidence = lunch.DetectLunchBreakNoonCentered(halfHourCounts, offsetInt)
@@ -893,7 +943,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		confidence = 0.7 // Moderate confidence after adjustment
 
 		d.logger.Info("recalculated work hours after timezone adjustment", "username", username,
-			"new_work_start", activeStart, "new_work_end", activeEnd, "new_offset", offsetInt)
+			"new_work_start_utc", activeStartUTC, "new_work_end_utc", activeEndUTC, "new_offset", offsetInt)
 	}
 
 	// Active hours are already in UTC from calculateTypicalActiveHours
@@ -901,13 +951,17 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 
 	// Detect sleep periods using 30-minute resolution with buffer
 	sleepBuckets := sleep.DetectSleepPeriodsWithHalfHours(halfHourCounts)
+	d.logger.Debug("detected sleep buckets", 
+		"username", username,
+		"sleepBuckets", sleepBuckets,
+		"numBuckets", len(sleepBuckets))
 
 	// Refine sleep hours using the more precise half-hour data
 	// If we have half-hour sleep data, use it to create more accurate hourly sleep hours
 	refinedSleepHours := refineHourlySleepFromBuckets(quietHours, sleepBuckets, halfHourCounts)
 
-	// Calculate sleep ranges using the same logic as CLI
-	sleepRanges := CalculateSleepRanges(refinedSleepHours, detectedTimezone)
+	// Calculate sleep ranges from buckets for 30-minute granularity
+	sleepRanges := CalculateSleepRangesFromBuckets(sleepBuckets, detectedTimezone)
 
 	result := &Result{
 		Username:         username,
@@ -920,8 +974,15 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			Start float64 `json:"start"`
 			End   float64 `json:"end"`
 		}{
-			Start: tzconvert.UTCToLocal(float64(activeStart), offsetInt),
-			End:   tzconvert.UTCToLocal(float64(activeEnd), offsetInt),
+			Start: tzconvert.UTCToLocal(activeStartUTC, offsetInt),
+			End:   tzconvert.UTCToLocal(activeEndUTC, offsetInt),
+		},
+		ActiveHoursUTC: struct {
+			Start float64 `json:"start"`
+			End   float64 `json:"end"`
+		}{
+			Start: activeStartUTC,
+			End:   activeEndUTC,
 		},
 		TopOrganizations:           topOrgs,
 		Confidence:                 confidence,

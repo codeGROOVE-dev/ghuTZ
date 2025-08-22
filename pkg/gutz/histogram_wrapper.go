@@ -5,7 +5,7 @@ import (
 )
 
 // GenerateHistogram creates a visual representation of user activity.
-func GenerateHistogram(result *Result, hourCounts map[int]int, timezone string) string {
+func GenerateHistogram(result *Result, timezone string) string {
 	// Convert gutz.Result to histogram.Result
 	histResult := &histogram.Result{
 		HalfHourlyActivityUTC:      result.HalfHourlyActivityUTC,
@@ -19,7 +19,7 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, timezone string) 
 		LunchHoursLocal:            convertLunchBreak(result.LunchHoursLocal),
 	}
 
-	return histogram.GenerateHistogram(histResult, hourCounts, timezone)
+	return histogram.GenerateHistogram(histResult, timezone)
 }
 
 func convertOrgActivities(orgs []OrgActivity) []histogram.OrgActivity {

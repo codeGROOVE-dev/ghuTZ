@@ -36,7 +36,7 @@ func calculateEasternLunchBonus(dropRatio, lunchLocalStart float64) (bonus float
 // EvaluateCandidates evaluates multiple timezone offsets to find the best candidates.
 //
 //nolint:gocognit,nestif,revive,maintidx // Timezone evaluation requires comprehensive multi-factor analysis
-func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts map[float64]int, totalActivity int, quietHours []int, midQuiet float64, activeStart int, bestGlobalLunch GlobalLunchPattern, profileTimezone string, newestActivity time.Time) []Candidate {
+func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts map[float64]int, totalActivity int, quietHours []int, midQuiet float64, activeStart float64, bestGlobalLunch GlobalLunchPattern, profileTimezone string, newestActivity time.Time) []Candidate {
 	var candidates []Candidate // Store timezone candidates for Gemini
 
 	// Evaluate multiple timezone offsets to find the best candidates
@@ -55,8 +55,8 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 
 		// Work start time - use the activeStart which is calculated based on sustained activity
 		// activeStart is in UTC, convert to local time for this offset
-		testWorkStart := (activeStart + testOffset + 24) % 24
-		firstActivityLocal := float64(testWorkStart)
+		testWorkStart := math.Mod(activeStart + float64(testOffset) + 24, 24)
+		firstActivityLocal := testWorkStart
 
 		// Lunch is only reasonable if:
 		// 1. Detected in the 10am-2:30pm window
@@ -388,10 +388,14 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 				// 7-9pm peak is common for OSS hobbyists working from home
 				peakBonus = 2.0
 				adjustments = append(adjustments, fmt.Sprintf("+2 (evening OSS peak at %dpm)", peakLocalHour-12))
-			case peakLocalHour >= 22:
-				// After 10pm peak is very unusual
-				peakBonus = -15.0 // Increased from -10 to -15
-				adjustments = append(adjustments, fmt.Sprintf("-15 (very late peak at %dpm)", peakLocalHour-12))
+			case peakLocalHour >= 22 || peakLocalHour <= 6:
+				// After 10pm or before 7am peak is very unusual - likely wrong timezone
+				peakBonus = -20.0
+				if peakLocalHour <= 6 {
+					adjustments = append(adjustments, fmt.Sprintf("-20 (peak at %dam - night owl unlikely)", peakLocalHour))
+				} else {
+					adjustments = append(adjustments, fmt.Sprintf("-20 (very late peak at %dpm)", peakLocalHour-12))
+				}
 			case peakLocalHour >= 13 && peakLocalHour <= 15:
 				// 1-3pm is ideal afternoon work time
 				peakBonus = 5.0
@@ -420,6 +424,45 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		} else if firstActivityLocal >= 12 {
 			testConfidence -= 10 // Moderate penalty for starting after noon
 			adjustments = append(adjustments, fmt.Sprintf("-10 (work starts after noon at %.1f)", firstActivityLocal))
+		}
+
+		// PENALTY for midnight-8am having higher average activity than rest of day
+		// This is a strong indicator of wrong timezone
+		nightActivity := 0 // midnight to 8am local
+		nightHours := 0
+		dayActivity := 0 // 8am to midnight local
+		dayHours := 0
+
+		for hour, count := range hourCounts {
+			localHour := (hour + testOffset + 24) % 24
+			if localHour >= 0 && localHour < 8 {
+				nightActivity += count
+				if count > 0 {
+					nightHours++
+				}
+			} else {
+				dayActivity += count
+				if count > 0 {
+					dayHours++
+				}
+			}
+		}
+
+		// Calculate averages (avoid division by zero)
+		nightAvg := 0.0
+		if nightHours > 0 {
+			nightAvg = float64(nightActivity) / 8.0 // Average per hour for night period
+		}
+		dayAvg := 0.0
+		if dayHours > 0 {
+			dayAvg = float64(dayActivity) / 16.0 // Average per hour for day period
+		}
+
+		// Strong penalty if night activity exceeds day activity
+		if nightAvg > dayAvg && nightActivity > 10 { // Only apply if there's meaningful activity
+			penalty := -25.0
+			testConfidence += penalty
+			adjustments = append(adjustments, fmt.Sprintf("-25 (night activity %.1f > day %.1f avg/hr)", nightAvg, dayAvg))
 		}
 
 		// Pacific timezone pattern recognition - 25 points max (increased)

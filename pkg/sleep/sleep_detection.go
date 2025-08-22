@@ -232,18 +232,14 @@ func adjustPeriodEnd(period quietPeriod, halfHourCounts map[float64]int) quietPe
 		if nextBucket >= 24 {
 			nextBucket -= 24
 		}
-		nextNextBucket := nextBucket + 0.5
-		if nextNextBucket >= 24 {
-			nextNextBucket -= 24
-		}
 
 		nextCount := halfHourCounts[nextBucket]
-		nextNextCount := halfHourCounts[nextNextBucket]
-
-		// If we see sustained activity (both buckets have events), trim back
-		// This catches the pattern at 7:00 (2 events) followed by 7:30 (1 event)
-		// which leads into the day's activity
-		if nextCount <= 0 || nextNextCount <= 0 {
+		
+		// Only trim back if we see significant sustained activity (2+ events in next bucket)
+		// A single event might just be a bathroom break or late-night check
+		// We want to catch real wake-up patterns like 7+ events at 6:30am
+		if nextCount < 2 {
+			// Next bucket has 0-1 events, don't trim
 			break
 		}
 		period.end -= 0.5
@@ -347,9 +343,10 @@ func FindSleepHours(hourCounts map[int]int) []int {
 		}
 
 		if hasWrapAround && wrapPoint > 0 {
-			// Reorder to maintain wrap-around: move the end hours to the beginning
-			// e.g., [2,3,4,5,6,7,8,9,10,22] -> [22,2,3,4,5,6,7,8,9,10]
-			quietHours = append(quietHours[wrapPoint:], quietHours[:wrapPoint]...)
+			// Return hours in their natural order, not wrapped
+			// The wrap-around hours (e.g., 22,23) should stay at the end
+			// e.g., [2,3,4,5,6,7,8,9,22,23] stays as is
+			// The caller should handle the wraparound properly
 			return quietHours
 		}
 

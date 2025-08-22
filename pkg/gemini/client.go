@@ -245,8 +245,8 @@ func (c *Client) makeAPICallWithRetry(ctx context.Context, client *genai.Client,
 		}
 
 		delay := baseDelay * time.Duration(1<<uint(attempt))
-		jitterBig, err := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(jitter)))
-		if err != nil {
+		jitterBig, randErr := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(jitter)))
+		if randErr != nil {
 			jitterBig = big.NewInt(0) // Fall back to no jitter on error
 		}
 		jitterDelay := time.Duration(jitterBig.Int64())

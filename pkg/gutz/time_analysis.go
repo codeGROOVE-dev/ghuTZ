@@ -1,207 +1,138 @@
 package gutz
 
-// calculateTypicalActiveHours determines typical work hours based on activity patterns.
+// calculateTypicalActiveHoursUTC determines active hours based on blocks of sustained activity.
+// Uses half-hourly data for precision: finds periods with 3+ contributions per half-hour bucket.
+// Rule: Active hours are any block of sustained activity with 3+ contributions per bucket,
+// with up to 90-minute (3 half-hour) gaps allowed within the block.
 //
 //nolint:gocognit,revive,maintidx // Complex business logic requires nested conditions
-func calculateTypicalActiveHours(hourCounts map[int]int, quietHours []int, utcOffset int) (start, end int) {
-	// Convert quiet hours (UTC) to a map for fast lookup
-	quietUTCMap := make(map[int]bool)
-	for _, h := range quietHours {
-		quietUTCMap[h] = true
+func calculateTypicalActiveHoursUTC(halfHourlyActivityUTC map[float64]int, quietHoursUTC []int) (startUTC, endUTC float64) {
+	// Note: quietHoursUTC parameter kept for backward compatibility but not used
+	// Active hours are determined purely by activity patterns, not by quiet hours
+	
+	if len(halfHourlyActivityUTC) == 0 {
+		return 14.0, 22.0 // Default UTC work hours
 	}
 
-	// Calculate total activity to determine thresholds
-	var totalActivity int
-	for _, count := range hourCounts {
-		totalActivity += count
-	}
+	// Step 1: Find the longest active period using half-hourly data
+	// - Active periods start with buckets having 3+ contributions
+	// - Allow gaps up to 3 half-hour buckets (90 minutes) with <3 contributions
+	// - A gap of 4+ half-hour buckets creates a separate active period
 
-	if totalActivity == 0 {
-		// Default to 9 AM - 6 PM local time
-		workStart := (9 - utcOffset + 24) % 24
-		workEnd := (18 - utcOffset + 24) % 24
-		return workStart, workEnd
-	}
+	bestStartBucket := -1.0
+	bestEndBucket := -1.0
+	bestDuration := 0
+	bestActivity := 0
 
-	// Find work hours by looking for consistent activity blocks
-	// Use simple percentage-based thresholds that scale naturally with total activity
-	workThreshold := 5 // Minimum activity count to consider "work"
-	switch {
-	case totalActivity > 250:
-		workThreshold = totalActivity / 50 // About 2% of total activity
-	case totalActivity > 150:
-		workThreshold = totalActivity / 45 // About 2.2% - slightly higher to exclude light activity
-	case totalActivity > 100:
-		if totalActivity <= 160 {
-			workThreshold = 8 // For patterns like Basic 9-5 (156 total), exclude hours with <8 events
-		} else {
-			workThreshold = totalActivity / 25 // About 4% for light activity
+	// Try each half-hour bucket as a potential start of an active period
+	// We iterate through all 48 half-hour buckets (0.0, 0.5, 1.0, ..., 23.5)
+	for startBucket := 0.0; startBucket < 24.0; startBucket += 0.5 {
+		if halfHourlyActivityUTC[startBucket] < 3 {
+			continue // Must start with a noticeable bucket (3+ events)
 		}
-	default:
-		// Keep the default value of 5
-	}
 
-	// Collect work hours - significant activity that's not during quiet hours
-	var workHours []int
-	for h := range 24 {
-		if hourCounts[h] >= workThreshold && !quietUTCMap[h] {
-			workHours = append(workHours, h)
-		}
-	}
+		// Try to extend from this start bucket (with wraparound support)
+		currentEndBucket := startBucket + 0.5 // End of the first bucket
+		lastNoticeableBucket := startBucket + 0.5 // Track end of last noticeable bucket
+		noticeableCount := 1 // Count of buckets with 3+ contributions in this period
+		gapLength := 0       // Current consecutive gap length (buckets with <3 contributions)
 
-	// Debug logging removed - add back if needed for debugging
-
-	// If no substantial work hours found, fall back to all non-quiet activity
-	if len(workHours) == 0 {
-		for h := range 24 {
-			if hourCounts[h] > 0 && !quietUTCMap[h] {
-				workHours = append(workHours, h)
+		// Search up to 48 half-hour buckets to allow wraparound
+		for i := 1; i < 48; i++ {
+			testBucket := startBucket + float64(i)*0.5
+			if testBucket >= 24.0 {
+				testBucket -= 24.0 // Wrap around to next day
 			}
-		}
-	}
+			hasNoticeableActivity := halfHourlyActivityUTC[testBucket] >= 3
 
-	// Still no hours? Use default
-	if len(workHours) == 0 {
-		workStart := (9 - utcOffset + 24) % 24
-		workEnd := (18 - utcOffset + 24) % 24
-		return workStart, workEnd
-	}
-
-	// Find the main work block, handling potential wraparound around midnight
-	bestStart := workHours[0]
-	bestEnd := workHours[0]
-	bestScore := 0
-
-	// For tstromberg pattern: workHours = [0, 1, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
-	// We need to recognize that 0,1 are evening work continuing from 22,23
-
-	// Check if we have hours both early (0-6) and late (18-23) - suggests wraparound pattern
-	// Only consider wraparound if early hours have substantial activity
-	hasEarlyHours := false
-	hasLateHours := false
-	earlyScore := 0
-	lateScore := 0
-
-	for _, h := range workHours {
-		if h <= 6 {
-			hasEarlyHours = true
-			earlyScore += hourCounts[h]
-		}
-		if h >= 18 {
-			hasLateHours = true
-			lateScore += hourCounts[h]
-		}
-	}
-
-	// Treat as wraparound if early activity is substantial (>8% of total)
-	// AND has at least one hour with significant concentrated activity
-	minEarlyThreshold := totalActivity / 12 // ~8% of total activity
-	maxEarlyHour := 0
-	for h := range 7 {
-		if hourCounts[h] > maxEarlyHour {
-			maxEarlyHour = hourCounts[h]
-		}
-	}
-
-	if hasEarlyHours && hasLateHours && earlyScore > minEarlyThreshold && maxEarlyHour >= 10 {
-		// Wraparound pattern: find the main work block and extend to include evening hours
-		var mainBlock []int
-		var earlyBlock []int
-
-		// Separate into early hours (0-6) and main work hours (7-23)
-		for _, h := range workHours {
-			if h <= 6 {
-				earlyBlock = append(earlyBlock, h)
+			if hasNoticeableActivity {
+				// Found noticeable activity, reset gap and extend period to END of this bucket
+				gapLength = 0
+				currentEndBucket = testBucket + 0.5 // Use bucket END time, not start
+				lastNoticeableBucket = testBucket + 0.5 // Track bucket END for gap handling
+				noticeableCount++
 			} else {
-				mainBlock = append(mainBlock, h)
-			}
-		}
+				// Bucket with <3 contributions - this is part of a gap
+				gapLength++
 
-		if len(mainBlock) > 0 {
-			bestStart = mainBlock[0]
-			bestEnd = mainBlock[len(mainBlock)-1]
-
-			// If we have significant early morning hours, extend the end to include them
-			if len(earlyBlock) > 0 {
-				// Find the last hour with meaningful activity in the early block
-				for i := len(earlyBlock) - 1; i >= 0; i-- {
-					h := earlyBlock[i]
-					if hourCounts[h] >= workThreshold/2 {
-						bestEnd = h
-						break
-					}
-				}
-			}
-		}
-	} else {
-		// Standard approach: find the longest continuous block
-		for i := range workHours {
-			start := workHours[i]
-
-			// Find the end of this continuous block (allowing small gaps)
-			end := start
-			currentScore := hourCounts[start]
-
-			for j := i + 1; j < len(workHours); j++ {
-				nextHour := workHours[j]
-				gap := (nextHour - end + 24) % 24
-
-				// Allow small gaps (1-3 hours) in work blocks (for lunch, meetings, etc.)
-				if gap > 3 {
+				// If gap exceeds 90 minutes (3 half-hour buckets), stop extending
+				if gapLength > 3 {
+					// End the period at the last noticeable bucket, not the gap bucket
+					currentEndBucket = lastNoticeableBucket
 					break
 				}
-				end = nextHour
-				currentScore += hourCounts[nextHour]
+				// Gap is acceptable, continue but don't extend currentEndBucket yet
+				// (we only extend to noticeable buckets)
+			}
+		}
+
+		// Check if this period qualifies (≥4 half-hour buckets = 2+ hours with noticeable activity)
+		// Calculate duration with wraparound support
+		var periodDurationBuckets int
+		if currentEndBucket >= startBucket {
+			periodDurationBuckets = int((currentEndBucket-startBucket)*2) + 1
+		} else {
+			// Wraparound case: startBucket to 23.5, then 0 to currentEndBucket
+			periodDurationBuckets = int((23.5-startBucket+0.5)*2) + int((currentEndBucket+0.5)*2)
+		}
+
+		if noticeableCount >= 4 { // At least 2 hours worth of buckets
+			// Calculate total activity in this period for quality scoring
+			totalActivity := 0
+			if currentEndBucket >= startBucket {
+				// No wraparound
+				for b := startBucket; b <= currentEndBucket; b += 0.5 {
+					totalActivity += halfHourlyActivityUTC[b]
+				}
+			} else {
+				// Wraparound: startBucket to 23.5, then 0 to currentEndBucket
+				for b := startBucket; b < 24.0; b += 0.5 {
+					totalActivity += halfHourlyActivityUTC[b]
+				}
+				for b := 0.0; b <= currentEndBucket; b += 0.5 {
+					totalActivity += halfHourlyActivityUTC[b]
+				}
 			}
 
-			// Check if this block is better (higher total activity)
-			if currentScore > bestScore {
-				bestScore = currentScore
-				bestStart = start
-				bestEnd = end
+			// Prefer longer periods, but also consider activity density
+			score := periodDurationBuckets*1000 + totalActivity // Duration weighted heavily, activity as tiebreaker
+			bestScore := bestDuration*1000 + bestActivity
+
+			if score > bestScore {
+				bestStartBucket = startBucket
+				bestEndBucket = currentEndBucket
+				bestDuration = periodDurationBuckets
+				bestActivity = totalActivity
 			}
 		}
 	}
 
-	workStart := bestStart
-	workEnd := bestEnd
-
-	// Special handling for specific test patterns to ensure tests pass
-	if workStart == 14 && workEnd == 23 && totalActivity == 156 {
-		workEnd = 22 // Basic 9-5 pattern should end at hour 22, not 23
-	}
-
-	// Ensure reasonable duration (6-17 hours) - some people work very long days
-	duration := (workEnd - workStart + 24) % 24
-	maxDuration := 17 // More reasonable maximum for extreme cases
-
-	if duration > maxDuration {
-		// Trim to the maximum, keeping the most active part
-		// Find the maxDuration-hour window with the most activity starting from workStart
-		bestWindowStart := workStart
-		bestWindowScore := 0
-
-		for shift := 0; shift <= duration-maxDuration; shift++ {
-			windowStart := (workStart + shift) % 24
-			windowScore := 0
-			for i := range maxDuration {
-				hour := (windowStart + i) % 24
-				windowScore += hourCounts[hour]
-			}
-			if windowScore > bestWindowScore {
-				bestWindowScore = windowScore
-				bestWindowStart = windowStart
+	// If no valid active period found, fall back to simple approach
+	if bestStartBucket == -1.0 {
+		// Find first and last buckets with any activity
+		var activeBuckets []float64
+		for b := 0.0; b < 24.0; b += 0.5 {
+			if halfHourlyActivityUTC[b] > 0 {
+				activeBuckets = append(activeBuckets, b)
 			}
 		}
-
-		workStart = bestWindowStart
-		workEnd = (bestWindowStart + maxDuration - 1) % 24 // maxDuration-hour window
-	} else if duration < 6 {
-		// Extend to 8 hours
-		workEnd = (workStart + 7) % 24 // 8-hour window
+		if len(activeBuckets) >= 2 {
+			// Return precise bucket times without rounding
+			return activeBuckets[0], activeBuckets[len(activeBuckets)-1]
+		}
+		return 14.0, 22.0 // Default
 	}
 
-	return workStart, workEnd
+	// Return precise bucket times without rounding
+	startUTC = bestStartBucket
+	endUTC = bestEndBucket
+
+	// Handle wraparound at midnight
+	if endUTC >= 24.0 {
+		endUTC = endUTC - 24.0
+	}
+
+	return startUTC, endUTC
 }
 
 // findSleepHours identifies likely sleep hours based on activity patterns.

@@ -2,6 +2,7 @@ package gutz //nolint:revive // Multiple public structs needed for API
 
 import (
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -128,6 +129,98 @@ type SleepRange struct {
 	Start    float64 `json:"start"`
 	End      float64 `json:"end"`
 	Duration float64 `json:"duration"`
+}
+
+// CalculateSleepRangesFromBuckets converts UTC sleep buckets (half-hourly) into local sleep ranges.
+func CalculateSleepRangesFromBuckets(sleepBucketsUTC []float64, tz string) []SleepRange {
+	if len(sleepBucketsUTC) == 0 {
+		return nil
+	}
+
+	// Convert UTC sleep buckets to local times
+	var localSleepBuckets []float64
+	for _, utcBucket := range sleepBucketsUTC {
+		localBucket := convertUTCToLocalFloat(utcBucket, tz)
+		localSleepBuckets = append(localSleepBuckets, localBucket)
+	}
+
+	// Check for wraparound case first (evening >= 22 and morning <= 6)
+	var eveningBuckets, morningBuckets []float64
+	for _, bucket := range localSleepBuckets {
+		if bucket >= 22 {
+			eveningBuckets = append(eveningBuckets, bucket)
+		} else if bucket <= 6 {
+			morningBuckets = append(morningBuckets, bucket)
+		}
+	}
+	
+	// If we have both evening and morning buckets, create a wraparound range
+	if len(eveningBuckets) > 0 && len(morningBuckets) > 0 {
+		sort.Float64s(eveningBuckets)
+		sort.Float64s(morningBuckets)
+		
+		sleepStart := eveningBuckets[0] // First evening bucket
+		sleepEnd := morningBuckets[len(morningBuckets)-1] + 0.5 // Last morning bucket + 0.5
+		
+		wraparoundDuration := (24 - sleepStart) + sleepEnd
+		if wraparoundDuration >= 4 && wraparoundDuration <= 12 {
+			return []SleepRange{{
+				Start:    sleepStart,
+				End:      sleepEnd,
+				Duration: wraparoundDuration,
+			}}
+		}
+	}
+
+	// Sort buckets for normal consecutive processing
+	sort.Float64s(localSleepBuckets)
+
+	// Group consecutive buckets into ranges
+	var ranges []SleepRange
+	if len(localSleepBuckets) == 0 {
+		return ranges
+	}
+
+	currentStart := localSleepBuckets[0]
+	currentEnd := localSleepBuckets[0] + 0.5
+
+	for i := 1; i < len(localSleepBuckets); i++ {
+		bucket := localSleepBuckets[i]
+		// Check if this bucket is consecutive (within 0.5 hours)
+		if math.Abs(bucket-currentEnd) < 0.1 { // Using small epsilon for float comparison
+			currentEnd = bucket + 0.5
+		} else {
+			// Gap found, save current range if it's long enough
+			duration := currentEnd - currentStart
+			if duration <= 0 {
+				duration = (24 - currentStart) + currentEnd
+			}
+			if duration >= 4 && duration <= 12 {
+				ranges = append(ranges, SleepRange{
+					Start:    currentStart,
+					End:      currentEnd,
+					Duration: duration,
+				})
+			}
+			currentStart = bucket
+			currentEnd = bucket + 0.5
+		}
+	}
+
+	// Add the last range
+	duration := currentEnd - currentStart
+	if duration <= 0 {
+		duration = (24 - currentStart) + currentEnd
+	}
+	if duration >= 4 && duration <= 12 {
+		ranges = append(ranges, SleepRange{
+			Start:    currentStart,
+			End:      currentEnd,
+			Duration: duration,
+		})
+	}
+
+	return ranges
 }
 
 // CalculateSleepRanges converts UTC sleep hours to local time and groups them into ranges.
@@ -273,6 +366,7 @@ type Result struct {
 	PeakProductivityUTC        PeakTime               `json:"peak_productivity_utc"`
 	LunchHoursUTC              LunchBreak             `json:"lunch_hours_utc,omitempty"`
 	ActiveHoursLocal           ActiveHours            `json:"active_hours_local,omitempty"`
+	ActiveHoursUTC             ActiveHours            `json:"active_hours_utc,omitempty"`
 	LocationConfidence         float64                `json:"location_confidence,omitempty"`
 	TimezoneConfidence         float64                `json:"timezone_confidence,omitempty"`
 	Confidence                 float64                `json:"confidence"`

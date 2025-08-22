@@ -288,6 +288,12 @@ func fetchWebsiteContent(ctx context.Context, websiteURL string, logger *slog.Lo
 		return ""
 	}
 
+	// Skip LinkedIn URLs entirely - they return HTTP 999 for bot protection
+	if strings.Contains(websiteURL, "linkedin.com") {
+		logger.Debug("skipping LinkedIn URL (requires authentication)", "url", websiteURL)
+		return ""
+	}
+
 	if !strings.HasPrefix(websiteURL, "http://") && !strings.HasPrefix(websiteURL, "https://") {
 		websiteURL = "https://" + websiteURL
 	}

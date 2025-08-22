@@ -11,7 +11,7 @@ type Candidate struct {
 	LunchEndUTC         float64  `json:"lunch_end_utc"`
 	EveningActivity     int      `json:"evening_activity"`
 	LunchLocalTime      float64  `json:"lunch_local_time"`
-	WorkStartLocal      int      `json:"work_start_local"`
+	WorkStartLocal      float64  `json:"work_start_local"`
 	SleepMidLocal       float64  `json:"sleep_mid_local"`
 	LunchDipStrength    float64  `json:"lunch_dip_strength"`
 	PeakTimeReasonable  bool     `json:"peak_time_reasonable"`

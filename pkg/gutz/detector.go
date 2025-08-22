@@ -280,6 +280,7 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 	result.SleepRangesLocal = activityResult.SleepRangesLocal
 	result.SleepBucketsUTC = activityResult.SleepBucketsUTC
 	result.ActiveHoursLocal = activityResult.ActiveHoursLocal
+	result.ActiveHoursUTC = activityResult.ActiveHoursUTC
 	result.LunchHoursUTC = activityResult.LunchHoursUTC
 	result.LunchHoursLocal = activityResult.LunchHoursLocal
 	result.PeakProductivityUTC = activityResult.PeakProductivityUTC
@@ -291,13 +292,14 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 	result.TimezoneCandidates = activityResult.TimezoneCandidates
 	result.ActivityDateRange = activityResult.ActivityDateRange
 
+	// Calculate timezone offset for the new timezone (needed for recalculation)
+	newOffset := offsetFromNamedTimezone(result.Timezone)
+	
 	// Always use the lunch times for the final chosen timezone
 	// First check if we already calculated lunch for this timezone in our candidates
 	// This is needed because Gemini might pick a named timezone like America/Los_Angeles
 	// but our activity analysis used UTC-8, and they might have different lunch calculations
 	if activityResult.HalfHourlyActivityUTC != nil && activityResult.TimezoneCandidates != nil {
-		// Calculate timezone offset for the new timezone
-		newOffset := offsetFromNamedTimezone(result.Timezone)
 		oldOffset := offsetFromNamedTimezone(activityResult.Timezone)
 
 		d.logger.Debug("mergeActivityData checking candidates",
@@ -397,6 +399,61 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 				End:        tzconvert.UTCToLocal(lunchEnd, newOffset),
 				Confidence: lunchConfidence,
 			}
+		}
+	}
+
+	// Recalculate LunchHoursLocal if we have UTC lunch hours but they weren't recalculated above
+	if result.LunchHoursUTC.Start != 0 || result.LunchHoursUTC.End != 0 {
+		// Check if lunch hours weren't already recalculated in the conditional block above
+		if activityResult.HalfHourlyActivityUTC == nil || activityResult.TimezoneCandidates == nil {
+			d.logger.Debug("recalculating LunchHoursLocal with correct offset",
+				"timezone", result.Timezone,
+				"offset", newOffset,
+				"lunchStartUTC", result.LunchHoursUTC.Start,
+				"lunchEndUTC", result.LunchHoursUTC.End)
+			result.LunchHoursLocal = struct {
+				Start      float64 `json:"start"`
+				End        float64 `json:"end"`
+				Confidence float64 `json:"confidence"`
+			}{
+				Start:      tzconvert.UTCToLocal(result.LunchHoursUTC.Start, newOffset),
+				End:        tzconvert.UTCToLocal(result.LunchHoursUTC.End, newOffset),
+				Confidence: result.LunchHoursUTC.Confidence,
+			}
+		}
+	}
+
+	// Also recalculate ActiveHoursLocal and PeakProductivityLocal with the correct timezone offset
+	if result.ActiveHoursUTC.Start != 0 || result.ActiveHoursUTC.End != 0 {
+		d.logger.Debug("recalculating ActiveHoursLocal with correct offset",
+			"timezone", result.Timezone,
+			"offset", newOffset,
+			"activeStartUTC", result.ActiveHoursUTC.Start,
+			"activeEndUTC", result.ActiveHoursUTC.End)
+		result.ActiveHoursLocal = struct {
+			Start float64 `json:"start"`
+			End   float64 `json:"end"`
+		}{
+			Start: tzconvert.UTCToLocal(result.ActiveHoursUTC.Start, newOffset),
+			End:   tzconvert.UTCToLocal(result.ActiveHoursUTC.End, newOffset),
+		}
+	}
+	
+	// Recalculate PeakProductivityLocal with correct offset
+	if result.PeakProductivityUTC.Start != 0 || result.PeakProductivityUTC.End != 0 {
+		d.logger.Debug("recalculating PeakProductivityLocal with correct offset",
+			"timezone", result.Timezone,
+			"offset", newOffset,
+			"peakStartUTC", result.PeakProductivityUTC.Start,
+			"peakEndUTC", result.PeakProductivityUTC.End)
+		result.PeakProductivityLocal = struct {
+			Start float64 `json:"start"`
+			End   float64 `json:"end"`
+			Count int     `json:"count"`
+		}{
+			Start: tzconvert.UTCToLocal(result.PeakProductivityUTC.Start, newOffset),
+			End:   tzconvert.UTCToLocal(result.PeakProductivityUTC.End, newOffset),
+			Count: result.PeakProductivityUTC.Count,
 		}
 	}
 }
@@ -789,6 +846,40 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 			if !candidateFound {
 				d.logger.Info("no matching candidate found, keeping existing values",
 					"offset", newOffset)
+			}
+			
+			// Recalculate ActiveHoursLocal and PeakProductivityLocal with the Gemini-corrected timezone
+			if locationResult.ActiveHoursUTC.Start != 0 || locationResult.ActiveHoursUTC.End != 0 {
+				d.logger.Debug("recalculating ActiveHoursLocal after Gemini correction",
+					"timezone", locationResult.Timezone,
+					"offset", newOffset,
+					"activeStartUTC", locationResult.ActiveHoursUTC.Start,
+					"activeEndUTC", locationResult.ActiveHoursUTC.End)
+				locationResult.ActiveHoursLocal = struct {
+					Start float64 `json:"start"`
+					End   float64 `json:"end"`
+				}{
+					Start: tzconvert.UTCToLocal(locationResult.ActiveHoursUTC.Start, newOffset),
+					End:   tzconvert.UTCToLocal(locationResult.ActiveHoursUTC.End, newOffset),
+				}
+			}
+			
+			// Recalculate PeakProductivityLocal with Gemini-corrected offset
+			if locationResult.PeakProductivityUTC.Start != 0 || locationResult.PeakProductivityUTC.End != 0 {
+				d.logger.Debug("recalculating PeakProductivityLocal after Gemini correction",
+					"timezone", locationResult.Timezone,
+					"offset", newOffset,
+					"peakStartUTC", locationResult.PeakProductivityUTC.Start,
+					"peakEndUTC", locationResult.PeakProductivityUTC.End)
+				locationResult.PeakProductivityLocal = struct {
+					Start float64 `json:"start"`
+					End   float64 `json:"end"`
+					Count int     `json:"count"`
+				}{
+					Start: tzconvert.UTCToLocal(locationResult.PeakProductivityUTC.Start, newOffset),
+					End:   tzconvert.UTCToLocal(locationResult.PeakProductivityUTC.End, newOffset),
+					Count: locationResult.PeakProductivityUTC.Count,
+				}
 			}
 
 			// Add location distance calculation if coordinates are available

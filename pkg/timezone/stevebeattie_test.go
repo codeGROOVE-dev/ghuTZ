@@ -90,7 +90,7 @@ func TestSteveBeattiePacificTimezone(t *testing.T) {
 	totalActivity := 207
 	quietHours := []int{10, 11, 12, 13, 14} // UTC quiet hours
 	midQuiet := 12.5
-	activeStart := 15 // First significant activity at 15 UTC
+	activeStart := 15.0 // First significant activity at 15 UTC
 
 	bestGlobalLunch := GlobalLunchPattern{
 		StartUTC:    20.5,

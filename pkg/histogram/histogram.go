@@ -104,7 +104,6 @@ func convertUTCToLocal(utcHour float64, timezone string) float64 {
 // histogramData holds the data needed to generate a histogram.
 type histogramData struct {
 	result      *Result
-	hourCounts  map[int]int
 	timezone    string
 	hasOrgData  bool
 	totalEvents int
@@ -112,8 +111,8 @@ type histogramData struct {
 }
 
 // GenerateHistogram creates a visual representation of user activity.
-func GenerateHistogram(result *Result, hourCounts map[int]int, timezone string) string {
-	data := prepareHistogramData(result, hourCounts, timezone)
+func GenerateHistogram(result *Result, timezone string) string {
+	data := prepareHistogramData(result, timezone)
 	if data == nil {
 		return "No activity data available\n"
 	}
@@ -125,21 +124,20 @@ func GenerateHistogram(result *Result, hourCounts map[int]int, timezone string) 
 }
 
 // prepareHistogramData initializes and validates the data for histogram generation.
-func prepareHistogramData(result *Result, hourCounts map[int]int, timezone string) *histogramData {
+func prepareHistogramData(result *Result, timezone string) *histogramData {
 	data := &histogramData{
 		result:     result,
-		hourCounts: hourCounts,
 		timezone:   timezone,
 		hasOrgData: len(result.HourlyOrganizationActivity) > 0,
 	}
 
-	// Count total events
-	for _, count := range hourCounts {
+	// Count total events from half-hourly data
+	for _, count := range result.HalfHourlyActivityUTC {
 		data.totalEvents += count
 	}
 
-	// Find max activity for scaling
-	data.maxActivity = findMaxActivity(hourCounts, result.HalfHourlyActivityUTC)
+	// Find max activity for scaling (only from half-hourly data)
+	data.maxActivity = findMaxActivityFromHalfHourly(result.HalfHourlyActivityUTC)
 	if data.maxActivity == 0 || len(result.HalfHourlyActivityUTC) == 0 {
 		return nil
 	}
@@ -147,14 +145,9 @@ func prepareHistogramData(result *Result, hourCounts map[int]int, timezone strin
 	return data
 }
 
-// findMaxActivity determines the maximum activity count across all time periods.
-func findMaxActivity(hourCounts map[int]int, halfHourCounts map[float64]int) int {
+// findMaxActivityFromHalfHourly determines the maximum activity count from half-hourly data.
+func findMaxActivityFromHalfHourly(halfHourCounts map[float64]int) int {
 	maxActivity := 0
-	for _, count := range hourCounts {
-		if count > maxActivity {
-			maxActivity = count
-		}
-	}
 	for _, count := range halfHourCounts {
 		if count > maxActivity {
 			maxActivity = count

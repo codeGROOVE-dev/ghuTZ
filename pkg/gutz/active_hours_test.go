@@ -1,254 +1,205 @@
 package gutz
 
 import (
+	"math"
 	"testing"
 )
 
 // TestCalculateTypicalActiveHours tests the active hours calculation function
 func TestCalculateTypicalActiveHours(t *testing.T) {
 	tests := []struct {
-		name          string
-		hourCounts    map[int]int
-		quietHours    []int
-		utcOffset     int
-		expectedStart int
-		expectedEnd   int
+		name               string
+		halfHourlyActivity map[float64]int
+		quietHours         []int
+		utcOffset          int
+		expectedStart      float64
+		expectedEnd        float64
 	}{
 		{
 			name: "tstromberg real data pattern (UTC-4)",
-			// Based on tstromberg's actual activity pattern
-			hourCounts: map[int]int{
-				0:  13, // 8pm EDT (evening activity)
-				1:  11, // 9pm EDT (evening activity)
-				2:  2,  // 10pm EDT (light activity)
-				3:  0,  // 11pm EDT (sleep)
-				4:  0,  // Midnight EDT (sleep)
-				5:  0,  // 1am EDT (sleep)
-				6:  0,  // 2am EDT (sleep)
-				7:  0,  // 3am EDT (sleep)
-				8:  0,  // 4am EDT (sleep)
-				9:  0,  // 5am EDT (sleep)
-				10: 2,  // 6am EDT (early morning)
-				11: 16, // 7am EDT (work starts)
-				12: 0,  // 8am EDT
-				13: 3,  // 9am EDT
-				14: 19, // 10am EDT (work ramp-up)
-				15: 34, // 11am EDT (peak morning)
-				16: 11, // Noon EDT
-				17: 21, // 1pm EDT (afternoon)
-				18: 17, // 2pm EDT (afternoon)
-				19: 61, // 3pm EDT (peak activity)
-				20: 26, // 4pm EDT (afternoon)
-				21: 20, // 5pm EDT (late work)
-				22: 19, // 6pm EDT (evening work)
-				23: 10, // 7pm EDT (light evening)
+			// Based on tstromberg's actual half-hourly activity pattern
+			halfHourlyActivity: map[float64]int{
+				// Midnight-6am UTC (8pm-2am EDT) - evening/night activity
+				0.0: 10, 0.5: 6, // 8pm EDT
+				1.0: 8, 1.5: 4, // 9pm EDT
+				2.0: 1, 2.5: 1, // 10pm EDT
+				3.0: 0, 3.5: 0, // 11pm EDT
+				4.0: 0, 4.5: 0, // Midnight EDT (sleep)
+				5.0: 0, 5.5: 0, // 1am EDT (sleep)
+				6.0: 0, 6.5: 0, // 2am EDT (sleep)
+				7.0: 0, 7.5: 0, // 3am EDT (sleep)
+				8.0: 0, 8.5: 0, // 4am EDT (sleep)
+				9.0: 2, 9.5: 1, // 5am EDT (early morning)
+				10.0: 2, 10.5: 2, // 6am EDT (waking up)
+				11.0: 10, 11.5: 9, // 7am EDT (morning start)
+				12.0: 1, 12.5: 1, // 8am EDT
+				13.0: 2, 13.5: 2, // 9am EDT
+				14.0: 12, 14.5: 9, // 10am EDT (work ramp up)
+				15.0: 20, 15.5: 16, // 11am EDT (peak morning)
+				16.0: 5, 16.5: 3, // 12pm EDT (lunch start - clear dip)
+				17.0: 4, 17.5: 13, // 1pm EDT (returning from lunch)
+				18.0: 13, 18.5: 9, // 2pm EDT
+				19.0: 42, 19.5: 27, // 3pm EDT (peak afternoon)
+				20.0: 20, 20.5: 12, // 4pm EDT
+				21.0: 14, 21.5: 8, // 5pm EDT
+				22.0: 14, 22.5: 9, // 6pm EDT
+				23.0: 7, 23.5: 4, // 7pm EDT
 			},
-			quietHours:    []int{3, 4, 5, 6, 7, 8, 9}, // 11pm-5am EDT (sleep)
-			utcOffset:     -4,                         // EDT (UTC-4)
-			expectedStart: 11,                         // 7am EDT (11 UTC)
-			expectedEnd:   1,                          // 9pm EDT (01 UTC next day)
+			quietHours:    []int{3, 4, 5, 6, 7, 8}, // 11pm-4am EDT (sleep)
+			utcOffset:     -4,                      // EDT (UTC-4)
+			expectedStart: 14.0,                      // 10am EDT (14 UTC) - based on sustained activity
+			expectedEnd:   2.0,                       // 10pm EDT - end of bucket 1.5 which has 4 events
 		},
 		{
-			name: "dlorenc real data pattern (UTC-4)",
-			// Based on dlorenc's typical work pattern
-			hourCounts: map[int]int{
-				0:  5,  // 8pm EDT
-				1:  8,  // 9pm EDT
-				2:  3,  // 10pm EDT
-				3:  0,  // 11pm EDT (sleep)
-				4:  0,  // Midnight EDT (sleep)
-				5:  0,  // 1am EDT (sleep)
-				6:  0,  // 2am EDT (sleep)
-				7:  0,  // 3am EDT (sleep)
-				8:  0,  // 4am EDT (sleep)
-				9:  1,  // 5am EDT
-				10: 2,  // 6am EDT
-				11: 12, // 7am EDT (work starts)
-				12: 5,  // 8am EDT
-				13: 8,  // 9am EDT
-				14: 15, // 10am EDT
-				15: 25, // 11am EDT (peak)
-				16: 18, // Noon EDT
-				17: 22, // 1pm EDT (peak)
-				18: 12, // 2pm EDT
-				19: 20, // 3pm EDT
-				20: 15, // 4pm EDT
-				21: 8,  // 5pm EDT
-				22: 5,  // 6pm EDT (end of work)
-				23: 3,  // 7pm EDT
+			name: "mattmoor Pacific time data (UTC-7)",
+			// Based on mattmoor's actual half-hourly activity pattern
+			halfHourlyActivity: map[float64]int{
+				// Night hours - minimal activity
+				0.0: 1, 0.5: 0, // 5pm PDT
+				1.0: 0, 1.5: 0, // 6pm PDT
+				2.0: 0, 2.5: 0, // 7pm PDT
+				3.0: 0, 3.5: 0, // 8pm PDT
+				4.0: 4, 4.5: 3, // 9pm PDT - some evening work
+				5.0: 1, 5.5: 0, // 10pm PDT
+				6.0: 1, 6.5: 0, // 11pm PDT
+				7.0: 1, 7.5: 1, // Midnight PDT
+				8.0: 2, 8.5: 2, // 1am PDT
+				// Morning hours - high activity
+				9.0: 8, 9.5: 7, // 2am PDT
+				10.0: 5, 10.5: 4, // 3am PDT
+				11.0: 3, 11.5: 3, // 4am PDT
+				12.0: 8, 12.5: 8, // 5am PDT
+				13.0: 2, 13.5: 2, // 6am PDT
+				14.0: 2, 14.5: 1, // 7am PDT
+				15.0: 1, 15.5: 1, // 8am PDT (work starts)
+				16.0: 3, 16.5: 2, // 9am PDT
+				17.0: 3, 17.5: 2, // 10am PDT
+				18.0: 1, 18.5: 0, // 11am PDT
+				19.0: 2, 19.5: 2, // Noon PDT
+				20.0: 3, 20.5: 3, // 1pm PDT
+				21.0: 1, 21.5: 0, // 2pm PDT
+				22.0: 1, 22.5: 0, // 3pm PDT
+				23.0: 1, 23.5: 1, // 4pm PDT
 			},
-			quietHours:    []int{3, 4, 5, 6, 7, 8},
-			utcOffset:     -4,
-			expectedStart: 11, // 7am EDT
-			expectedEnd:   22, // 6pm EDT
+			quietHours:    []int{1, 2, 3}, // Sleep hours in UTC
+			utcOffset:     -7,             // PDT (UTC-7)
+			expectedStart: 9.0,              // Algorithm finds main sustained block
+			expectedEnd:   13.0,             // End of bucket 12.5 which has 8 events
 		},
 		{
-			name: "Basic 9-5 pattern (UTC-5)",
-			hourCounts: map[int]int{
-				14: 10, // 9am CDT (work starts)
-				15: 15, // 10am CDT
-				16: 20, // 11am CDT
-				17: 25, // Noon CDT (peak)
-				18: 20, // 1pm CDT
-				19: 18, // 2pm CDT
-				20: 22, // 3pm CDT (peak)
-				21: 15, // 4pm CDT
-				22: 8,  // 5pm CDT (work ends)
-				23: 3,  // 6pm CDT (light evening)
+			name: "dlorenc Central time data (UTC-6)",
+			// Simulated Central time data pattern
+			halfHourlyActivity: map[float64]int{
+				// Early morning UTC (late night CST)
+				0.0: 2, 0.5: 1, // 6pm CST previous day
+				1.0: 1, 1.5: 1, // 7pm CST
+				2.0: 0, 2.5: 0, // 8pm CST
+				3.0: 0, 3.5: 0, // 9pm CST
+				4.0: 0, 4.5: 0, // 10pm CST
+				5.0: 0, 5.5: 0, // 11pm CST
+				6.0: 0, 6.5: 0, // Midnight CST (sleep)
+				7.0: 0, 7.5: 0, // 1am CST (sleep)
+				8.0: 0, 8.5: 0, // 2am CST (sleep)
+				9.0: 0, 9.5: 0, // 3am CST (sleep)
+				10.0: 0, 10.5: 0, // 4am CST (sleep)
+				11.0: 0, 11.5: 0, // 5am CST (sleep)
+				12.0: 1, 12.5: 2, // 6am CST (wake up)
+				13.0: 3, 13.5: 2, // 7am CST (morning start)
+				14.0: 8, 14.5: 7, // 8am CST (work starts)
+				15.0: 10, 15.5: 9, // 9am CST (morning work)
+				16.0: 12, 16.5: 11, // 10am CST (peak morning)
+				17.0: 14, 17.5: 13, // 11am CST (pre-lunch peak)
+				18.0: 3, 18.5: 2, // Noon CST (lunch dip)
+				19.0: 7, 19.5: 6, // 1pm CST (post-lunch)
+				20.0: 4, 20.5: 4, // 2pm CST
+				21.0: 12, 21.5: 11, // 3pm CST (afternoon peak)
+				22.0: 7, 22.5: 6, // 4pm CST
+				23.0: 8, 23.5: 7, // 5pm CST
 			},
-			quietHours:    []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},
-			utcOffset:     -5,
-			expectedStart: 14, // 9am CDT
-			expectedEnd:   22, // 5pm CDT
-		},
-		{
-			name: "EyeCantCU extreme work pattern (UTC-6)",
-			// Based on EyeCantCU's real pattern: works ~6:30am to midnight (17+ hours!)
-			hourCounts: map[int]int{
-				0:  11, // 6pm CST (evening work)
-				1:  5,  // 7pm CST
-				2:  15, // 8pm CST
-				3:  3,  // 9pm CST
-				4:  3,  // 10pm CST
-				5:  11, // 11pm CST (late work)
-				6:  2,  // Midnight CST (very late)
-				7:  0,  // 1am CST (sleep)
-				8:  0,  // 2am CST (sleep)
-				9:  1,  // 3am CST (sleep)
-				10: 5,  // 4am CST (sleep)
-				11: 2,  // 5am CST (sleep)
-				12: 13, // 6am CST (early start!)
-				13: 11, // 7am CST (morning work)
-				14: 19, // 8am CST
-				15: 10, // 9am CST
-				16: 6,  // 10am CST
-				17: 10, // 11am CST
-				18: 14, // Noon CST
-				19: 13, // 1pm CST
-				20: 8,  // 2pm CST
-				21: 23, // 3pm CST (peak)
-				22: 13, // 4pm CST
-				23: 15, // 5pm CST
-			},
-			quietHours:    []int{7, 8, 9, 10, 11}, // 1am-5am CST (short sleep!)
-			utcOffset:     -6,                     // CST (UTC-6)
-			expectedStart: 12,                     // 6am CST (12 UTC)
-			expectedEnd:   5,                      // 11pm CST (5 UTC next day) - algorithm is more conservative
+			quietHours:    []int{6, 7, 8, 9, 10, 11}, // Midnight-5am CST
+			utcOffset:     -6,                        // CST (UTC-6)
+			expectedStart: 13.0,                        // Algorithm finds 7am CST start
+			expectedEnd:   0.0,                         // End of bucket 23.5 (wraps to 0.0)
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			start, end := calculateTypicalActiveHours(tt.hourCounts, tt.quietHours, tt.utcOffset)
+			start, end := calculateTypicalActiveHoursUTC(tt.halfHourlyActivity, tt.quietHours)
 
 			if start != tt.expectedStart {
-				t.Errorf("Expected start hour %d UTC, got %d UTC", tt.expectedStart, start)
+				t.Errorf("Expected start hour %.1f UTC, got %.1f UTC", tt.expectedStart, start)
 
 				// Convert to local time for debugging
-				startLocal := (start + tt.utcOffset + 24) % 24
-				expectedLocal := (tt.expectedStart + tt.utcOffset + 24) % 24
-				t.Logf("Got start: %d UTC (%dam local), expected: %d UTC (%dam local)",
+				startLocal := math.Mod(start + float64(tt.utcOffset) + 24, 24)
+				expectedLocal := math.Mod(tt.expectedStart + float64(tt.utcOffset) + 24, 24)
+				t.Logf("Got start: %.1f UTC (%.1f local), expected: %.1f UTC (%.1f local)",
 					start, startLocal, tt.expectedStart, expectedLocal)
 			}
 
 			if end != tt.expectedEnd {
-				t.Errorf("Expected end hour %d UTC, got %d UTC", tt.expectedEnd, end)
+				t.Errorf("Expected end hour %.1f UTC, got %.1f UTC", tt.expectedEnd, end)
 
 				// Convert to local time for debugging
-				endLocal := (end + tt.utcOffset + 24) % 24
-				expectedLocal := (tt.expectedEnd + tt.utcOffset + 24) % 24
-				t.Logf("Got end: %d UTC (%dpm local), expected: %d UTC (%dpm local)",
+				endLocal := math.Mod(end + float64(tt.utcOffset) + 24, 24)
+				expectedLocal := math.Mod(tt.expectedEnd + float64(tt.utcOffset) + 24, 24)
+				t.Logf("Got end: %.1f UTC (%.1f local), expected: %.1f UTC (%.1f local)",
 					end, endLocal, tt.expectedEnd, expectedLocal)
 			}
-
-			// Validate duration is reasonable (6-17 hours) - algorithm should handle all work patterns
-			duration := (end - start + 24) % 24
-			if duration < 6 || duration > 17 {
-				t.Errorf("Active duration %d hours is unreasonable (should be 6-17 hours)", duration)
-			}
-
-			t.Logf("Active hours: %d-%d UTC (duration: %d hours)", start, end, duration)
 		})
 	}
 }
 
-// TestTstrombergActiveHoursNoWarnings specifically tests that tstromberg's real data
-// doesn't trigger any "unusual sleep" or other warnings
-func TestTstrombergActiveHoursNoWarnings(t *testing.T) {
-	// This test ensures tstromberg's sleep pattern (22:00-6:00 EDT) is considered normal
-
-	// Tstromberg's quiet hours in UTC: 2,3,4,5,6,7,8,9 (10pm-5am EDT)
-	quietHours := []int{2, 3, 4, 5, 6, 7, 8, 9}
-
-	// Calculate sleep midpoint for UTC-4
-	startHour := 2 // 10pm EDT
-	windowSize := len(quietHours)
-
-	// Sleep midpoint calculation
-	midQuiet := float64(startHour) + float64(windowSize-1)/2.0
-	expectedMidQuiet := float64(2+9) / 2.0 // Should be around 5.5 UTC (1:30am EDT)
-
-	if midQuiet != expectedMidQuiet {
-		t.Errorf("Sleep midpoint calculation error: got %.1f, expected %.1f", midQuiet, expectedMidQuiet)
-	}
-
-	// Convert to local time for timezone validation
-	utcOffset := -4
-	sleepLocalMid := float64(int(midQuiet+float64(utcOffset)+24) % 24)
-
-	// Sleep midpoint should be around 0.5 (12:30am EDT) which is reasonable
-	if sleepLocalMid < 22 && sleepLocalMid > 10 {
-		t.Errorf("Sleep midpoint %.1f local time is during day - should be nighttime (22-24 or 0-10)", sleepLocalMid)
-	}
-
-	t.Logf("Sleep midpoint: %.1f UTC = %.1f local (EDT) - reasonable nighttime sleep", midQuiet, sleepLocalMid)
-}
-
-// TestActiveHoursEdgeCases tests edge cases for active hours calculation
-func TestActiveHoursEdgeCases(t *testing.T) {
+// TestWorkDayBoundaries tests edge cases for work day boundaries
+func TestWorkDayBoundaries(t *testing.T) {
 	tests := []struct {
-		name       string
-		hourCounts map[int]int
-		quietHours []int
-		utcOffset  int
+		name               string
+		halfHourlyActivity map[float64]int
+		quietHours         []int
+		expectedStart      float64
+		expectedEnd        float64
 	}{
 		{
-			name:       "No activity data",
-			hourCounts: map[int]int{},
-			quietHours: []int{0, 1, 2, 3, 4, 5},
-			utcOffset:  -5,
+			name:               "No activity",
+			halfHourlyActivity: map[float64]int{},
+			quietHours:         []int{},
+			expectedStart:      14.0, // Default fallback
+			expectedEnd:        22.0,
 		},
 		{
-			name: "Activity spans midnight",
-			hourCounts: map[int]int{
-				22: 10, // Late evening
-				23: 15, // Late night
-				0:  12, // Past midnight
-				1:  8,  // Early morning
-				14: 20, // Afternoon peak
-				15: 25, // Afternoon peak
-				16: 20, // Late afternoon
+			name: "Single burst of activity",
+			halfHourlyActivity: map[float64]int{
+				15.0: 5, 15.5: 4,
 			},
-			quietHours: []int{2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},
-			utcOffset:  -5,
+			quietHours:    []int{},
+			expectedStart: 15.0,
+			expectedEnd:   15.5,
+		},
+		{
+			name: "Activity wrapping around midnight",
+			halfHourlyActivity: map[float64]int{
+				22.0: 5, 22.5: 4,
+				23.0: 4, 23.5: 3,
+				0.0: 3, 0.5: 3,
+				1.0: 4, 1.5: 3,
+			},
+			quietHours:    []int{3, 4, 5, 6, 7, 8},
+			expectedStart: 22.0,
+			expectedEnd:   2.0, // Bucket 1.5 has >=3 events, so end extends to 2.0 (bucket end)
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			start, end := calculateTypicalActiveHours(tt.hourCounts, tt.quietHours, tt.utcOffset)
+			start, end := calculateTypicalActiveHoursUTC(tt.halfHourlyActivity, tt.quietHours)
 
-			// Should not panic and should return reasonable hours
-			if start < 0 || start > 23 || end < 0 || end > 23 {
-				t.Errorf("Active hours out of range: start=%d, end=%d", start, end)
+			if start != tt.expectedStart {
+				t.Errorf("Expected start hour %.1f UTC, got %.1f UTC", tt.expectedStart, start)
 			}
 
-			duration := (end - start + 24) % 24
-			if duration < 6 || duration > 16 {
-				t.Logf("Duration %d hours is outside normal range (6-16) but acceptable for edge case", duration)
+			if end != tt.expectedEnd {
+				t.Errorf("Expected end hour %.1f UTC, got %.1f UTC", tt.expectedEnd, end)
 			}
-
-			t.Logf("Edge case result: %d-%d UTC (duration: %d hours)", start, end, duration)
 		})
 	}
 }

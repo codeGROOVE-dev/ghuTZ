@@ -67,7 +67,7 @@ func TestEvaluateCandidates(t *testing.T) {
 	totalActivity := 300
 	quietHours := []int{4, 5, 6, 7, 8, 9} // midnight-6am EST
 	midQuiet := 6.5
-	activeStart := 13 // 9am EST
+	activeStart := 13.0 // 9am EST
 
 	// Lunch pattern at noon EST (16 UTC)
 	bestGlobalLunch := GlobalLunchPattern{
@@ -174,7 +174,7 @@ func TestUKTimezoneDetection(t *testing.T) {
 	totalActivity := 127
 	quietHours := []int{2, 3, 4, 5, 6, 7, 8, 18, 19, 20, 22, 23}
 	midQuiet := 8.0 // As calculated in the actual implementation
-	activeStart := 8
+	activeStart := 8.0
 
 	// Best global lunch pattern at 12:00 UTC
 	bestGlobalLunch := GlobalLunchPattern{
@@ -204,7 +204,7 @@ func TestUKTimezoneDetection(t *testing.T) {
 
 	// Test 3: UTC+0 should have reasonable work hours (8am-5pm local)
 	if topCandidate.WorkStartLocal != 8 {
-		t.Errorf("UTC+0 work start incorrect: %d, expected 8", topCandidate.WorkStartLocal)
+		t.Errorf("UTC+0 work start incorrect: %.1f, expected 8", topCandidate.WorkStartLocal)
 	}
 
 	// Test 4: UTC+0 should have lunch detected at noon
