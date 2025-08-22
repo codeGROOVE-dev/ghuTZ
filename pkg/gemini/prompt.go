@@ -124,7 +124,21 @@ DETECTION PRIORITIES (subject to above constraint):
 
 Seriously though, if they have a .ca e-mail address or .ca website, they almost certainly live in Canada. Do not assign them to New York.
 
-8. SUSPICIOUS MISMATCH DETECTION:
+8. PROFILE LOCATION TRUST:
+	- 🚨 CRITICAL: If the user's GitHub profile location is specific (city, state) and matches the detected timezone from activity patterns, USE THAT EXACT LOCATION
+	- Trust specific cities over generic regions:
+	  • "Kirkland, WA" → Use Kirkland, WA (not "San Francisco Bay Area")
+	  • "Raleigh, NC" → Use Raleigh, NC (not "Eastern US")
+	  • "Austin, TX" → Use Austin, TX (not "Central US")
+	- Only override the profile location if:
+	  • It's vague ("Earth", "Internet", "Remote")
+	  • It's fictional ("Gotham", "Hogwarts", "Mars")
+	  • It clearly conflicts with activity patterns (>2 hour timezone difference)
+	  • You have STRONG evidence for a different specific location
+	- When the profile location timezone matches the activity timezone (±1 hour), prefer the profile location
+	- Default to the profile location's GPS coordinates when available and plausible
+
+9. SUSPICIOUS MISMATCH DETECTION:
 	- 🚨 CRITICAL: This tool has a responsibility to detect users being deceptive about their GitHub location.
     - Set "suspicious_mismatch": true if the location in their GitHub profile is implausible and not within the provided list of candidate timezones.
     - For example, if you've detected based on activity that they are more likely to be in UTC-0 than UTC-5, but UTC-5 was listed as a candidate, it shouldn't be considered suspicious. They may just work weird hours.
