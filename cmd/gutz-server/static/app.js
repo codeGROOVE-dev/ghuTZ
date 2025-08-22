@@ -93,30 +93,10 @@ function displayResults(data) {
     document.getElementById('locationRow').style.display = 'none';
     document.getElementById('mapRow').style.display = 'none';
     
-    // Check for suspicious patterns from both detection systems
+    // Removed scary warnings - timezone discrepancies are now shown elegantly in the timezone display
     const warningDiv = document.getElementById('suspiciousWarning');
     if (warningDiv) {
-        const hasMajorLocation = data.verification && data.verification.location_mismatch === 'major';
-        const hasMajorTimezone = data.verification && data.verification.timezone_mismatch === 'major';
-        const hasGeminiSuspicion = data.gemini_suspicious_mismatch;
-        
-        if ((hasMajorLocation || hasMajorTimezone) && hasGeminiSuspicion) {
-            // Both systems detected anomalies
-            warningDiv.innerHTML = `<div style="background: #fee2e2; border: 2px solid #dc2626; border-radius: 8px; padding: 12px; margin-bottom: 20px;">
-                <span style="color: #991b1b; font-weight: bold;">🔍 DETECTION ALERT:</span> 
-                <span style="color: #7f1d1d;">Multiple anomalies detected. ${data.gemini_mismatch_reason || 'Location/timezone discrepancies found.'}</span>
-            </div>`;
-            warningDiv.style.display = 'block';
-        } else if (hasGeminiSuspicion && data.gemini_mismatch_reason) {
-            // Only AI detected something
-            warningDiv.innerHTML = `<div style="background: #fef3c7; border: 2px solid #f59e0b; border-radius: 8px; padding: 12px; margin-bottom: 20px;">
-                <span style="color: #d97706; font-weight: bold;">⚠️ AI ANALYSIS:</span> 
-                <span style="color: #92400e;">${data.gemini_mismatch_reason}</span>
-            </div>`;
-            warningDiv.style.display = 'block';
-        } else {
-            warningDiv.style.display = 'none';
-        }
+        warningDiv.style.display = 'none';
     }
     
     // Set required fields with GitHub profile link

@@ -231,10 +231,19 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 
 	// Timezone candidates are critical constraints that must be respected.
 	if candidates, ok := contextData["timezone_candidates"].([]timezone.Candidate); ok && len(candidates) > 0 { //nolint:nestif // Complex but necessary for accurate timezone detection
-		// Summary line shows all viable candidates.
-		sb.WriteString("Top 4 candidates: ")
+		// Summary line shows top candidates
+		// Show top 5 candidates (or more if claimed timezone is lower)
+		maxToShow := 5
+		for i, c := range candidates {
+			if c.IsProfile && i >= maxToShow {
+				maxToShow = i + 1 // Include the claimed timezone
+				break
+			}
+		}
+		
+		sb.WriteString("Top candidates: ")
 		for i := range candidates {
-			if i >= maxTopCandidates {
+			if i >= maxToShow {
 				break
 			}
 			candidate := &candidates[i]
@@ -276,9 +285,17 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		}
 		sb.WriteString("\n")
 
-		// Show detailed signals for top 3 candidates with work patterns.
+		// Show detailed signals for top candidates (including claimed if not in top 3)
+		maxDetailed := maxDetailedCandidates
+		for i, c := range candidates {
+			if c.IsProfile && i >= maxDetailedCandidates {
+				maxDetailed = i + 1 // Include the claimed timezone in details
+				break
+			}
+		}
+		
 		for i := range candidates {
-			if i >= maxDetailedCandidates {
+			if i >= maxDetailed {
 				break
 			}
 			candidate := &candidates[i]

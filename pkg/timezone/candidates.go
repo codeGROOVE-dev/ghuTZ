@@ -4,6 +4,9 @@ package timezone
 import (
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/codeGROOVE-dev/guTZ/pkg/lunch"
 )
@@ -33,7 +36,7 @@ func calculateEasternLunchBonus(dropRatio, lunchLocalStart float64) (bonus float
 // EvaluateCandidates evaluates multiple timezone offsets to find the best candidates.
 //
 //nolint:gocognit,nestif,revive,maintidx // Timezone evaluation requires comprehensive multi-factor analysis
-func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts map[float64]int, totalActivity int, quietHours []int, midQuiet float64, activeStart int, bestGlobalLunch GlobalLunchPattern) []Candidate {
+func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts map[float64]int, totalActivity int, quietHours []int, midQuiet float64, activeStart int, bestGlobalLunch GlobalLunchPattern, profileTimezone string, newestActivity time.Time) []Candidate {
 	var candidates []Candidate // Store timezone candidates for Gemini
 
 	// Evaluate multiple timezone offsets to find the best candidates
@@ -816,6 +819,20 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			adjustments = append(adjustments, "-15 (European timezone but no morning activity)")
 		}
 
+		// Check if this is the user's profile timezone for bonus points
+		isProfileTimezone := false
+		if profileTimezone != "" {
+			// Parse the profile timezone UTC offset string (e.g., "UTC-7", "UTC+5.5")
+			// Since this comes directly from GitHub's data-hours-ahead-of-utc, it's already the current offset
+			profileOffset := parseUTCOffsetString(profileTimezone)
+			if profileOffset == testOffset {
+				isProfileTimezone = true
+				// Add a moderate boost for the profile timezone (before scaling)
+				testConfidence += 10.0
+				adjustments = append(adjustments, "+10 (user's profile timezone)")
+			}
+		}
+
 		// Ensure confidence stays above 0 and scale up for better dynamic range
 		testConfidence = math.Max(0, testConfidence)
 		// Scale confidence by 1.5x for better dynamic range (50% -> 75%)
@@ -833,10 +850,17 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f adjustments=%v\n",
 				username, testOffset, testConfidence, adjustments)
 		}
+		
+		// Debug for mattmoor - show all timezones to see if profile timezone is included
+		if username == "mattmoor" {
+			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f isProfile=%v adjustments=%v\n",
+				username, testOffset, testConfidence, isProfileTimezone, adjustments)
+		}
 
-		// Add to candidates if confidence is reasonable (at least 5%)
-		// Lowered threshold to ensure we get multiple candidates for better Gemini analysis
-		if testConfidence >= 5 {
+		// Add ALL candidates regardless of confidence to ensure complete coverage
+		// This ensures --force-offset works and profile locations are always considered
+		// We'll let Gemini and other factors determine the final choice
+		if true { // Always add candidate
 			candidate := Candidate{
 				Timezone:            fmt.Sprintf("UTC%+d", testOffset),
 				Offset:              float64(testOffset),
@@ -854,6 +878,7 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 				LunchEndUTC:         testLunchEnd,   // Store for reuse
 				LunchConfidence:     testLunchConf,  // Store for reuse
 				ScoringDetails:      adjustments,    // Include scoring details for Gemini
+				IsProfile:          isProfileTimezone, // Mark if this is the profile timezone
 			}
 			candidates = append(candidates, candidate)
 		}
@@ -869,4 +894,37 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 	}
 
 	return candidates
+}
+
+// parseUTCOffsetString converts a UTC offset string to its integer offset.
+// Handles formats like "UTC", "UTC-5", "UTC+8", "UTC+5.5", "UTC-2.5", etc.
+// Returns the offset rounded to the nearest integer hour for comparison.
+func parseUTCOffsetString(tz string) int {
+	// Handle plain UTC
+	if tz == "UTC" {
+		return 0
+	}
+	
+	// Handle UTC+/- format with possible decimals
+	if strings.HasPrefix(tz, "UTC+") {
+		offsetStr := strings.TrimPrefix(tz, "UTC+")
+		if offset, err := strconv.ParseFloat(offsetStr, 64); err == nil {
+			return int(math.Round(offset))
+		}
+	}
+	if strings.HasPrefix(tz, "UTC-") {
+		offsetStr := strings.TrimPrefix(tz, "UTC-")
+		if offset, err := strconv.ParseFloat(offsetStr, 64); err == nil {
+			return -int(math.Round(offset))
+		}
+	}
+	if strings.HasPrefix(tz, "UTC") && len(tz) > 3 {
+		// Handle formats like UTC-5.5 or UTC5 (without explicit + or -)
+		offsetStr := strings.TrimPrefix(tz, "UTC")
+		if offset, err := strconv.ParseFloat(offsetStr, 64); err == nil {
+			return int(math.Round(offset))
+		}
+	}
+
+	return 0 // Default to UTC if parsing fails
 }

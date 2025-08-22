@@ -34,13 +34,16 @@ var (
 	timezoneJSONRegex     = regexp.MustCompile(`"timezone":"([^"]+)"`)
 	timezoneFieldRegex    = regexp.MustCompile(`timezone:([^,}]+)`)
 	// GitHub profile timezone element pattern - extracts the UTC offset hours
-	profileTimezoneRegex = regexp.MustCompile(`<profile-timezone[^>]*data-hours-ahead-of-utc="([^"]+)"`)
+	profileTimezoneRegex = regexp.MustCompile(`<profile-timezone[^>]*data-hours-ahead-of-utc="([^"]*)"`)
+	// Fallback pattern for when data-hours-ahead-of-utc is empty - matches text like (UTC +02:00) or (UTC -05:00)
+	profileTimezoneTextRegex = regexp.MustCompile(`<profile-timezone[^>]*>.*?\(UTC\s*([+-]?\d{2}):(\d{2})\).*?</profile-timezone>`)
 )
 
 // UserContext holds all fetched data for a user to avoid redundant API calls.
 type UserContext struct {
 	User             *github.User
-	GitHubTimezone   string // Timezone from GitHub profile (e.g., "UTC-12")
+	GitHubTimezone   string // Profile timezone from GitHub profile UTC offset (e.g., "UTC-7")
+	ProfileLocationTimezone  string // Profile location timezone from geocoding location (e.g., "UTC-8" for Seattle in winter)
 	FromCache        map[string]bool
 	Username         string
 	ProfileHTML      string
@@ -687,6 +690,11 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		fullName = userCtx.User.Name
 	}
 
+	// Extract GitHub profile timezone early if we have the HTML
+	if userCtx.ProfileHTML != "" {
+		d.extractGitHubTimezoneFromHTML(userCtx)
+	}
+	
 	// Always perform activity analysis for fun and comparison
 	d.logger.Debug("performing activity pattern analysis", "username", username)
 	activityResult := d.tryActivityPatternsWithContext(ctx, userCtx)
@@ -697,10 +705,9 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		d.logger.Info("detected from profile HTML", "username", username, "timezone", result.Timezone)
 		result.Name = fullName
 		d.mergeActivityData(result, activityResult)
-		// Add verification
-		if userCtx.User != nil {
-			result.Verification = d.verifyLocationAndTimezone(ctx, userCtx.User, result.Location, result.Timezone, userCtx.GitHubTimezone)
-		}
+		// Add verification using centralized function
+		result.Verification = d.createVerification(userCtx, result.Timezone, 
+			userCtx.ProfileLocationTimezone, result.ActivityTimezone, result.Location)
 		return result, nil
 	}
 	d.logger.Debug("profile HTML scraping failed", "username", username)
@@ -717,12 +724,10 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		geminiResult := d.tryUnifiedGeminiAnalysisWithContext(ctx, userCtx, activityResult)
 		if geminiResult != nil {
 			d.logger.Info("Gemini returned result", "timezone", geminiResult.Timezone)
-			// Always prefer Gemini's detected values when available - they're more accurate
-			// Store the location-field values as the "claimed" ones for verification
-			verification := &VerificationResult{
-				ClaimedLocation: userCtx.User.Location,
-				ClaimedTimezone: locationResult.Timezone, // The timezone from their claimed location
-			}
+			// Create verification using centralized function
+			// Note: locationResult.Timezone is the timezone from geocoding the location field
+			verification := d.createVerification(userCtx, geminiResult.Timezone,
+				locationResult.Timezone, activityResult.Timezone, geminiResult.Location)
 			
 			// Use Gemini's detected values as the actual result
 			locationResult.Timezone = geminiResult.Timezone
@@ -786,23 +791,8 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 					"offset", newOffset)
 			}
 			
-			// Calculate timezone offset difference for verification display
-			if verification.ClaimedTimezone != "" && verification.ClaimedTimezone != geminiResult.Timezone {
-				offsetDiff := d.calculateTimezoneOffsetDiff(verification.ClaimedTimezone, geminiResult.Timezone)
-				if offsetDiff != 0 {
-					verification.TimezoneOffsetDiff = abs(offsetDiff)
-					if abs(offsetDiff) > 3 {
-						verification.TimezoneMismatch = "major"
-					} else if abs(offsetDiff) > 1 {
-						verification.TimezoneMismatch = "minor"
-					}
-				}
-			}
-			
-			// Calculate location distance if different
-			// Use the already geocoded coordinates from locationResult to avoid redundant API call
-			if verification.ClaimedLocation != "" && geminiResult.Location != nil && locationResult.Location != nil {
-				// We already have the claimed location's coordinates from earlier geocoding
+			// Add location distance calculation if coordinates are available
+			if verification.ProfileLocation != "" && geminiResult.Location != nil && locationResult.Location != nil {
 				distance := haversineDistance(locationResult.Location.Latitude, locationResult.Location.Longitude,
 					geminiResult.Location.Latitude, geminiResult.Location.Longitude)
 				if distance > 0 {
@@ -830,26 +820,13 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		}
 		
 		// Add verification if we didn't already add it above
-		if locationResult.Verification == nil && userCtx.User != nil && activityResult != nil {
-			// Since we detected from their claimed location, compare that timezone with activity
-			verification := &VerificationResult{
-				ClaimedLocation: userCtx.User.Location,
-				ClaimedTimezone: locationResult.Timezone, // The timezone from their claimed location
+		if locationResult.Verification == nil {
+			activityTz := ""
+			if activityResult != nil {
+				activityTz = activityResult.Timezone
 			}
-			
-			// Check if activity timezone differs from location-based timezone
-			if activityResult.Timezone != "" && activityResult.Timezone != locationResult.Timezone {
-				offsetDiff := d.calculateTimezoneOffsetDiff(locationResult.Timezone, activityResult.Timezone)
-				if offsetDiff != 0 {
-					verification.TimezoneOffsetDiff = abs(offsetDiff)
-					if abs(offsetDiff) > 3 {
-						verification.TimezoneMismatch = "major"
-					} else if abs(offsetDiff) > 1 {
-						verification.TimezoneMismatch = "minor"
-					}
-				}
-			}
-			locationResult.Verification = verification
+			locationResult.Verification = d.createVerification(userCtx, locationResult.Timezone,
+				locationResult.Timezone, activityTz, locationResult.Location)
 		}
 		return locationResult, nil
 	}
@@ -860,10 +837,13 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		result.Name = fullName
 		// Use mergeActivityData to properly handle lunch time reuse from candidates
 		d.mergeActivityData(result, activityResult)
-		// Add verification
-		if userCtx.User != nil {
-			result.Verification = d.verifyLocationAndTimezone(ctx, userCtx.User, result.Location, result.Timezone, userCtx.GitHubTimezone)
+		// Add verification using centralized function
+		activityTz := ""
+		if activityResult != nil {
+			activityTz = activityResult.Timezone
 		}
+		result.Verification = d.createVerification(userCtx, result.Timezone,
+			userCtx.ProfileLocationTimezone, activityTz, result.Location)
 		if activityResult != nil {
 			d.logger.Info("timezone detected with Gemini + activity", "username", username,
 				"activity_timezone", activityResult.Timezone, "final_timezone", result.Timezone)
@@ -878,13 +858,68 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		d.logger.Info("using activity-only result as fallback", "username", username, "timezone", activityResult.Timezone)
 		activityResult.Name = fullName
 		// Add verification for activity-only result
-		if userCtx.User != nil {
-			activityResult.Verification = d.verifyLocationAndTimezone(ctx, userCtx.User, activityResult.Location, activityResult.Timezone, userCtx.GitHubTimezone)
-		}
+		activityResult.Verification = d.createVerification(userCtx, activityResult.Timezone,
+			userCtx.ProfileLocationTimezone, activityResult.Timezone, activityResult.Location)
 		return activityResult, nil
 	}
 
 	return nil, fmt.Errorf("could not determine timezone for %s", username)
+}
+
+// createVerification creates a consistent VerificationResult from the various timezone sources.
+// This centralizes the logic to avoid duplication and ensure consistent handling.
+func (d *Detector) createVerification(userCtx *UserContext, detectedTimezone string, locationTimezone string, activityTimezone string, detectedLocation *Location) *VerificationResult {
+	if userCtx == nil || userCtx.User == nil {
+		return nil
+	}
+	
+	verification := &VerificationResult{
+		ProfileLocation:         userCtx.User.Location,
+		ProfileTimezone:         userCtx.GitHubTimezone,          // From GitHub profile UTC offset
+		ProfileLocationTimezone: userCtx.ProfileLocationTimezone, // From geocoding the location field
+	}
+	
+	// If ProfileLocationTimezone is empty but we have a locationTimezone from geocoding, use it
+	if verification.ProfileLocationTimezone == "" && locationTimezone != "" {
+		verification.ProfileLocationTimezone = locationTimezone
+	}
+	
+	// Calculate difference between profile timezone and profile location timezone
+	if verification.ProfileTimezone != "" && verification.ProfileLocationTimezone != "" {
+		offsetDiff := d.calculateTimezoneOffsetDiff(verification.ProfileTimezone, verification.ProfileLocationTimezone)
+		if offsetDiff != 0 {
+			verification.ProfileLocationDiff = abs(offsetDiff)
+		}
+	}
+	
+	// Calculate difference between detected timezone and profile timezone
+	if detectedTimezone != "" && verification.ProfileTimezone != "" && detectedTimezone != verification.ProfileTimezone {
+		offsetDiff := d.calculateTimezoneOffsetDiff(verification.ProfileTimezone, detectedTimezone)
+		if offsetDiff != 0 {
+			verification.TimezoneOffsetDiff = abs(offsetDiff)
+			if abs(offsetDiff) > 3 {
+				verification.TimezoneMismatch = "major"
+			} else if abs(offsetDiff) > 1 {
+				verification.TimezoneMismatch = "minor"
+			}
+		}
+	}
+	
+	// Calculate location distance if we have both profile location and detected location
+	if verification.ProfileLocation != "" && detectedLocation != nil {
+		distance := d.calculateLocationDistanceFromCoords(context.Background(), verification.ProfileLocation, 
+			detectedLocation.Latitude, detectedLocation.Longitude)
+		if distance > 0 {
+			verification.LocationDistanceMiles = distance
+			if distance > 1000 {
+				verification.LocationMismatch = "major"
+			} else if distance > 250 {
+				verification.LocationMismatch = "minor"
+			}
+		}
+	}
+	
+	return verification
 }
 
 // tryUnifiedGeminiAnalysisWithEvents uses Gemini with provided events data.
@@ -1016,6 +1051,121 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 	return markdown
 }
 
+// extractGitHubTimezoneFromHTML extracts the GitHub profile timezone from HTML and stores it in userCtx.
+// This is separate from tryProfileScrapingWithContext so we can extract the timezone early.
+func (d *Detector) extractGitHubTimezoneFromHTML(userCtx *UserContext) {
+	html := userCtx.ProfileHTML
+	if html == "" {
+		return
+	}
+
+	// First check for GitHub's profile-timezone element (most reliable)
+	d.logger.Debug("checking for GitHub profile timezone element", "username", userCtx.Username, "html_length", len(html))
+	
+	// Log if we find the profile-timezone element at all
+	if strings.Contains(html, "profile-timezone") {
+		d.logger.Debug("found profile-timezone element in HTML", "username", userCtx.Username)
+		// Extract a sample around it for debugging
+		if idx := strings.Index(html, "profile-timezone"); idx >= 0 {
+			start := idx - 50
+			if start < 0 {
+				start = 0
+			}
+			end := idx + 200
+			if end > len(html) {
+				end = len(html)
+			}
+			d.logger.Debug("profile-timezone context", "username", userCtx.Username, "sample", html[start:end])
+		}
+	} else {
+		d.logger.Debug("no profile-timezone element found in HTML", "username", userCtx.Username)
+	}
+	
+	if matches := profileTimezoneRegex.FindStringSubmatch(html); len(matches) > 1 {
+		hoursStr := strings.TrimSpace(matches[1])
+		d.logger.Debug("found data-hours-ahead-of-utc attribute", "username", userCtx.Username, "value", hoursStr)
+		if hoursStr != "" { // Only process if not empty
+			if hours, err := strconv.ParseFloat(hoursStr, 64); err == nil {
+				// Convert hours to UTC offset format
+				// GitHub uses negative for west of UTC (e.g., -12.0 for UTC-12)
+				// Handle fractional hours (e.g., India is UTC+5.5, Nepal is UTC+5.75, Newfoundland is UTC-2.5)
+				var tz string
+				if hours == 0 {
+					tz = "UTC"
+				} else if hours < 0 {
+					// Check if it's a fractional hour
+					if hours != float64(int(hours)) {
+						// Format with decimal for fractional hours
+						tz = fmt.Sprintf("UTC%.1f", hours)
+					} else {
+						tz = fmt.Sprintf("UTC%d", int(hours))
+					}
+				} else {
+					// Positive offset
+					if hours != float64(int(hours)) {
+						// Format with decimal for fractional hours
+						tz = fmt.Sprintf("UTC+%.1f", hours)
+					} else {
+						tz = fmt.Sprintf("UTC+%d", int(hours))
+					}
+				}
+				
+				// Store the GitHub timezone in userCtx for verification
+				userCtx.GitHubTimezone = tz
+				
+				// Don't return this as the detected timezone - it's the user's profile timezone
+				// But we'll use it for verification later
+				d.logger.Debug("found GitHub profile timezone", "username", userCtx.Username, "timezone", tz, "hours_offset", hoursStr)
+			}
+		} else {
+			d.logger.Debug("data-hours-ahead-of-utc was empty, trying fallback", "username", userCtx.Username)
+		}
+	} else {
+		d.logger.Debug("no profile-timezone element found", "username", userCtx.Username)
+	}
+	
+	// Fallback: If data-hours-ahead-of-utc was empty, try parsing the text content
+	if userCtx.GitHubTimezone == "" {
+		d.logger.Debug("trying fallback regex for timezone text", "username", userCtx.Username)
+		if matches := profileTimezoneTextRegex.FindStringSubmatch(html); len(matches) > 2 {
+			hoursStr := strings.TrimSpace(matches[1])
+			minutesStr := strings.TrimSpace(matches[2])
+			if hours, err := strconv.Atoi(hoursStr); err == nil {
+				if minutes, err := strconv.Atoi(minutesStr); err == nil {
+					// Convert to decimal hours
+					decimalHours := float64(hours) + float64(minutes)/60.0
+					if hours < 0 {
+						decimalHours = float64(hours) - float64(minutes)/60.0
+					}
+					
+					// Format the timezone string
+					var tz string
+					if decimalHours == 0 {
+						tz = "UTC"
+					} else if decimalHours == float64(int(decimalHours)) {
+						// Whole number of hours
+						if decimalHours > 0 {
+							tz = fmt.Sprintf("UTC+%d", int(decimalHours))
+						} else {
+							tz = fmt.Sprintf("UTC%d", int(decimalHours))
+						}
+					} else {
+						// Fractional hours
+						if decimalHours > 0 {
+							tz = fmt.Sprintf("UTC+%.1f", decimalHours)
+						} else {
+							tz = fmt.Sprintf("UTC%.1f", decimalHours)
+						}
+					}
+					
+					userCtx.GitHubTimezone = tz
+					d.logger.Debug("found GitHub profile timezone from text", "username", userCtx.Username, "timezone", tz, "hours", hoursStr, "minutes", minutesStr)
+				}
+			}
+		}
+	}
+}
+
 // tryProfileScrapingWithContext tries to extract timezone from profile HTML using UserContext.
 func (d *Detector) tryProfileScrapingWithContext(_ context.Context, userCtx *UserContext) *Result {
 	html := userCtx.ProfileHTML
@@ -1034,42 +1184,7 @@ func (d *Detector) tryProfileScrapingWithContext(_ context.Context, userCtx *Use
 		}
 	}
 
-	// First check for GitHub's profile-timezone element (most reliable)
-	if matches := profileTimezoneRegex.FindStringSubmatch(html); len(matches) > 1 {
-		hoursStr := strings.TrimSpace(matches[1])
-		if hours, err := strconv.ParseFloat(hoursStr, 64); err == nil {
-			// Convert hours to UTC offset format
-			// GitHub uses negative for west of UTC (e.g., -12.0 for UTC-12)
-			// Handle fractional hours (e.g., India is UTC+5.5, Nepal is UTC+5.75)
-			var tz string
-			if hours == 0 {
-				tz = "UTC"
-			} else if hours < 0 {
-				// Check if it's a fractional hour
-				if hours != float64(int(hours)) {
-					// Format with decimal for fractional hours
-					tz = fmt.Sprintf("UTC%.1f", hours)
-				} else {
-					tz = fmt.Sprintf("UTC%d", int(hours))
-				}
-			} else {
-				// Positive offset
-				if hours != float64(int(hours)) {
-					// Format with decimal for fractional hours
-					tz = fmt.Sprintf("UTC+%.1f", hours)
-				} else {
-					tz = fmt.Sprintf("UTC+%d", int(hours))
-				}
-			}
-			
-			// Store the GitHub timezone in userCtx for verification
-			userCtx.GitHubTimezone = tz
-			
-			// Don't return this as the detected timezone - it's the user's claimed timezone
-			// But we'll use it for verification later
-			d.logger.Debug("found GitHub profile timezone", "username", userCtx.Username, "timezone", tz, "hours_offset", hoursStr)
-		}
-	}
+	// GitHub timezone extraction has already been done in extractGitHubTimezoneFromHTML
 	
 	// Try extracting timezone from HTML using other pre-compiled regex patterns
 	patterns := []*regexp.Regexp{

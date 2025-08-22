@@ -111,7 +111,7 @@ func (d *Detector) collectActivityTimestamps(ctx context.Context, username strin
 func (d *Detector) collectSupplementalTimestamps(ctx context.Context, username string,
 	allTimestamps []timestampEntry, targetDataPoints int,
 ) []timestampEntry {
-	const minDaysSpan = 42 // Need at least 6 weeks for good pattern detection
+	const minDaysSpan = 35 // Need at least 5 weeks for good pattern detection
 
 	// Deduplicate timestamps first to get accurate count
 	uniqueTimestamps := make(map[time.Time]bool)
@@ -398,7 +398,7 @@ func filterAndSortTimestamps(allTimestamps []timestampEntry, maxYears int) []tim
 // applyProgressiveTimeWindow applies a progressive time window strategy to get sufficient data.
 func applyProgressiveTimeWindow(allTimestamps []timestampEntry, targetMin int) []timestampEntry {
 	const maxTimeWindowDays = 365 * 5 // Maximum 5 years
-	const initialWindowDays = 42      // Start with 6 weeks (same as minDaysSpan)
+	const initialWindowDays = 35      // Start with 5 weeks (same as minDaysSpan)
 	const expansionFactor = 1.25      // Increase by 25% each iteration
 
 	// Progressive time window strategy

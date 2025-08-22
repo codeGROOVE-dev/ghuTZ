@@ -79,11 +79,54 @@ func refineHourlySleepFromBuckets(quietHours []int, sleepBuckets []float64, half
 
 // tryActivityPatternsWithContext performs activity pattern analysis using UserContext.
 func (d *Detector) tryActivityPatternsWithContext(ctx context.Context, userCtx *UserContext) *Result {
-	return d.tryActivityPatternsWithEvents(ctx, userCtx.Username, userCtx.Events)
+	// Get implied timezone from location if not already set
+	if userCtx.ProfileLocationTimezone == "" && userCtx.User != nil && userCtx.User.Location != "" {
+		// Try to geocode and get timezone from the location
+		if coords, err := d.geocodeLocation(ctx, userCtx.User.Location); err == nil {
+			if tz, err := d.timezoneForCoordinates(ctx, coords.Latitude, coords.Longitude); err == nil {
+				// Convert to UTC offset using current time for DST-aware calculation
+				if loc, err := time.LoadLocation(tz); err == nil {
+					now := time.Now()
+					_, offset := now.In(loc).Zone()
+					offsetHours := offset / 3600
+					if offsetHours == 0 {
+						userCtx.ProfileLocationTimezone = "UTC"
+					} else if offsetHours > 0 {
+						userCtx.ProfileLocationTimezone = fmt.Sprintf("UTC+%d", offsetHours)
+					} else {
+						userCtx.ProfileLocationTimezone = fmt.Sprintf("UTC%d", offsetHours)
+					}
+					d.logger.Debug("derived profile location timezone from location", 
+						"username", userCtx.Username, 
+						"location", userCtx.User.Location,
+						"timezone_name", tz,
+						"profile_location_offset", userCtx.ProfileLocationTimezone)
+				}
+			}
+		}
+	}
+	
+	// Log both profile and profile location timezones for debugging
+	d.logger.Info("timezone context for activity analysis",
+		"username", userCtx.Username,
+		"profile_timezone", userCtx.GitHubTimezone,
+		"profile_location_timezone", userCtx.ProfileLocationTimezone,
+		"location", userCtx.User.Location)
+	
+	// For candidate evaluation, prefer claimed timezone if available, otherwise use implied
+	timezoneForCandidates := userCtx.GitHubTimezone
+	if timezoneForCandidates == "" {
+		timezoneForCandidates = userCtx.ProfileLocationTimezone
+	}
+	d.logger.Debug("using timezone for candidates", 
+		"username", userCtx.Username, 
+		"timezone_for_candidates", timezoneForCandidates)
+	
+	return d.tryActivityPatternsWithEvents(ctx, userCtx.Username, userCtx.Events, timezoneForCandidates)
 }
 
 //nolint:gocognit,revive,maintidx // Complex timezone detection logic requires detailed analysis
-func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username string, events []github.PublicEvent) *Result {
+func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username string, events []github.PublicEvent, claimedTimezone string) *Result {
 	// Collect all timestamps from various sources
 	allTimestamps, orgCounts := d.collectActivityTimestamps(ctx, username, events)
 
@@ -99,7 +142,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	}
 
 	// Implement adaptive data collection strategy
-	const targetDataPoints = 200
+	const targetDataPoints = 160
 	allTimestamps = d.collectSupplementalTimestamps(ctx, username, allTimestamps, targetDataPoints)
 
 	// Filter and sort timestamps, then apply progressive time window
@@ -509,8 +552,26 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			EndUTC:      bestGlobalLunch.EndUTC,
 			Confidence:  bestGlobalLunch.Confidence,
 			DropPercent: bestGlobalLunch.DropPercent,
-		})
+		}, claimedTimezone, newestActivity)
 
+	// Ensure the claimed timezone is in the candidates list
+	// Check if any candidate is already marked as claimed
+	claimedFound := false
+	for _, c := range candidates {
+		if c.IsProfile {
+			claimedFound = true
+			break
+		}
+	}
+	
+	// If claimed timezone wasn't evaluated (shouldn't happen but just in case), add it
+	if claimedTimezone != "" && !claimedFound {
+		// This shouldn't happen since EvaluateCandidates evaluates all offsets
+		// But if somehow the claimed timezone wasn't included, add it with minimal info
+		d.logger.Warn("claimed timezone not found in candidates, adding it",
+			"username", username, "claimed_timezone", claimedTimezone)
+	}
+	
 	// Keep ALL candidates for --force-offset support
 	// We've already analyzed all 27 possible offsets (-12 to +14)
 	// so we have complete data for any forced offset the user might choose

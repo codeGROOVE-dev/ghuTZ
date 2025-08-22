@@ -2,6 +2,7 @@ package timezone
 
 import (
 	"testing"
+	"time"
 )
 
 // TestDetectPeakProductivityWithHalfHours tests the peak detection function
@@ -76,7 +77,7 @@ func TestEvaluateCandidates(t *testing.T) {
 		DropPercent: 30.0,
 	}
 
-	candidates := EvaluateCandidates("testuser", hourCounts, halfHourCounts, totalActivity, quietHours, midQuiet, activeStart, bestGlobalLunch)
+	candidates := EvaluateCandidates("testuser", hourCounts, halfHourCounts, totalActivity, quietHours, midQuiet, activeStart, bestGlobalLunch, "", time.Now())
 
 	if len(candidates) == 0 {
 		t.Fatal("Expected at least one timezone candidate")
@@ -184,7 +185,7 @@ func TestUKTimezoneDetection(t *testing.T) {
 	}
 
 	candidates := EvaluateCandidates("max-allan-cgr", hourCounts, halfHourCounts,
-		totalActivity, quietHours, midQuiet, activeStart, bestGlobalLunch)
+		totalActivity, quietHours, midQuiet, activeStart, bestGlobalLunch, "", time.Now())
 
 	// Test 1: UTC+0 should be the top candidate
 	if len(candidates) == 0 {

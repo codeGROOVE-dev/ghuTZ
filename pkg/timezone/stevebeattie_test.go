@@ -2,6 +2,7 @@ package timezone
 
 import (
 	"testing"
+	"time"
 )
 
 func TestSteveBeattiePacificTimezone(t *testing.T) {
@@ -100,7 +101,7 @@ func TestSteveBeattiePacificTimezone(t *testing.T) {
 
 	// Evaluate candidates
 	candidates := EvaluateCandidates("stevebeattie", hourCounts, halfHourCounts,
-		totalActivity, quietHours, midQuiet, activeStart, bestGlobalLunch)
+		totalActivity, quietHours, midQuiet, activeStart, bestGlobalLunch, "", time.Now())
 
 	// Check that we have multiple candidates
 	if len(candidates) < 3 {

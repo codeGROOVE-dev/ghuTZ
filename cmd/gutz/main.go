@@ -240,21 +240,7 @@ func printResult(result *gutz.Result) {
 	fmt.Printf("\n🌍 GitHub User: %s\n", result.Username)
 	fmt.Println(strings.Repeat("─", 50))
 
-	// Show combined analysis warning when both systems detect issues
-	hasSuspiciousLocation := result.Verification != nil && result.Verification.LocationMismatch == "major"
-	hasSuspiciousTimezone := result.Verification != nil && result.Verification.TimezoneMismatch == "major"
-	hasGeminiSuspicion := result.GeminiSuspiciousMismatch
-	
-	if (hasSuspiciousLocation || hasSuspiciousTimezone) && hasGeminiSuspicion {
-		// Both detection systems agree something is off
-		fmt.Printf("\033[91m🔍 DETECTION ALERT: Multiple anomalies detected\033[0m\n")
-		fmt.Println(strings.Repeat("─", 50))
-	} else if hasGeminiSuspicion && result.GeminiMismatchReason != "" &&
-	          (result.Verification == nil || (result.Verification.ClaimedLocation == "" && result.Verification.ClaimedTimezone == "")) {
-		// Only Gemini detected something (no claims to verify against)
-		fmt.Printf("\033[33m⚠️  AI ANALYSIS: %s\033[0m\n", result.GeminiMismatchReason)
-		fmt.Println(strings.Repeat("─", 50))
-	}
+	// Removed scary warnings - the elegant timezone display already shows discrepancies clearly
 
 	printLocation(result)
 	printTimezone(result)
@@ -342,10 +328,11 @@ func printLocation(result *gutz.Result) {
 	case result.Location != nil:
 		locationStr = fmt.Sprintf("%.3f, %.3f", result.Location.Latitude, result.Location.Longitude)
 	default:
-		// No detected location, but check if there's a claimed location
-		if result.Verification != nil && result.Verification.ClaimedLocation != "" {
-			// Show claimed location when we have no detected location
-			fmt.Printf("📍 Location:      Unknown — user claims %s\n", result.Verification.ClaimedLocation)
+		// No detected location, but check if there's a profile location
+		if result.Verification != nil && result.Verification.ProfileLocation != "" {
+			// Show profile location when we have no detected location
+			fmt.Printf("📍 Location:      Unknown\n")
+			fmt.Printf("                  └─ Profile Location: %s\n", result.Verification.ProfileLocation)
 			return
 		}
 		// No location information at all
@@ -353,133 +340,122 @@ func printLocation(result *gutz.Result) {
 	}
 
 	if locationStr != "" {
-		fmt.Printf("📍 Location:      %s", locationStr)
+		fmt.Printf("📍 Location:      %s\n", locationStr)
 		
-		// Check for discrepancies from both our verification and Gemini
-		if result.Verification != nil && result.Verification.ClaimedLocation != "" {
-			// Check if we should show the claim
-			// 1. If distance > 50 miles, definitely show
-			// 2. If distance is -1 (couldn't geocode), definitely show
-			// 3. If LocationMismatch is flagged, show
-			// 4. If Gemini says it's suspicious, show
-			// 5. If location strings differ but distance is 0, check if cities match
-			showClaim := false
+		// Display profile location if it differs significantly
+		if result.Verification != nil && result.Verification.ProfileLocation != "" {
+			// Only show if there's a meaningful difference
+			showProfileLocation := false
+			distanceStr := ""
 			
-			if result.Verification.LocationDistanceMiles > 50 || result.Verification.LocationDistanceMiles == -1 {
-				showClaim = true
-			} else if result.Verification.LocationMismatch != "" {
-				showClaim = true
-			} else if result.GeminiSuspiciousMismatch {
-				showClaim = true
-			} else if locationStr != result.Verification.ClaimedLocation {
-				// Strings differ but no distance/mismatch flags
-				// Check if it's just formatting differences (e.g., "Raleigh, NC" vs "Raleigh, NC, United States")
-				detectedCity := extractMainLocation(locationStr)
-				claimedCity := extractMainLocation(result.Verification.ClaimedLocation)
-				showClaim = detectedCity != claimedCity
-			}
-			
-			if showClaim {
-				claimStr := fmt.Sprintf(" — claims %s", result.Verification.ClaimedLocation)
-				if result.Verification.LocationDistanceMiles > 0 {
-					distStr := fmt.Sprintf(" (%.0f mi away)", result.Verification.LocationDistanceMiles)
-					claimStr += distStr
-				} else if result.Verification.LocationDistanceMiles == -1 {
-					// Location couldn't be geocoded
-					claimStr += " (location unrecognized)"
-				}
-				
-				// Determine severity based on both detectors
-				isMajor := result.Verification.LocationMismatch == "major" || result.GeminiSuspiciousMismatch
-				isMinor := result.Verification.LocationMismatch == "minor"
-				
-				if isMajor {
-					// Red for major discrepancy
-					fmt.Printf("\033[31m%s\033[0m", claimStr)
-				} else if isMinor {
-					// Normal for minor discrepancy
-					fmt.Printf("%s", claimStr)
+			if result.Verification.LocationDistanceMiles > 50 {
+				showProfileLocation = true
+				if result.Verification.LocationDistanceMiles > 620 {
+					// Red warning for >620 miles
+					distanceStr = fmt.Sprintf(" \033[31m⚠️ %.0f mi\033[0m", result.Verification.LocationDistanceMiles)
 				} else {
-					fmt.Printf("%s", claimStr)
+					distanceStr = fmt.Sprintf(" (%.0f mi)", result.Verification.LocationDistanceMiles)
+				}
+			} else if result.Verification.LocationDistanceMiles == 0 {
+				// Couldn't geocode but locations differ textually
+				if locationStr != result.Verification.ProfileLocation {
+					showProfileLocation = true
 				}
 			}
-		}
-		fmt.Println()
-		
-		// Show analysis from both detectors working together
-		if result.GeminiSuspiciousMismatch && result.GeminiMismatchReason != "" {
-			// Gemini AI analysis
-			fmt.Printf("                  └─ AI: \033[33m%s\033[0m\n", result.GeminiMismatchReason)
-		}
-		if result.Verification != nil && result.Verification.LocationMismatch != "" {
-			// Distance-based analysis
-			severity := "suspicious"
-			if result.Verification.LocationMismatch == "major" {
-				severity = "highly suspicious"
+			
+			if showProfileLocation {
+				fmt.Printf("                  └─ Profile Location: %s%s\n", result.Verification.ProfileLocation, distanceStr)
 			}
-			fmt.Printf("                  └─ Distance: %s discrepancy detected\n", severity)
 		}
 	}
 }
 
 func printTimezone(result *gutz.Result) {
-	tzName := result.Timezone
-
-	// Try to load the timezone
-	if loc, err := time.LoadLocation(tzName); err == nil {
-		now := time.Now().In(loc)
-		_, offset := now.Zone()
-		offsetHours := offset / 3600
-		var utcOffset string
-		if offsetHours >= 0 {
-			utcOffset = fmt.Sprintf("UTC+%d", offsetHours)
-		} else {
-			utcOffset = fmt.Sprintf("UTC%d", offsetHours)
+	// Helper function to get current time in a timezone
+	getCurrentTime := func(tz string) (string, int) {
+		if loc, err := time.LoadLocation(tz); err == nil {
+			now := time.Now().In(loc)
+			_, offset := now.Zone()
+			return now.Format("15:04"), offset / 3600
 		}
-		currentLocal := now.Format("15:04")
-		fmt.Printf("🕐 Timezone:      %s (%s, now %s)", tzName, utcOffset, currentLocal)
-	} else {
-		// Fallback for UTC+/- format
-		fmt.Printf("🕐 Timezone:      %s", result.Timezone)
+		// Try to parse UTC offset format
+		if strings.HasPrefix(tz, "UTC") {
+			offsetStr := strings.TrimPrefix(tz, "UTC")
+			if offsetHours, err := strconv.Atoi(strings.TrimPrefix(offsetStr, "+")); err == nil {
+				now := time.Now().UTC().Add(time.Duration(offsetHours) * time.Hour)
+				return now.Format("15:04"), offsetHours
+			} else if offsetHours, err := strconv.Atoi(offsetStr); err == nil {
+				now := time.Now().UTC().Add(time.Duration(offsetHours) * time.Hour)
+				return now.Format("15:04"), offsetHours
+			}
+		}
+		return "--:--", 0
 	}
 
-	// Check for verification discrepancy (claimed location's timezone vs activity)
-	if result.Verification != nil && result.Verification.TimezoneMismatch != "" {
-		// When detected from location field, show that the location implies wrong timezone
-		claimStr := ""
-		if result.Method == "location_field" && result.ActivityTimezone != "" {
-			claimStr = fmt.Sprintf(" — location implies this")
-			if result.Verification.TimezoneOffsetDiff > 0 {
-				diffStr := fmt.Sprintf(" (%d hr off from activity)", result.Verification.TimezoneOffsetDiff)
-				claimStr += diffStr
-			}
-		} else if result.Verification.ClaimedTimezone != "" {
-			claimStr = fmt.Sprintf(" — user claims %s", result.Verification.ClaimedTimezone)
-			if result.Verification.TimezoneOffsetDiff > 0 {
-				diffStr := fmt.Sprintf(" (%d hours off)", result.Verification.TimezoneOffsetDiff)
-				claimStr += diffStr
-			}
+	// Helper to calculate hour difference between timezones
+	calcHourDiff := func(tz1, tz2 string) int {
+		_, offset1 := getCurrentTime(tz1)
+		_, offset2 := getCurrentTime(tz2)
+		return abs(offset1 - offset2)
+	}
+
+	// Helper to format timezone display with offset indicator
+	formatTimezoneRow := func(label, tz string, isPrimary bool) {
+		if tz == "" {
+			return
 		}
 		
-		if claimStr != "" {
-			switch result.Verification.TimezoneMismatch {
-			case "major":
-				// Red for >3 timezone difference
-				fmt.Printf("\033[31m%s\033[0m", claimStr)
-			case "minor":
-				// Normal color for >1 timezone difference
-				fmt.Printf("%s", claimStr)
+		localTime, offsetHours := getCurrentTime(tz)
+		utcStr := fmt.Sprintf("UTC%+d", offsetHours)
+		
+		if isPrimary {
+			// Primary detected timezone
+			fmt.Printf("🕐 Timezone:      %s (%s, now %s)\n", tz, utcStr, localTime)
+		} else {
+			// Secondary timezone sources
+			hourDiff := calcHourDiff(result.Timezone, tz)
+			offsetStr := ""
+			if hourDiff > 0 {
+				if hourDiff > 4 {
+					// Red warning for >4 hour difference
+					offsetStr = fmt.Sprintf(" \033[31m⚠️ %+d hr\033[0m", hourDiff)
+				} else {
+					offsetStr = fmt.Sprintf(" (%+d hr)", hourDiff)
+				}
 			}
+			fmt.Printf("                  └─ %s: %s (%s, now %s)%s\n", label, tz, utcStr, localTime, offsetStr)
 		}
 	}
 
-	if result.ActivityTimezone != "" && result.ActivityTimezone != result.Timezone {
-		fmt.Printf("\n                  └─ activity suggests %s", result.ActivityTimezone)
+	// Display primary detected timezone
+	formatTimezoneRow("Detected", result.Timezone, true)
+
+	// Display other timezone sources if they differ
+	if result.Verification != nil {
+		// Profile Timezone (from GitHub UTC offset)
+		if result.Verification.ProfileTimezone != "" && result.Verification.ProfileTimezone != result.Timezone {
+			formatTimezoneRow("Profile Timezone", result.Verification.ProfileTimezone, false)
+		}
+		
+		// Profile Location (from geocoding the location string)
+		if result.Verification.ProfileLocationTimezone != "" && result.Verification.ProfileLocationTimezone != result.Timezone {
+			formatTimezoneRow("Profile Location", result.Verification.ProfileLocationTimezone, false)
+		}
 	}
-	fmt.Println()
+	
+	// Activity Pattern
+	if result.ActivityTimezone != "" && result.ActivityTimezone != result.Timezone {
+		formatTimezoneRow("Activity Pattern", result.ActivityTimezone, false)
+	}
 }
 
-// Removed - no longer needed since we use UTC throughout.
+// abs returns the absolute value of an integer.
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
 
 func printWorkSchedule(result *gutz.Result) {
 	if result.ActiveHoursLocal.Start == 0 && result.ActiveHoursLocal.End == 0 {

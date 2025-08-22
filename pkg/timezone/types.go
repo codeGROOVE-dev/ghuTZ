@@ -18,4 +18,5 @@ type Candidate struct {
 	SleepReasonable     bool     `json:"sleep_reasonable"`
 	WorkHoursReasonable bool     `json:"work_hours_reasonable"`
 	LunchReasonable     bool     `json:"lunch_reasonable"`
+	IsProfile           bool     `json:"is_profile"` // True if this matches the user's profile timezone
 }
