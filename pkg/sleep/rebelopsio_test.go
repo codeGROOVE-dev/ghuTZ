@@ -85,7 +85,7 @@ func TestRebelopsioSleepDetection(t *testing.T) {
 	// Note: The algorithm now includes buckets with some activity as part of natural sleep patterns
 	// People may briefly check their phone or have minor activity during sleep periods
 	// The test accepts this as realistic behavior
-	
+
 	// Morning work buckets after 12.0 should definitely NOT be included
 	morningWorkBuckets := []float64{12.0, 12.5} // 8:00-8:30 local
 	for _, bucket := range morningWorkBuckets {

@@ -349,6 +349,7 @@ func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request)
 		// Create a temporary result with string keys for JSON encoding
 		type JSONResult struct {
 			*gutz.Result
+
 			HalfHourlyActivityUTC map[string]int `json:"half_hourly_activity_utc,omitempty"`
 		}
 		jsonResult := JSONResult{
@@ -369,7 +370,9 @@ func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request)
 
 		// Send response
 		writer.Header().Set("Content-Type", "application/json")
-		writer.Write(data)
+		if _, err := writer.Write(data); err != nil {
+			s.logger.Error("Failed to write response", "error", err)
+		}
 		return
 	}
 

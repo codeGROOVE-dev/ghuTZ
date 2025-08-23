@@ -166,7 +166,7 @@ func (d *Detector) fetchPersonalWebsite(ctx context.Context, req *http.Request) 
 	err := retry.Do(
 		func() error {
 			var err error
-			resp, err = d.httpClient.Do(req)
+			resp, err = d.httpClient.Do(req) //nolint:bodyclose // Body is closed by caller on success, closed here on error
 			if err != nil {
 				lastErr = err
 				return err
@@ -832,7 +832,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		result.Name = fullName
 		d.mergeActivityData(result, activityResult)
 		// Add verification using centralized function
-		result.Verification = d.createVerification(userCtx, result.Timezone,
+		result.Verification = d.createVerification(ctx, userCtx, result.Timezone,
 			userCtx.ProfileLocationTimezone, result.ActivityTimezone, result.Location)
 		return result, nil
 	}
@@ -852,7 +852,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 			d.logger.Info("Gemini returned result", "timezone", geminiResult.Timezone)
 			// Create verification using centralized function
 			// Note: locationResult.Timezone is the timezone from geocoding the location field
-			verification := d.createVerification(userCtx, geminiResult.Timezone,
+			verification := d.createVerification(ctx, userCtx, geminiResult.Timezone,
 				locationResult.Timezone, activityResult.Timezone, geminiResult.Location)
 
 			// Use Gemini's detected values as the actual result
@@ -877,7 +877,8 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 
 			// Try to find a matching candidate with the same offset
 			candidateFound := false
-			for _, candidate := range locationResult.TimezoneCandidates {
+			for i := range locationResult.TimezoneCandidates {
+				candidate := &locationResult.TimezoneCandidates[i]
 				if int(candidate.Offset) == newOffset {
 					d.logger.Info("found matching candidate",
 						"offset", newOffset,
@@ -976,7 +977,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 			locationResult.Verification = verification
 		} else {
 			d.logger.Info("Gemini returned nil result")
-			
+
 			// When Gemini isn't available, prefer: profile timezone > profile location timezone > activity timezone
 			// Check if we should use profile timezone or activity timezone instead of location
 			if userCtx.GitHubTimezone != "" {
@@ -984,14 +985,14 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 				d.logger.Info("using profile timezone when Gemini unavailable",
 					"profile_tz", userCtx.GitHubTimezone,
 					"location_tz", locationResult.Timezone)
-				
+
 				// Parse the profile timezone to a standard format if needed
 				profileTz := userCtx.GitHubTimezone
 				locationResult.Timezone = profileTz
-				
+
 				// Recalculate all local times with the profile timezone
 				newOffset := offsetFromNamedTimezone(profileTz)
-				
+
 				// Recalculate ActiveHoursLocal
 				if locationResult.ActiveHoursUTC.Start != 0 || locationResult.ActiveHoursUTC.End != 0 {
 					locationResult.ActiveHoursLocal = struct {
@@ -1002,7 +1003,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 						End:   tzconvert.UTCToLocal(locationResult.ActiveHoursUTC.End, newOffset),
 					}
 				}
-				
+
 				// Recalculate PeakProductivityLocal
 				if locationResult.PeakProductivityUTC.Start != 0 || locationResult.PeakProductivityUTC.End != 0 {
 					locationResult.PeakProductivityLocal = struct {
@@ -1015,7 +1016,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 						Count: locationResult.PeakProductivityUTC.Count,
 					}
 				}
-				
+
 				// Recalculate LunchHoursLocal
 				if locationResult.LunchHoursUTC.Start != 0 || locationResult.LunchHoursUTC.End != 0 {
 					locationResult.LunchHoursLocal = struct {
@@ -1028,7 +1029,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 						Confidence: locationResult.LunchHoursUTC.Confidence,
 					}
 				}
-				
+
 				// Recalculate SleepRangesLocal
 				if len(locationResult.SleepBucketsUTC) > 0 {
 					d.logger.Debug("recalculating SleepRangesLocal with profile timezone",
@@ -1056,7 +1057,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 			if activityResult != nil {
 				activityTz = activityResult.Timezone
 			}
-			locationResult.Verification = d.createVerification(userCtx, locationResult.Timezone,
+			locationResult.Verification = d.createVerification(ctx, userCtx, locationResult.Timezone,
 				locationResult.Timezone, activityTz, locationResult.Location)
 		}
 		return locationResult, nil
@@ -1073,7 +1074,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		if activityResult != nil {
 			activityTz = activityResult.Timezone
 		}
-		result.Verification = d.createVerification(userCtx, result.Timezone,
+		result.Verification = d.createVerification(ctx, userCtx, result.Timezone,
 			userCtx.ProfileLocationTimezone, activityTz, result.Location)
 		if activityResult != nil {
 			d.logger.Info("timezone detected with Gemini + activity", "username", username,
@@ -1089,7 +1090,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 		d.logger.Info("using activity-only result as fallback", "username", username, "timezone", activityResult.Timezone)
 		activityResult.Name = fullName
 		// Add verification for activity-only result
-		activityResult.Verification = d.createVerification(userCtx, activityResult.Timezone,
+		activityResult.Verification = d.createVerification(ctx, userCtx, activityResult.Timezone,
 			userCtx.ProfileLocationTimezone, activityResult.Timezone, activityResult.Location)
 		return activityResult, nil
 	}
@@ -1099,7 +1100,7 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 
 // createVerification creates a consistent VerificationResult from the various timezone sources.
 // This centralizes the logic to avoid duplication and ensure consistent handling.
-func (d *Detector) createVerification(userCtx *UserContext, detectedTimezone string, locationTimezone string, activityTimezone string, detectedLocation *Location) *VerificationResult {
+func (d *Detector) createVerification(ctx context.Context, userCtx *UserContext, detectedTimezone string, locationTimezone string, activityTimezone string, detectedLocation *Location) *VerificationResult {
 	if userCtx == nil || userCtx.User == nil {
 		return nil
 	}
@@ -1138,7 +1139,7 @@ func (d *Detector) createVerification(userCtx *UserContext, detectedTimezone str
 
 	// Calculate location distance if we have both profile location and detected location
 	if verification.ProfileLocation != "" && detectedLocation != nil {
-		distance := d.calculateLocationDistanceFromCoords(context.Background(), verification.ProfileLocation,
+		distance := d.calculateLocationDistanceFromCoords(ctx, verification.ProfileLocation,
 			detectedLocation.Latitude, detectedLocation.Longitude)
 		if distance > 0 {
 			verification.LocationDistanceKm = distance
