@@ -137,7 +137,7 @@ func main() {
 	displayResult := result
 	displayTimezone := result.Timezone
 
-	if *forceOffset >= -12 && *forceOffset <= 14 && result.HourlyActivityUTC != nil {
+	if *forceOffset >= -12 && *forceOffset <= 14 && result.HalfHourlyActivityUTC != nil {
 		// Convert forced offset to UTC+/- format
 		if *forceOffset >= 0 {
 			displayTimezone = fmt.Sprintf("UTC+%d", *forceOffset)
@@ -502,10 +502,10 @@ func printOrganizations(result *gutz.Result) {
 
 func printActivitySummary(result *gutz.Result) {
 	if !result.ActivityDateRange.OldestActivity.IsZero() && !result.ActivityDateRange.NewestActivity.IsZero() {
-		// Calculate total events from hourly activity
+		// Calculate total events from half-hourly activity
 		totalEvents := 0
-		if result.HourlyActivityUTC != nil {
-			for _, count := range result.HourlyActivityUTC {
+		if result.HalfHourlyActivityUTC != nil {
+			for _, count := range result.HalfHourlyActivityUTC {
 				totalEvents += count
 			}
 		}

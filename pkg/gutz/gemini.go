@@ -29,29 +29,12 @@ type geminiQueryResult struct {
 	Prompt    string
 }
 
-// convertHalfHourlyToHourly converts half-hourly activity data to hourly for Gemini analysis.
-// Combines two consecutive 30-minute buckets into one hourly bucket.
-// Input: map[float64]int where keys are 0.0, 0.5, 1.0, 1.5, ..., 23.5
-// Output: map[int]int where keys are 0, 1, 2, ..., 23.
-func convertHalfHourlyToHourly(halfHourlyData map[float64]int) map[int]int {
-	hourlyData := make(map[int]int)
-
-	// Process each hour (0-23)
-	for hour := range 24 {
-		// Sum the two half-hour buckets for this hour
-		firstHalf := halfHourlyData[float64(hour)]      // e.g., 9.0 for 9:00-9:30
-		secondHalf := halfHourlyData[float64(hour)+0.5] // e.g., 9.5 for 9:30-10:00
-		hourlyData[hour] = firstHalf + secondHalf
-	}
-
-	return hourlyData
-}
 
 // queryUnifiedGeminiForTimezone queries Gemini AI for timezone detection.
 func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]any) (*geminiQueryResult, error) {
 	// Check if we have activity data for confidence scoring later
 	hasActivityData := false
-	if hourCounts, ok := contextData["hour_counts"].(map[int]int); ok && len(hourCounts) > 0 {
+	if activityResult, ok := contextData["activity_result"].(*Result); ok && activityResult != nil && activityResult.HalfHourlyActivityUTC != nil && len(activityResult.HalfHourlyActivityUTC) > 0 {
 		hasActivityData = true
 	}
 
@@ -166,10 +149,6 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 			contextData["sleep_hours"] = activityResult.SleepHoursUTC
 		}
 
-		// Convert half-hourly data to hourly data for Gemini (user display remains 30-minute resolution)
-		if activityResult.HalfHourlyActivityUTC != nil {
-			contextData["hour_counts"] = convertHalfHourlyToHourly(activityResult.HalfHourlyActivityUTC)
-		}
 
 		if len(activityResult.TimezoneCandidates) > 0 {
 			contextData["timezone_candidates"] = activityResult.TimezoneCandidates
@@ -616,7 +595,6 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		result.SleepHoursUTC = activityResult.SleepHoursUTC
 		result.SleepRangesLocal = activityResult.SleepRangesLocal
 		result.SleepBucketsUTC = activityResult.SleepBucketsUTC
-		result.HourlyActivityUTC = activityResult.HourlyActivityUTC
 		result.HalfHourlyActivityUTC = activityResult.HalfHourlyActivityUTC
 		result.LunchHoursUTC = activityResult.LunchHoursUTC
 		result.LunchHoursLocal = activityResult.LunchHoursLocal

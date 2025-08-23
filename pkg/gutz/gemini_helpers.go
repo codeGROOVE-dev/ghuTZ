@@ -502,15 +502,6 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		fmt.Fprintf(&sb, "Quiet hours UTC: %v\n", quietHours)
 	}
 
-	// Hourly activity distribution helps validate timezone candidates.
-	if hourCounts, ok := contextData["hour_counts"].(map[int]int); ok && len(hourCounts) > 0 {
-		sb.WriteString("\nHourly activity (UTC):\n")
-		for hour := range 24 {
-			if count, exists := hourCounts[hour]; exists && count > 0 {
-				fmt.Fprintf(&sb, "%02d:00: %d events\n", hour, count)
-			}
-		}
-	}
 	sb.WriteString("\n")
 
 	// Section 3: Repository geography and interests.

@@ -19,18 +19,6 @@ import (
 )
 
 // GlobalLunchPattern represents the best lunch pattern found globally in UTC
-// aggregateHalfHoursToHours converts 30-minute buckets back to hourly buckets for display
-// This keeps CLI output and Gemini communication simple while using 30-min precision internally.
-func aggregateHalfHoursToHours(halfHourCounts map[float64]int) map[int]int {
-	hourCounts := make(map[int]int)
-
-	for bucket, count := range halfHourCounts {
-		hour := int(bucket) // Convert 12.0 and 12.5 both to hour 12
-		hourCounts[hour] += count
-	}
-
-	return hourCounts
-}
 
 // refineHourlySleepFromBuckets uses half-hour resolution data to create accurate sleep hours.
 // Since we always have half-hour data, we should use it for precise sleep detection.
@@ -191,8 +179,8 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	totalActivity := len(uniqueTimestamps)
 
 	// For CLI output and Gemini communication, aggregate halfHourCounts back to hourly buckets
-	// This keeps output simple and readable while using 30-min precision for internal calculations
-	displayHourCounts := aggregateHalfHoursToHours(halfHourCounts)
+	// Note: Removed displayHourCounts as we now use half-hourly precision everywhere
+	// except for the Gemini prompt which aggregates on-demand
 
 	// Find oldest and newest timestamps from the unique set
 	var oldestActivity, newestActivity time.Time
@@ -1010,7 +998,6 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		TopOrganizations:           topOrgs,
 		Confidence:                 confidence,
 		Method:                     "activity_patterns",
-		HourlyActivityUTC:          displayHourCounts, // Store aggregated hourly data for histogram generation
 		HalfHourlyActivityUTC:      halfHourCounts,    // Store 30-minute resolution data
 		HourlyOrganizationActivity: hourOrgActivity,   // Store org-specific activity
 		TimezoneCandidates:         candidates,        // Top 3 timezone candidates with analysis

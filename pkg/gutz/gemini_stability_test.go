@@ -107,9 +107,6 @@ func (d *Detector) buildContextData(userCtx *UserContext, activityResult *Result
 	if activityResult != nil {
 		contextData["activity_result"] = activityResult
 
-		if activityResult.HourlyActivityUTC != nil {
-			contextData["hour_counts"] = activityResult.HourlyActivityUTC
-		}
 
 		if len(activityResult.TimezoneCandidates) > 0 {
 			contextData["timezone_candidates"] = activityResult.TimezoneCandidates
@@ -117,8 +114,8 @@ func (d *Detector) buildContextData(userCtx *UserContext, activityResult *Result
 
 		if activityResult.ActivityDateRange.TotalDays > 0 {
 			totalEvents := 0
-			if activityResult.HourlyActivityUTC != nil {
-				for _, count := range activityResult.HourlyActivityUTC {
+			if activityResult.HalfHourlyActivityUTC != nil {
+				for _, count := range activityResult.HalfHourlyActivityUTC {
 					totalEvents += count
 				}
 			}
@@ -272,10 +269,6 @@ func createTestActivityResult() *Result {
 		},
 		PeakProductivityLocal: PeakTime{
 			Start: 16, End: 16.5, Count: 22, // UTC-10, so 2 UTC = 16 local
-		},
-		HourlyActivityUTC: map[int]int{
-			0: 21, 1: 25, 2: 25, 3: 18, 4: 19, 5: 15, 6: 8, 7: 8,
-			19: 31, 20: 38, 21: 23, 22: 6, 23: 14,
 		},
 		TimezoneCandidates: []timezone.Candidate{
 			{Offset: -10, Confidence: 42.2, EveningActivity: 31, LunchReasonable: true, WorkStartLocal: 9, LunchLocalTime: 11},

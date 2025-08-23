@@ -404,7 +404,6 @@ type Result struct {
 	DetectionTime              time.Time              `json:"detection_time"`
 	CreatedAt                  *time.Time             `json:"created_at,omitempty"`
 	HourlyOrganizationActivity map[int]map[string]int `json:"hourly_organization_activity,omitempty"`
-	HourlyActivityUTC          map[int]int            `json:"hourly_activity_utc"`
 	HalfHourlyActivityUTC      map[float64]int        `json:"half_hourly_activity_utc,omitempty"`
 	Location                   *Location              `json:"location,omitempty"`
 	Verification               *VerificationResult    `json:"verification,omitempty"`

@@ -375,7 +375,6 @@ func (d *Detector) mergeActivityData(result, activityResult *Result) {
 	result.PeakProductivityUTC = activityResult.PeakProductivityUTC
 	result.PeakProductivityLocal = activityResult.PeakProductivityLocal
 	result.TopOrganizations = activityResult.TopOrganizations
-	result.HourlyActivityUTC = activityResult.HourlyActivityUTC
 	result.HalfHourlyActivityUTC = activityResult.HalfHourlyActivityUTC
 	result.HourlyOrganizationActivity = activityResult.HourlyOrganizationActivity
 	result.TimezoneCandidates = activityResult.TimezoneCandidates

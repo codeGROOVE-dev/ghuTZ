@@ -37,11 +37,6 @@ func TestJamonationSleepDetection(t *testing.T) {
 		23.0: 0, 23.5: 1, // Mostly quiet with one blip at 23:30
 	}
 
-	// Aggregate to hourly for the old sleep detection
-	hourCounts := aggregateHalfHoursToHours(halfHourCounts)
-
-	// Old sleep detection (hourly)
-	quietHours := sleep.FindSleepHours(hourCounts)
 
 	// New sleep detection (half-hourly)
 	sleepBuckets := sleep.DetectSleepPeriodsWithHalfHours(halfHourCounts)
@@ -277,20 +272,15 @@ func TestSleepDetectionWithTrailingActivity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Get base hourly counts
-			hourCounts := aggregateHalfHoursToHours(tt.halfHourCounts)
-
-			// Get quiet hours and sleep buckets
-			quietHours := sleep.FindSleepHours(hourCounts)
+			// Get sleep buckets using half-hourly detection
 			sleepBuckets := sleep.DetectSleepPeriodsWithHalfHours(tt.halfHourCounts)
 
 			// Debug output
-			t.Logf("%s: quietHours from FindSleepHours: %v", tt.name, quietHours)
 			t.Logf("%s: sleepBuckets from DetectSleepPeriodsWithHalfHours: %v", tt.name, sleepBuckets)
 			t.Logf("%s: len(sleepBuckets): %d", tt.name, len(sleepBuckets))
 
-			// Refine
-			refinedHours := refineHourlySleepFromBuckets(quietHours, sleepBuckets, tt.halfHourCounts)
+			// Refine (note: this function will need updating if it still depends on hourly data)
+			refinedHours := refineHourlySleepFromBuckets(nil, sleepBuckets, tt.halfHourCounts)
 
 			// Check that expected hours are included
 			refinedMap := make(map[int]bool)

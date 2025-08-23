@@ -270,7 +270,8 @@ function displayResults(data) {
     if (data.peak_productivity_local && data.peak_productivity_local.count > 0) {
         // Using the local version which is already converted
         const peakText = formatHour(data.peak_productivity_local.start) + '-' + formatHour(data.peak_productivity_local.end);
-        document.getElementById('peakHours').textContent = peakText;
+        const peakWithCount = `${peakText} (${data.peak_productivity_local.count} events)`;
+        document.getElementById('peakHours').textContent = peakWithCount;
         document.getElementById('peakRow').style.display = 'table-row';
     }
 
@@ -337,10 +338,10 @@ function displayResults(data) {
         
         // Check if dates are valid and not from year 1 (which indicates zero time values)
         if (oldestDateObj.getFullYear() > 1900 && newestDateObj.getFullYear() > 1900) {
-            // Calculate total events from hourly activity
+            // Calculate total events from half-hourly activity
             let totalEvents = 0;
-            if (data.hourly_activity_utc) {
-                Object.values(data.hourly_activity_utc).forEach(count => {
+            if (data.half_hourly_activity_utc) {
+                Object.values(data.half_hourly_activity_utc).forEach(count => {
                     totalEvents += count;
                 });
             }
@@ -390,7 +391,7 @@ function displayResults(data) {
     }
 
     // Draw histogram if activity data is available
-    if (data.hourly_activity_utc) {
+    if (data.half_hourly_activity_utc) {
         drawHistogram(data);
         document.getElementById('histogramRow').style.display = 'block';
     }
@@ -771,7 +772,6 @@ function drawHistogram(data) {
         halfHourlyData[numKey] = halfHourlyDataRaw[key];
     }
     
-    const hourlyData = data.hourly_activity_utc || {};
     const hourlyOrgData = data.hourly_organization_activity || {};
     const utcOffset = getUTCOffsetFromTimezone(data.timezone, data.activity_timezone);
     console.log('Timezone:', data.timezone, 'Activity timezone:', data.activity_timezone, 'Calculated offset:', utcOffset);
@@ -803,7 +803,10 @@ function drawHistogram(data) {
             const halfHourCount = halfHourlyData[utcTime] || 0;
             const utcHour = Math.floor(utcTime);
             const hourOrgs = hourlyOrgData[utcHour] || {};
-            const hourTotal = hourlyData[utcHour] || 1;
+            // Calculate hourly total by summing the two half-hour buckets for this hour
+            const hourStart = utcHour;
+            const hourMid = utcHour + 0.5;
+            const hourTotal = (halfHourlyData[hourStart] || 0) + (halfHourlyData[hourMid] || 0) || 1;
             const orgHourCount = hourOrgs[orgName] || 0;
             // Distribute the org's hourly count proportionally to half-hour slots
             orgData.push(Math.round((halfHourCount * orgHourCount) / hourTotal));
@@ -829,13 +832,15 @@ function drawHistogram(data) {
             const utcTime = (localTime - utcOffset + 24) % 24;
             
             const halfHourCount = halfHourlyData[utcTime] || 0;
-            const utcHour = Math.floor(utcTime);
-            const hourOrgs = hourlyOrgData[utcHour] || {};
-            const hourTotal = hourlyData[utcHour] || 0;
-            const attributedCount = Object.values(hourOrgs).reduce((sum, count) => sum + count, 0);
-            // Scale the unattributed count proportionally for half-hour slots
-            const unattributedHourly = Math.max(0, hourTotal - attributedCount);
-            const unattributedHalfHour = hourTotal > 0 ? Math.round((halfHourCount * unattributedHourly) / hourTotal) : halfHourCount;
+            
+            // Calculate how much activity is already attributed to organizations for this half-hour slot
+            let attributedHalfHour = 0;
+            for (let i = 0; i < datasets.length; i++) {
+                attributedHalfHour += datasets[i].data[barIndex] || 0;
+            }
+            
+            // The unattributed amount is simply the difference
+            const unattributedHalfHour = Math.max(0, halfHourCount - attributedHalfHour);
             otherData.push(unattributedHalfHour);
         }
         
