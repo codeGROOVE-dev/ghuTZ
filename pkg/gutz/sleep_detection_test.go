@@ -141,6 +141,67 @@ func TestSleepStartsWithQuietBuckets(t *testing.T) {
 	}
 }
 
+func TestSleepEndsWithBurstOfActivity(t *testing.T) {
+	// Test that sleep ends when we see 3+ activities followed by 2+ activities
+	// This matches the rebelopsio morning pattern in UTC time:
+	// 10:00 UTC = 6:00 local (1 activity)
+	// 10:30 UTC = 6:30 local (5 activities)
+	// 11:00 UTC = 7:00 local (2 activities)
+	halfHourCounts := map[float64]int{
+		// Full day to set context (all buckets filled)
+		0.0: 4, 0.5: 0, // 20:00-20:30 local (evening)
+		1.0: 3, 1.5: 0, // 21:00-21:30 local (sleep starts at 1.5)
+		2.0: 0, 2.5: 0, // 22:00-22:30 local
+		3.0: 0, 3.5: 0, // 23:00-23:30 local
+		4.0: 0, 4.5: 0, // 00:00-00:30 local
+		5.0: 0, 5.5: 0, // 01:00-01:30 local
+		6.0: 0, 6.5: 0, // 02:00-02:30 local
+		7.0: 0, 7.5: 0, // 03:00-03:30 local
+		8.0: 0, 8.5: 0, // 04:00-04:30 local
+		9.0: 0, 9.5: 0, // 05:00-05:30 local
+		10.0: 1, 10.5: 5, // 06:00-06:30 local (1 then 5 - burst!)
+		11.0: 2, 11.5: 6, // 07:00-07:30 local (wake up confirmed)
+		12.0: 6, 12.5: 2, // 08:00-08:30 local
+		13.0: 1, 13.5: 1, // 09:00-09:30 local
+		14.0: 6, 14.5: 4, // 10:00-10:30 local
+		15.0: 7, 15.5: 4, // 11:00-11:30 local (lunch)
+		16.0: 10, 16.5: 9, // 12:00-12:30 local
+		17.0: 9, 17.5: 9, // 13:00-13:30 local
+		18.0: 14, 18.5: 15, // 14:00-14:30 local
+		19.0: 12, 19.5: 7, // 15:00-15:30 local
+		20.0: 23, 20.5: 12, // 16:00-16:30 local (peak)
+		21.0: 4, 21.5: 2, // 17:00-17:30 local
+		22.0: 4, 22.5: 5, // 18:00-18:30 local
+		23.0: 2, 23.5: 2, // 19:00-19:30 local
+	}
+
+	sleepBuckets := sleep.DetectSleepPeriodsWithHalfHours(halfHourCounts)
+
+	if len(sleepBuckets) == 0 {
+		t.Fatal("No sleep buckets detected")
+	}
+
+	// Sort buckets to find the last one
+	sort.Float64s(sleepBuckets)
+	lastBucket := sleepBuckets[len(sleepBuckets)-1]
+
+	t.Logf("Sleep buckets: %v", sleepBuckets)
+	t.Logf("Last sleep bucket: %.1f", lastBucket)
+
+	// Sleep should end at 10.0 (the last quiet bucket before the burst)
+	// NOT include 10.5 (5 activities) or beyond
+	if lastBucket > 10.0 {
+		t.Errorf("Sleep continued too long, last bucket %.1f, expected to end at 10.0", lastBucket)
+	}
+
+	// Verify that 10.5 (with 5 activities) is NOT in sleep
+	for _, bucket := range sleepBuckets {
+		if bucket == 10.5 {
+			t.Errorf("Sleep includes bucket 10.5 which has 5 activities (burst of morning activity)")
+		}
+	}
+}
+
 func TestSleepDetectionWithTrailingActivity(t *testing.T) {
 	tests := []struct {
 		name            string

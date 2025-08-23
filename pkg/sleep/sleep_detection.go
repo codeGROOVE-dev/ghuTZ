@@ -69,10 +69,11 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 				currentPeriod = []float64{}
 				previousCount = -1
 			} else {
-				// Halting condition: bucket with 2+ events followed by bucket with 3+ events
-				// This indicates transition from quiet/light activity to real activity
-				if previousCount >= 2 && count >= 3 {
-					// Don't include the previous bucket (with 2+ events) - remove it if added
+				// Halting conditions for end of sleep:
+				// 1. Two consecutive active buckets (2+ followed by 3+)
+				// 2. A burst of activity (3+ followed by 2+) indicating wake-up
+				if (previousCount >= 2 && count >= 3) || (previousCount >= 3 && count >= 2) {
+					// Don't include the previous bucket if it's too active
 					if len(currentPeriod) > 0 && previousCount >= 2 {
 						currentPeriod = currentPeriod[:len(currentPeriod)-1]
 					}
