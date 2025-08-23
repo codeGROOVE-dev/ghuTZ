@@ -500,51 +500,53 @@ function formatHour(decimalHour) {
 }
 
 function getUTCOffsetFromTimezone(timezone, activityTimezone) {
-    // Try to extract UTC offset from timezone string
-    if (activityTimezone && activityTimezone.startsWith('UTC')) {
-        const offsetStr = activityTimezone.replace('UTC', '').replace('GMT', '');
-        const offset = parseInt(offsetStr) || 0;
-        return offset;
-    }
+    // Prefer the real timezone if we have it (e.g., America/New_York)
+    // Only fall back to activity timezone if no real timezone is available
     
-    // Try standard timezone
-    if (timezone) {
+    // Try standard timezone first (this is the authoritative one)
+    if (timezone && !timezone.startsWith('UTC')) {
         try {
-            // Better way to get timezone offset - use Intl.DateTimeFormat
+            // Simple approach: Create dates in UTC and target timezone, compare them
             const now = new Date();
-            const formatter = new Intl.DateTimeFormat('en-US', {
+            
+            // Get UTC hours
+            const utcHours = now.getUTCHours();
+            
+            // Get local hours in the target timezone
+            const localString = now.toLocaleString('en-US', {
                 timeZone: timezone,
-                timeZoneName: 'short'
+                hour: 'numeric',
+                hour12: false
+            });
+            const localHours = parseInt(localString);
+            
+            // Calculate offset
+            // If it's 20:00 UTC and 16:00 local, offset = 16 - 20 = -4
+            let offset = localHours - utcHours;
+            
+            // Handle day boundary (e.g., 23:00 UTC is 01:00 local next day in UTC+2)
+            if (offset > 12) {
+                offset -= 24;
+            } else if (offset < -12) {
+                offset += 24;
+            }
+            
+            console.log('Timezone offset calculation:', {
+                timezone, utcHours, localHours, offset
             });
             
-            // Parse the timezone offset from the formatted date
-            const parts = formatter.formatToParts(now);
-            const timeZoneName = parts.find(part => part.type === 'timeZoneName')?.value || '';
-            
-            // Try to extract offset from timezone abbreviation (e.g., "PST", "EDT", "GMT+12")
-            const offsetMatch = timeZoneName.match(/GMT([+-]\d+)/);
-            if (offsetMatch) {
-                return parseInt(offsetMatch[1]);
-            }
-            
-            // Alternative method: compare UTC and local times
-            const utcTime = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 
-                                     now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds());
-            const tzTime = new Date(now.toLocaleString("en-US", {timeZone: timezone})).getTime();
-            const offset = Math.round((tzTime - utcTime) / (1000 * 60 * 60));
-            
-            // Sanity check - offset should be between -12 and +14
-            if (offset >= -12 && offset <= 14) {
-                return offset;
-            }
+            return offset;
         } catch (e) {
             console.error('Error calculating timezone offset for', timezone, ':', e);
-            // Fallback for UTC+X format
-            if (timezone.startsWith('UTC')) {
-                const offsetStr = timezone.replace('UTC', '').replace('GMT', '');
-                return parseInt(offsetStr) || 0;
-            }
         }
+    }
+    
+    // Fallback to UTC offset formats (either from timezone or activityTimezone)
+    const utcTimezone = timezone?.startsWith('UTC') ? timezone : activityTimezone;
+    if (utcTimezone && utcTimezone.startsWith('UTC')) {
+        const offsetStr = utcTimezone.replace('UTC', '').replace('GMT', '');
+        const offset = parseInt(offsetStr) || 0;
+        return offset;
     }
     
     return 0;
@@ -721,6 +723,7 @@ function drawHistogram(data) {
     const hourlyData = data.hourly_activity_utc || {};
     const hourlyOrgData = data.hourly_organization_activity || {};
     const utcOffset = getUTCOffsetFromTimezone(data.timezone, data.activity_timezone);
+    console.log('Timezone:', data.timezone, 'Activity timezone:', data.activity_timezone, 'Calculated offset:', utcOffset);
     const topOrgs = data.top_organizations || [];
     
     // Define organization colors - only top 3 get colors
@@ -828,62 +831,159 @@ function drawHistogram(data) {
     // Add annotations for sleep, lunch, and peak times if available
     const annotations = {};
     
-    // Add sleep annotation
+    // Add sleep annotation with gradient and better visuals
     if (data.sleep_ranges_local && data.sleep_ranges_local.length > 0) {
         data.sleep_ranges_local.forEach((range, i) => {
-            const startIndex = Math.floor(range.start / increment);
-            const endIndex = Math.floor(range.end / increment);
-            annotations[`sleep${i}`] = {
-                type: 'box',
-                xMin: startIndex - 0.5,
-                xMax: endIndex - 0.5,
-                backgroundColor: 'rgba(66, 133, 244, 0.1)', // Light blue for sleep
-                borderColor: 'rgba(66, 133, 244, 0.3)',
-                borderWidth: 1,
-                label: {
-                    content: '💤 Sleep',
-                    enabled: true,
-                    position: 'start'
-                }
-            };
+            // Handle wraparound sleep (e.g., 22:00 to 06:00)
+            if (range.end < range.start) {
+                // Sleep wraps around midnight - create two boxes
+                // First box: from start to midnight (24:00)
+                const firstStartIndex = Math.floor(range.start / increment);
+                const firstEndIndex = Math.floor(24 / increment); // End of day
+                annotations[`sleep${i}_part1`] = {
+                    type: 'box',
+                    xMin: firstStartIndex - 0.5,
+                    xMax: firstEndIndex - 0.5,
+                    backgroundColor: 'rgba(37, 99, 235, 0.08)', // Soft blue gradient
+                    borderColor: 'rgba(37, 99, 235, 0.4)',
+                    borderWidth: 1,
+                    borderDash: [5, 3],
+                    label: {
+                        content: '💤 Sleep',
+                        enabled: true,
+                        position: 'start',
+                        font: {
+                            size: 11,
+                            weight: 'bold'
+                        },
+                        color: 'rgba(37, 99, 235, 0.8)',
+                        yAdjust: -8
+                    }
+                };
+                
+                // Second box: from midnight to end
+                const secondStartIndex = 0; // Start of day
+                const secondEndIndex = Math.floor(range.end / increment);
+                annotations[`sleep${i}_part2`] = {
+                    type: 'box',
+                    xMin: secondStartIndex - 0.5,
+                    xMax: secondEndIndex - 0.5,
+                    backgroundColor: 'rgba(37, 99, 235, 0.08)', // Soft blue gradient
+                    borderColor: 'rgba(37, 99, 235, 0.4)',
+                    borderWidth: 1,
+                    borderDash: [5, 3],
+                    label: {
+                        content: '💤 Sleep',
+                        enabled: true,
+                        position: 'end',
+                        font: {
+                            size: 11,
+                            weight: 'bold'
+                        },
+                        color: 'rgba(37, 99, 235, 0.8)',
+                        yAdjust: -8
+                    }
+                };
+            } else {
+                // Normal sleep within the same day
+                const startIndex = Math.floor(range.start / increment);
+                const endIndex = Math.floor(range.end / increment);
+                annotations[`sleep${i}`] = {
+                    type: 'box',
+                    xMin: startIndex - 0.5,
+                    xMax: endIndex - 0.5,
+                    backgroundColor: 'rgba(37, 99, 235, 0.08)', // Soft blue gradient
+                    borderColor: 'rgba(37, 99, 235, 0.4)',
+                    borderWidth: 1,
+                    borderDash: [5, 3],
+                    label: {
+                        content: '💤 Sleep',
+                        enabled: true,
+                        position: 'start',
+                        font: {
+                            size: 11,
+                            weight: 'bold'
+                        },
+                        color: 'rgba(37, 99, 235, 0.8)',
+                        yAdjust: -8
+                    }
+                };
+            }
         });
     }
     
-    // Add lunch annotation
+    // Add lunch annotation with confidence indicator
     if (data.lunch_hours_local && data.lunch_hours_local.start) {
         const lunchStartIndex = Math.floor(data.lunch_hours_local.start / increment);
         const lunchEndIndex = Math.floor(data.lunch_hours_local.end / increment);
+        const confidence = data.lunch_hours_local.confidence || 0;
+        const opacity = Math.max(0.08, confidence * 0.15); // Scale opacity with confidence
+        
         annotations.lunch = {
             type: 'box',
             xMin: lunchStartIndex - 0.5,
             xMax: lunchEndIndex - 0.5,
-            backgroundColor: 'rgba(52, 168, 83, 0.1)', // Light green for lunch
-            borderColor: 'rgba(52, 168, 83, 0.3)',
+            backgroundColor: `rgba(34, 197, 94, ${opacity})`, // Green with confidence-based opacity
+            borderColor: 'rgba(34, 197, 94, 0.5)',
             borderWidth: 1,
+            borderDash: confidence > 0.5 ? [] : [3, 3], // Solid if confident, dashed if not
             label: {
-                content: '🍽️ Lunch',
+                content: `🍽️ Lunch ${confidence > 0 ? '(' + Math.round(confidence * 100) + '%)' : ''}`,
                 enabled: true,
-                position: 'center'
+                position: 'center',
+                font: {
+                    size: 11,
+                    weight: 'bold'
+                },
+                color: 'rgba(34, 197, 94, 0.9)',
+                yAdjust: -8
             }
         };
     }
     
-    // Add peak productivity annotation
+    // Add peak productivity annotation with activity count
     if (data.peak_productivity_local && data.peak_productivity_local.start) {
+        console.log('Peak local times:', data.peak_productivity_local);
+        console.log('UTC offset:', utcOffset);
         const peakStartIndex = Math.floor(data.peak_productivity_local.start / increment);
         const peakEndIndex = Math.floor(data.peak_productivity_local.end / increment);
+        console.log('Peak indices:', peakStartIndex, peakEndIndex, 'for bars at', peakStartIndex * increment, '-', peakEndIndex * increment);
+        const peakCount = data.peak_productivity_local.count || 0;
+        
         annotations.peak = {
             type: 'box',
             xMin: peakStartIndex - 0.5,
             xMax: peakEndIndex - 0.5,
-            backgroundColor: 'rgba(251, 188, 4, 0.1)', // Light yellow for peak
-            borderColor: 'rgba(251, 188, 4, 0.3)',
+            backgroundColor: 'rgba(251, 191, 36, 0.08)', // Warm yellow/orange
+            borderColor: 'rgba(251, 191, 36, 0.5)',
             borderWidth: 1,
+            borderDash: [4, 2],
             label: {
-                content: '⚡ Peak',
+                content: `⚡ Peak${peakCount > 0 ? ' (' + peakCount + ' events)' : ''}`,
                 enabled: true,
-                position: 'end'
+                position: 'end',
+                font: {
+                    size: 11,
+                    weight: 'bold'
+                },
+                color: 'rgba(251, 146, 60, 0.9)',
+                yAdjust: -8
             }
+        };
+    }
+    
+    // Add work hours annotation (subtle background)
+    if (data.active_hours_local && data.active_hours_local.start) {
+        const workStartIndex = Math.floor(data.active_hours_local.start / increment);
+        const workEndIndex = Math.floor(data.active_hours_local.end / increment);
+        annotations.workHours = {
+            type: 'box',
+            xMin: workStartIndex - 0.5,
+            xMax: workEndIndex - 0.5,
+            backgroundColor: 'rgba(156, 163, 175, 0.03)', // Very subtle grey
+            borderColor: 'transparent',
+            borderWidth: 0,
+            drawTime: 'beforeDatasetsDraw' // Draw behind the data
         };
     }
     
@@ -907,6 +1007,48 @@ function drawHistogram(data) {
                     text: `Daily Activity Pattern (${data.timezone}) - 30-minute Resolution`,
                     font: {
                         size: 14
+                    },
+                    padding: {
+                        bottom: 10
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        afterLabel: function(context) {
+                            const index = context.dataIndex;
+                            const localTime = index * increment;
+                            const hour = Math.floor(localTime);
+                            const minutes = Math.round((localTime - hour) * 60);
+                            const timeStr = String(hour).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+                            
+                            const labels = [];
+                            
+                            // Check if this time is in sleep period
+                            if (data.sleep_ranges_local) {
+                                for (const range of data.sleep_ranges_local) {
+                                    if (localTime >= range.start && localTime < range.end) {
+                                        labels.push('💤 Sleep period');
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            // Check if this is lunch time
+                            if (data.lunch_hours_local && data.lunch_hours_local.start) {
+                                if (localTime >= data.lunch_hours_local.start && localTime < data.lunch_hours_local.end) {
+                                    labels.push('🍽️ Lunch break');
+                                }
+                            }
+                            
+                            // Check if this is peak productivity
+                            if (data.peak_productivity_local && data.peak_productivity_local.start) {
+                                if (localTime >= data.peak_productivity_local.start && localTime < data.peak_productivity_local.end) {
+                                    labels.push('⚡ Peak productivity');
+                                }
+                            }
+                            
+                            return labels;
+                        }
                     }
                 },
                 annotation: {
@@ -961,6 +1103,133 @@ function drawHistogram(data) {
         }
     });
     
+    // Add a visual legend below the chart for sleep, lunch, and peak times
+    createActivityLegend(data);
+}
+
+function createActivityLegend(data) {
+    // Remove existing legend if it exists
+    const existingLegend = document.getElementById('activityLegend');
+    if (existingLegend) {
+        existingLegend.remove();
+    }
+    
+    const legendItems = [];
+    
+    // Add sleep periods
+    if (data.sleep_ranges_local && data.sleep_ranges_local.length > 0) {
+        const sleepPeriods = data.sleep_ranges_local.map(range => {
+            const startHour = Math.floor(range.start);
+            const startMin = Math.round((range.start - startHour) * 60);
+            const endHour = Math.floor(range.end);
+            const endMin = Math.round((range.end - endHour) * 60);
+            return `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}-${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
+        }).join(', ');
+        legendItems.push({
+            icon: '💤',
+            label: 'Sleep',
+            value: sleepPeriods,
+            color: 'rgba(37, 99, 235, 0.8)'
+        });
+    }
+    
+    // Add lunch period
+    if (data.lunch_hours_local && data.lunch_hours_local.start) {
+        const lunchStart = data.lunch_hours_local.start;
+        const lunchEnd = data.lunch_hours_local.end;
+        const startHour = Math.floor(lunchStart);
+        const startMin = Math.round((lunchStart - startHour) * 60);
+        const endHour = Math.floor(lunchEnd);
+        const endMin = Math.round((lunchEnd - endHour) * 60);
+        const confidence = data.lunch_hours_local.confidence || 0;
+        const lunchStr = `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}-${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
+        legendItems.push({
+            icon: '🍽️',
+            label: 'Lunch',
+            value: confidence > 0 ? `${lunchStr} (${Math.round(confidence * 100)}% conf)` : lunchStr,
+            color: 'rgba(34, 197, 94, 0.9)'
+        });
+    }
+    
+    // Add peak productivity
+    if (data.peak_productivity_local && data.peak_productivity_local.start) {
+        const peakStart = data.peak_productivity_local.start;
+        const peakEnd = data.peak_productivity_local.end;
+        const startHour = Math.floor(peakStart);
+        const startMin = Math.round((peakStart - startHour) * 60);
+        const endHour = Math.floor(peakEnd);
+        const endMin = Math.round((peakEnd - endHour) * 60);
+        const peakCount = data.peak_productivity_local.count || 0;
+        const peakStr = `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}-${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
+        legendItems.push({
+            icon: '⚡',
+            label: 'Peak',
+            value: peakCount > 0 ? `${peakStr} (${peakCount} events)` : peakStr,
+            color: 'rgba(251, 146, 60, 0.9)'
+        });
+    }
+    
+    // Add work hours
+    if (data.active_hours_local && data.active_hours_local.start) {
+        const workStart = data.active_hours_local.start;
+        const workEnd = data.active_hours_local.end;
+        const startHour = Math.floor(workStart);
+        const startMin = Math.round((workStart - startHour) * 60);
+        const endHour = Math.floor(workEnd);
+        const endMin = Math.round((workEnd - endHour) * 60);
+        legendItems.push({
+            icon: '💼',
+            label: 'Work',
+            value: `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}-${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`,
+            color: 'rgba(107, 114, 128, 0.7)'
+        });
+    }
+    
+    if (legendItems.length === 0) return;
+    
+    // Create legend container
+    const legendDiv = document.createElement('div');
+    legendDiv.id = 'activityLegend';
+    legendDiv.style.cssText = `
+        display: flex;
+        flex-wrap: wrap;
+        gap: 15px;
+        margin-top: 15px;
+        padding: 12px;
+        background: #f9fafb;
+        border-radius: 8px;
+        border: 1px solid #e5e7eb;
+        font-size: 13px;
+        align-items: center;
+        justify-content: center;
+    `;
+    
+    legendItems.forEach(item => {
+        const itemDiv = document.createElement('div');
+        itemDiv.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #e5e7eb;
+        `;
+        
+        itemDiv.innerHTML = `
+            <span style="font-size: 16px;">${item.icon}</span>
+            <span style="color: ${item.color}; font-weight: 600;">${item.label}:</span>
+            <span style="color: #4b5563;">${item.value}</span>
+        `;
+        
+        legendDiv.appendChild(itemDiv);
+    });
+    
+    // Insert after canvas
+    const container = document.getElementById('histogramContainer');
+    if (container) {
+        container.appendChild(legendDiv);
+    }
 }
 
 
