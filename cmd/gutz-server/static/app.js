@@ -287,13 +287,13 @@ function displayResults(data) {
         const orgsContainer = document.getElementById('organizations');
         orgsContainer.innerHTML = ''; // Clear existing content
         
-        // Colors for top 3 only
+        // Colors for top 3 only - matching chart colors
         const colors = [
-            '#4285F4', // Google Blue for 1st
-            '#FBBC04', // Google Yellow for 2nd
-            '#EA4335', // Google Red for 3rd
+            '#007aff', // Apple Blue for 1st
+            '#ff9500', // Apple Orange for 2nd
+            '#af52de', // Apple Purple for 3rd
         ];
-        const greyColor = '#999999'; // Grey for all others
+        const greyColor = '#8e8e93'; // Apple system grey for all others
         
         // Show all organizations with color-coded counts and links
         data.top_organizations.forEach((org, i) => {
@@ -776,13 +776,13 @@ function drawHistogram(data) {
     console.log('Timezone:', data.timezone, 'Activity timezone:', data.activity_timezone, 'Calculated offset:', utcOffset);
     const topOrgs = data.top_organizations || [];
     
-    // Define organization colors - only top 3 get colors
+    // Define organization colors with a funky gradient feel - top 3 get vibrant colors
     const orgColors = [
-        '#4285F4', // Google Blue for 1st
-        '#FBBC04', // Google Yellow for 2nd
-        '#EA4335', // Google Red for 3rd
+        '#007aff', // Apple Blue for 1st
+        '#ff9500', // Apple Orange for 2nd 
+        '#af52de', // Apple Purple for 3rd
     ];
-    const otherColor = '#999999'; // Grey for all others
+    const otherColor = '#8e8e93'; // Apple system grey for all others
     
     // Create datasets for stacked bar chart - 48 bars for 30-minute resolution
     const datasets = [];
@@ -894,10 +894,10 @@ function drawHistogram(data) {
                     type: 'box',
                     xMin: firstStartIndex - 0.5,
                     xMax: firstEndIndex - 0.5,
-                    backgroundColor: 'rgba(37, 99, 235, 0.08)', // Soft blue gradient
-                    borderColor: 'rgba(37, 99, 235, 0.4)',
+                    backgroundColor: 'rgba(0, 122, 255, 0.06)', // Soft Apple blue gradient
+                    borderColor: 'rgba(0, 122, 255, 0.3)',
                     borderWidth: 1,
-                    borderDash: [5, 3],
+                    borderDash: [6, 4],
                     label: {
                         content: '💤 Sleep',
                         enabled: true,
@@ -906,7 +906,7 @@ function drawHistogram(data) {
                             size: 11,
                             weight: 'bold'
                         },
-                        color: 'rgba(37, 99, 235, 0.8)',
+                        color: 'rgba(0, 122, 255, 0.9)',
                         yAdjust: -8
                     }
                 };
@@ -918,10 +918,10 @@ function drawHistogram(data) {
                     type: 'box',
                     xMin: secondStartIndex - 0.5,
                     xMax: secondEndIndex - 0.5,
-                    backgroundColor: 'rgba(37, 99, 235, 0.08)', // Soft blue gradient
-                    borderColor: 'rgba(37, 99, 235, 0.4)',
+                    backgroundColor: 'rgba(0, 122, 255, 0.06)', // Soft Apple blue gradient
+                    borderColor: 'rgba(0, 122, 255, 0.3)',
                     borderWidth: 1,
-                    borderDash: [5, 3],
+                    borderDash: [6, 4],
                     label: {
                         content: '💤 Sleep',
                         enabled: true,
@@ -930,7 +930,7 @@ function drawHistogram(data) {
                             size: 11,
                             weight: 'bold'
                         },
-                        color: 'rgba(37, 99, 235, 0.8)',
+                        color: 'rgba(0, 122, 255, 0.9)',
                         yAdjust: -8
                     }
                 };
@@ -942,10 +942,10 @@ function drawHistogram(data) {
                     type: 'box',
                     xMin: startIndex - 0.5,
                     xMax: endIndex - 0.5,
-                    backgroundColor: 'rgba(37, 99, 235, 0.08)', // Soft blue gradient
-                    borderColor: 'rgba(37, 99, 235, 0.4)',
+                    backgroundColor: 'rgba(0, 122, 255, 0.06)', // Soft Apple blue gradient
+                    borderColor: 'rgba(0, 122, 255, 0.3)',
                     borderWidth: 1,
-                    borderDash: [5, 3],
+                    borderDash: [6, 4],
                     label: {
                         content: '💤 Sleep',
                         enabled: true,
@@ -954,7 +954,7 @@ function drawHistogram(data) {
                             size: 11,
                             weight: 'bold'
                         },
-                        color: 'rgba(37, 99, 235, 0.8)',
+                        color: 'rgba(0, 122, 255, 0.9)',
                         yAdjust: -8
                     }
                 };
@@ -973,10 +973,10 @@ function drawHistogram(data) {
             type: 'box',
             xMin: lunchStartIndex - 0.5,
             xMax: lunchEndIndex - 0.5,
-            backgroundColor: `rgba(34, 197, 94, ${opacity})`, // Green with confidence-based opacity
-            borderColor: 'rgba(34, 197, 94, 0.5)',
+            backgroundColor: `rgba(52, 199, 89, ${opacity})`, // Apple green with confidence-based opacity
+            borderColor: 'rgba(52, 199, 89, 0.5)',
             borderWidth: 1,
-            borderDash: confidence > 0.5 ? [] : [3, 3], // Solid if confident, dashed if not
+            borderDash: confidence > 0.5 ? [] : [4, 4], // Solid if confident, dashed if not
             label: {
                 content: `🍽️ Lunch ${confidence > 0 ? '(' + Math.round(confidence * 100) + '%)' : ''}`,
                 enabled: true,
@@ -985,7 +985,7 @@ function drawHistogram(data) {
                     size: 11,
                     weight: 'bold'
                 },
-                color: 'rgba(34, 197, 94, 0.9)',
+                color: 'rgba(52, 199, 89, 0.9)',
                 yAdjust: -8
             }
         };
@@ -1011,12 +1011,15 @@ function drawHistogram(data) {
                 },
                 title: {
                     display: true,
-                    text: `Daily Activity Pattern (${data.timezone}) - 30-minute Resolution`,
+                    text: `Daily Activity Pattern (${data.timezone})`,
                     font: {
-                        size: 14
+                        size: 16,
+                        weight: '600',
+                        family: '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif'
                     },
+                    color: '#1d1d1f',
                     padding: {
-                        bottom: 10
+                        bottom: 16
                     }
                 },
                 tooltip: {
@@ -1062,23 +1065,45 @@ function drawHistogram(data) {
                     stacked: true,
                     title: {
                         display: true,
-                        text: 'Activity Count'
+                        text: 'Activity Count',
+                        font: {
+                            size: 13,
+                            weight: '500'
+                        },
+                        color: '#6e6e73'
                     },
                     ticks: {
-                        precision: 0 // Show whole numbers only
+                        precision: 0, // Show whole numbers only
+                        font: {
+                            size: 11
+                        },
+                        color: '#8e8e93'
+                    },
+                    grid: {
+                        color: 'rgba(0, 0, 0, 0.05)',
+                        drawBorder: false
                     }
                 },
                 x: {
                     stacked: true,
                     title: {
                         display: true,
-                        text: 'Time (Local)'
+                        text: 'Time (Local)',
+                        font: {
+                            size: 13,
+                            weight: '500'
+                        },
+                        color: '#6e6e73'
                     },
                     ticks: {
                         maxRotation: 45,
                         minRotation: 0,
                         autoSkip: true,
                         maxTicksLimit: 24, // Show only hour labels for readability
+                        font: {
+                            size: 11
+                        },
+                        color: '#8e8e93',
                         callback: function(value, index) {
                             // Only show labels for whole hours (every other bar)
                             if (index % 2 !== 0) {
@@ -1086,6 +1111,10 @@ function drawHistogram(data) {
                             }
                             return this.getLabelForValue(value);
                         }
+                    },
+                    grid: {
+                        color: 'rgba(0, 0, 0, 0.03)',
+                        drawBorder: false
                     },
                     barPercentage: 0.95, // Thin bars for 48 bars
                     categoryPercentage: 1.0
@@ -1130,7 +1159,7 @@ function createActivityLegend(data) {
             icon: '💤',
             label: 'Sleep',
             value: sleepPeriods,
-            color: 'rgba(37, 99, 235, 0.8)'
+            color: 'rgba(0, 122, 255, 0.9)'
         });
     }
     
@@ -1148,7 +1177,7 @@ function createActivityLegend(data) {
             icon: '🍽️',
             label: 'Lunch',
             value: confidence > 0 ? `${lunchStr} (${Math.round(confidence * 100)}% conf)` : lunchStr,
-            color: 'rgba(34, 197, 94, 0.9)'
+            color: 'rgba(52, 199, 89, 0.9)'
         });
     }
     
@@ -1166,7 +1195,7 @@ function createActivityLegend(data) {
             icon: '⚡',
             label: 'Peak',
             value: peakCount > 0 ? `${peakStr} (${peakCount} events)` : peakStr,
-            color: 'rgba(251, 146, 60, 0.9)'
+            color: 'rgba(255, 149, 0, 0.9)'
         });
     }
     

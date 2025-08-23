@@ -5,7 +5,7 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>
             {{if .Username}}{{.Username}} - guTZ{{else}}guuTZ • Developer
-            Timezone Lookup{{end}}
+            Timezone Detective{{end}}
         </title>
         <link
             rel="stylesheet"
@@ -46,7 +46,7 @@
                 display: flex;
                 align-items: center;
                 margin-bottom: 32px;
-                border-bottom: 4px solid #ffe838;
+                border-bottom: 3px solid #ffcc00; /* Apple yellow with better contrast */
                 padding-bottom: 20px;
                 position: relative;
                 transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
@@ -93,10 +93,11 @@
             }
 
             h2 {
-                font-size: 18px;
+                font-size: 20px; /* Apple standard heading */
                 font-weight: 600;
-                margin: 28px 0 16px 0;
+                margin: 32px 0 16px 0; /* Better spacing */
                 letter-spacing: -0.02em;
+                color: #1d1d1f; /* Apple primary text */
             }
 
             .intro-text {
@@ -136,12 +137,12 @@
             input[type="text"] {
                 flex: 0 1 260px;
                 padding: 12px 16px;
-                border: 2px solid #000;
-                font-size: 16px;
+                border: 1.5px solid #d2d2d7; /* Apple input border */
+                font-size: 17px; /* Apple standard input text */
                 font-family: inherit;
-                font-weight: 500;
+                font-weight: 400;
                 transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-                border-radius: 8px;
+                border-radius: 10px; /* Apple standard radius */
                 background: #fff;
             }
 
@@ -157,25 +158,25 @@
 
             input[type="text"]:focus {
                 outline: none;
-                border-color: #000;
-                box-shadow: 0 0 0 4px rgba(255, 232, 56, 0.5);
-                transform: translateY(-1px);
+                border-color: #007aff; /* Apple blue */
+                box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15); /* Apple focus ring */
+                transform: none; /* Remove jump effect */
             }
 
             input[type="text"]:hover:not(:focus) {
-                border-color: #333;
+                border-color: #86868b; /* Apple tertiary */
             }
 
             button {
                 padding: 12px 24px;
-                border: 2px solid #000;
+                border: 2px solid #1d1d1f; /* Apple primary */
                 background: #fff;
-                font-size: 16px;
+                font-size: 17px; /* Apple standard button text */
                 cursor: pointer;
                 font-family: inherit;
                 font-weight: 600;
                 transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-                border-radius: 8px;
+                border-radius: 10px; /* Apple standard radius */
                 white-space: nowrap;
                 letter-spacing: -0.01em;
                 position: relative;
@@ -189,7 +190,7 @@
                 left: -100%;
                 width: 100%;
                 height: 100%;
-                background: #ffe838;
+                background: #ffcc00; /* Better contrast yellow */
                 transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
                 z-index: -1;
             }
@@ -203,8 +204,8 @@
             }
 
             button:hover {
-                transform: translateY(-2px) scale(1.02);
-                box-shadow: 0 6px 0 #000;
+                transform: translateY(-1px);
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); /* Subtle Apple-style shadow */
             }
 
             button:hover::before {
@@ -217,12 +218,12 @@
             }
 
             button:disabled {
-                background: #f5f5f5;
-                color: #999;
+                background: #f2f2f7; /* Apple system background */
+                color: #86868b; /* Apple tertiary text */
                 cursor: not-allowed;
                 transform: none;
                 box-shadow: none;
-                border-color: #ddd;
+                border-color: #d2d2d7; /* Apple separator */
             }
 
             button:disabled::before {
@@ -269,9 +270,9 @@
             .error {
                 display: none;
                 color: #000;
-                background: #f5f5f5;
+                background: #f2f2f7; /* Apple system background */
                 padding: 10px;
-                border: 1px solid #ccc;
+                border: 1px solid #d2d2d7; /* Apple separator */
                 margin: 20px 0;
             }
 
@@ -321,20 +322,21 @@
                 display: table-cell;
                 width: 140px;
                 min-width: 140px;
-                color: #666;
-                font-size: 13px;
-                padding: 8px 12px 8px 0;
+                color: #6e6e73; /* Apple secondary label color */
+                font-size: 15px; /* Apple standard small text */
+                padding: 10px 16px 10px 0; /* Better vertical rhythm */
                 vertical-align: top;
-                border-bottom: 1px solid #eee;
+                border-bottom: 1px solid #d2d2d7; /* Apple separator color */
             }
 
             .result-value {
                 display: table-cell;
-                color: #000;
+                color: #1d1d1f; /* Apple primary text color */
                 font-weight: 500;
-                padding: 8px 0;
-                border-bottom: 1px solid #eee;
+                padding: 10px 0; /* Match label padding */
+                border-bottom: 1px solid #d2d2d7; /* Apple separator color */
                 vertical-align: top;
+                line-height: 1.4; /* Better readability */
             }
 
             .result-row:last-child .result-label,
@@ -352,16 +354,16 @@
 
             .result-row.histogram-row {
                 display: block;
-                margin: 20px 0;
-                padding-top: 15px;
-                border-top: 2px solid #ddd;
+                margin: 24px 0;
+                padding-top: 20px;
+                border-top: 1px solid #d2d2d7; /* Apple separator */
             }
 
             .result-row.section-divider {
                 display: block;
                 margin-top: 20px;
                 padding-top: 15px;
-                border-top: 2px solid #ddd;
+                border-top: 2px solid #d2d2d7; /* Apple separator */
             }
 
             /* Mobile responsive */
@@ -376,7 +378,7 @@
             #map {
                 width: 100%;
                 height: 200px;
-                border: 1px solid #ccc;
+                border: 1px solid #d2d2d7; /* Apple separator */
                 background: #f9f9f9;
                 margin-top: 10px;
                 position: relative;
@@ -384,14 +386,21 @@
 
             #histogramContainer {
                 width: 100%;
-                margin-top: 15px;
-                padding: 20px;
-                background: #fafafa;
-                border: 1px solid #e0e0e0;
-                border-radius: 8px;
+                margin-top: 20px;
+                padding: 24px;
+                background: linear-gradient(180deg, #ffffff 0%, #f9f9fb 100%);
+                border: 1px solid #d2d2d7;
+                border-radius: 12px;
                 min-height: 400px; /* Increased height to accommodate legend */
                 display: flex;
                 flex-direction: column;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+                transition: all 0.3s ease;
+            }
+
+            #histogramContainer:hover {
+                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+                transform: translateY(-1px);
             }
 
             #activityChart {
@@ -405,7 +414,7 @@
                 gap: 20px;
                 margin-top: 15px;
                 font-size: 12px;
-                color: #666;
+                color: #6e6e73; /* Apple secondary text */
             }
 
             .legend-item {
@@ -428,16 +437,17 @@
             .footer {
                 margin-top: 40px;
                 padding-top: 20px;
-                border-top: 1px solid #eee;
+                border-top: 1px solid #d2d2d7; /* Apple separator */
                 font-size: 12px;
-                color: #666;
+                color: #6e6e73; /* Apple secondary text */
                 text-align: center;
             }
 
             .footer a {
-                color: #000;
+                color: #007aff;
                 text-decoration: none;
                 margin: 0 10px;
+                font-weight: 500;
             }
 
             .footer a:hover {
@@ -481,7 +491,7 @@
             .result-value {
                 position: relative;
             }
-            
+
             /* Tooltip styling for informational hovers */
             .result-value span[title] {
                 cursor: help;
@@ -489,27 +499,34 @@
                 display: inline-block;
                 position: relative;
             }
-            
+
             /* Simple native tooltip enhancement */
             .result-value span[title]:hover {
                 border-bottom-color: #666;
             }
 
-            /* Style the applications box on hover */
+            /* Style the applications box on hover with funk */
             .applications-box:hover {
-                border-left-width: 12px !important;
-                padding-left: 16px !important;
+                transform: translateY(-2px) rotate(-0.5deg);
+                box-shadow: 0 8px 20px rgba(255, 204, 0, 0.15) !important;
+                background: linear-gradient(
+                    135deg,
+                    #fff 0%,
+                    #fffbf0 100%
+                ) !important;
             }
 
             a {
-                color: #000;
+                color: #007aff; /* Apple link blue */
                 text-decoration: none;
                 position: relative;
                 transition: all 0.2s ease;
+                font-weight: 500;
             }
 
             a:hover {
                 text-decoration: none;
+                color: #0051d5; /* Darker blue on hover */
             }
 
             a::after {
@@ -519,8 +536,8 @@
                 left: 0;
                 width: 0;
                 height: 2px;
-                background: #ffe838;
-                transition: width 0.3s ease;
+                background: #ffcc00; /* Better contrast yellow */
+                transition: width 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
             }
 
             a:hover::after {
@@ -580,7 +597,7 @@
     <body>
         <div class="header">
             <img src="/static/logo.png" alt="guTZ" class="logo" />
-            <h1>guTZ • Developer Timezone Lookup</h1>
+            <h1>guTZ • Developer Timezone Detective</h1>
         </div>
 
         <p class="intro-text">
@@ -607,8 +624,8 @@
         <div id="loading" class="loading">Searching...</div>
 
         <div id="result" class="results">
-            <div id="suspiciousWarning" style="display: none;"></div>
-            
+            <div id="suspiciousWarning" style="display: none"></div>
+
             <h2>Approximate location</h2>
 
             <div class="result-row map-row" id="mapRow" style="display: none">
@@ -644,7 +661,6 @@
                     <span class="result-label">Data sources:</span>
                     <span class="result-value" id="dataSources">-</span>
                 </div>
-
 
                 <div class="result-row" id="hoursRow" style="display: none">
                     <span class="result-label">Active hours:</span>
@@ -695,38 +711,57 @@
         <div
             class="applications-box"
             style="
-                margin-top: 30px;
-                padding: 15px 15px 15px 20px;
-                background: #fff;
-                border: 2px solid #000;
-                border-left: 8px solid #ffe838;
-                border-radius: 0;
-                font-size: 12px;
-                color: #000;
+                margin-top: 40px;
+                padding: 24px;
+                background: linear-gradient(135deg, #f9f9fb 0%, #ffffff 100%);
+                border: 1px solid #d2d2d7;
+                border-radius: 12px;
+                font-size: 15px;
+                color: #1d1d1f;
                 position: relative;
-                transition: all 0.3s ease;
+                transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+                overflow: hidden;
             "
         >
+            <div
+                style="
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 4px;
+                    height: 100%;
+                    background: linear-gradient(
+                        180deg,
+                        #ffcc00 0%,
+                        #ff9500 100%
+                    );
+                "
+            ></div>
             <h3
                 style="
-                    margin: 0 0 10px 0;
-                    font-size: 14px;
-                    color: #000;
-                    font-weight: 700;
+                    margin: 0 0 12px 0;
+                    font-size: 17px;
+                    color: #1d1d1f;
+                    font-weight: 600;
+                    letter-spacing: -0.02em;
                 "
             >
-                Why Though?
+                💡 Why Though?
             </h3>
-            <p style="margin: 0 0 12px 0">
-                guTZ powers the timezone detection that
-                <a href="https://codegroove.dev/products/hub/">grooveHUB</a>
-                needs to find code reviewers who share work hours with PR
-                authors, among other constraints.
+            <p style="margin: 0 0 12px 0; line-height: 1.5">
+                guTZ powers
+                <a
+                    href="https://codegroove.dev/products/hub/"
+                    style="font-weight: 600"
+                    >grooveHUB</a
+                >'s ability to find candidates for real-time code reviews.
             </p>
-            <p style="margin: 0 0 12px 0">
-                <strong>Security use case:</strong> Detect location
-                mismatches—like a prospective hire in Albuquerque working
-                Pyongyang hours.
+            <p style="margin: 0; line-height: 1.5">
+                It also has a useful
+                <strong style="color: #ff3b30">security application</strong>:
+                background-checking remote hires or contributors who claim to be
+                in Topeka but work Pyongyang hours.
             </p>
         </div>
 
