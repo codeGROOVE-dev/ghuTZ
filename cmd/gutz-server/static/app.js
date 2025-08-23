@@ -93,7 +93,7 @@ async function detectUser(username) {
         
         // Add details if available
         if (error.details) {
-            errorHTML += '<br><span style="font-size: 0.9em; color: #666; margin-top: 8px; display: inline-block;">' + error.details + '</span>';
+            errorHTML += '<br><span style="font-size: 14px; color: #666; margin-top: 8px; display: inline-block;">' + error.details + '</span>';
         }
         
         errorDiv.innerHTML = errorHTML;
@@ -253,7 +253,7 @@ function displayResults(data) {
         // Format active hours with relative time deltas
         const startTime = formatHour(localStart);
         const endTime = formatHour(localEnd);
-        const activeHoursText = `${startTime} <span style="color: #666; font-size: 0.9em;">(${startDelta})</span> - ${endTime} <span style="color: #666; font-size: 0.9em;">(${endDelta})</span>`;
+        const activeHoursText = `${startTime} <span style="color: #666; font-size: 13px;">(${startDelta})</span> - ${endTime} <span style="color: #666; font-size: 13px;">(${endDelta})</span>`;
         
         document.getElementById('activeHours').innerHTML = activeHoursText;
         document.getElementById('hoursRow').style.display = 'table-row';
@@ -1243,7 +1243,7 @@ function createActivityLegend(data) {
         background: #f9fafb;
         border-radius: 6px;
         border: 1px solid #e5e7eb;
-        font-size: 12px;
+        font-size: 14px;
         align-items: center;
         justify-content: center;
     `;
@@ -1261,9 +1261,9 @@ function createActivityLegend(data) {
         `;
         
         itemDiv.innerHTML = `
-            <span style="font-size: 14px;">${item.icon}</span>
-            <span style="color: ${item.color}; font-weight: 600; font-size: 11px;">${item.label}:</span>
-            <span style="color: #4b5563; font-size: 11px;">${item.value}</span>
+            <span style="font-size: 16px;">${item.icon}</span>
+            <span style="color: ${item.color}; font-weight: 600; font-size: 14px;">${item.label}:</span>
+            <span style="color: #4b5563; font-size: 14px;">${item.value}</span>
         `;
         
         legendDiv.appendChild(itemDiv);
