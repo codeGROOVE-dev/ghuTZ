@@ -442,9 +442,6 @@ func applyProgressiveTimeWindow(allTimestamps []timestampEntry, targetMin int) [
 			sourceCounts[ts.source]++
 		}
 
-		// Log detailed breakdown of what we have at this expansion step
-		fmt.Printf("DEBUG: Progressive expansion %d days -> %d events (%d day span)\n",
-			int(timeWindowDays), len(filtered), actualSpanDays)
 		for source, count := range sourceCounts {
 			fmt.Printf("  - %s: %d events\n", source, count)
 		}
