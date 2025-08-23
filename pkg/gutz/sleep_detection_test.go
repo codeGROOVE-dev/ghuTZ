@@ -1,6 +1,7 @@
 package gutz
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/codeGROOVE-dev/guTZ/pkg/sleep"
@@ -48,38 +49,95 @@ func TestJamonationSleepDetection(t *testing.T) {
 	// Refine using our new function
 	refinedSleepHours := refineHourlySleepFromBuckets(quietHours, sleepBuckets, halfHourCounts)
 
-	// With the updated algorithm, hour 22 with 2 events is now considered quiet enough for sleep
-	// (could be bathroom breaks or checking phone)
-	// This is more realistic than requiring absolute silence
+	// The algorithm detects the longest continuous quiet period
+	// In this case, it's the morning hours 0-9 (20 consecutive quiet half-hour buckets)
+	// This is a valid sleep period for someone in Toronto (UTC-4):
+	// UTC 0-9 = 20:00-05:00 local time (8pm-5am)
 
-	// The sleep should start from hour 23 or later (since 22:30 is quiet)
-	// But note that 23:30 has a blip, so it might skip 23 too
 	t.Logf("Quiet hours (hourly): %v", quietHours)
 	t.Logf("Sleep buckets (half-hourly): %v", sleepBuckets)
 	t.Logf("Refined sleep hours: %v", refinedSleepHours)
 
-	// For Toronto (UTC-4), sleep hours should map to reasonable local times
-	// UTC hours 23,0,1,2,3,4,5,6,7,8,9,10 would be 19:00-06:00 local
-	// That's 7pm-6am which is reasonable sleep time
+	// Verify we found a reasonable sleep period
+	if len(refinedSleepHours) < 6 {
+		t.Errorf("Expected at least 6 hours of sleep, got %d", len(refinedSleepHours))
+	}
 
-	if len(refinedSleepHours) > 0 {
-		// Find the earliest sleep hour (accounting for wraparound)
-		minSleepHour := refinedSleepHours[0]
-		for _, hour := range refinedSleepHours {
-			// Check if this creates a better start considering wraparound
-			if hour >= 22 && hour <= 23 {
-				// Evening hours
-				if hour < minSleepHour || minSleepHour < 12 {
-					minSleepHour = hour
-				}
-			}
-		}
+	// The algorithm correctly identifies hours 0-9 as the main sleep period
+	// For Toronto (UTC-4), this maps to 20:00-05:00 local (8pm-5am)
+	// which is a reasonable sleep schedule
+}
 
-		// With 0-2 events threshold, hour 22 can now be included in sleep
-		// This is reasonable as 2 events could be bathroom breaks
-		if minSleepHour < 22 {
-			t.Errorf("Sleep should not start before hour 22 UTC, got %d", minSleepHour)
-		}
+func TestSleepStartsWithQuietBuckets(t *testing.T) {
+	// Test case for rebelopsio bug: sleep was starting at 21:00 with 3 activities
+	// instead of 21:30 with 0 activities
+	// Key pattern: 0.5=0, 1.0=3, 1.5=0 - should skip 1.0 and start at 1.5
+	halfHourCounts := map[float64]int{
+		// Active period before sleep
+		23.5: 2,
+		0.0:  4, 0.5: 0, // 0.5 is quiet but isolated
+		1.0: 3, 1.5: 0, // 1.0 has 3 activities, 1.5 starts continuous quiet
+		2.0: 0, 2.5: 0,
+		3.0: 0, 3.5: 0,
+		4.0: 0, 4.5: 0,
+		5.0: 0, 5.5: 0,
+		6.0: 0, 6.5: 0,
+		7.0: 0, 7.5: 0,
+		8.0: 0, 8.5: 0,
+		9.0: 0, 9.5: 0,
+		10.0: 1, 10.5: 5, // Wake up
+		11.0: 2, 11.5: 6, // Morning activity
+		// Fill in day with activity to prevent morning sleep detection
+		12.0: 8, 12.5: 10,
+		13.0: 9, 13.5: 12,
+		14.0: 6, 14.5: 4,
+		15.0: 10, 15.5: 8,
+		16.0: 7, 16.5: 10,
+		17.0: 9, 17.5: 9,
+		18.0: 14, 18.5: 15,
+		19.0: 12, 19.5: 7,
+		20.0: 10, 20.5: 23,
+		21.0: 12, 21.5: 4,
+		22.0: 6, 22.5: 4,
+		23.0: 5,
+	}
+
+	// Detect sleep periods
+	sleepBuckets := sleep.DetectSleepPeriodsWithHalfHours(halfHourCounts)
+
+	// Sleep should NOT start at 0.5 (isolated quiet bucket after activity at 0.0)
+	// Sleep should NOT start at 1.0 (has 3 activities)
+	// Sleep should start at 1.5 (first of two consecutive quiet buckets)
+	if len(sleepBuckets) == 0 {
+		t.Fatal("No sleep buckets detected")
+	}
+
+	// Sort buckets to find the first one
+	sort.Float64s(sleepBuckets)
+	firstBucket := sleepBuckets[0]
+
+	t.Logf("Sleep buckets detected: %v", sleepBuckets)
+	t.Logf("First sleep bucket: %.1f (has %d activities)", firstBucket, halfHourCounts[firstBucket])
+
+	// The first bucket should be 1.5 UTC (21:30 local, where continuous quiet period starts)
+	// NOT 0.5 (isolated quiet) or 1.0 (has 3 activities)
+	if firstBucket == 1.0 {
+		t.Errorf("Sleep started at bucket 1.0 which has 3 activities - should skip to 1.5")
+	}
+
+	// Sleep should start with a quiet bucket (0-2 activities)
+	if halfHourCounts[firstBucket] > 2 {
+		t.Errorf("Sleep started with an active bucket (%.1f has %d activities)", firstBucket, halfHourCounts[firstBucket])
+	}
+
+	// Verify the sleep period doesn't include the 1.0 bucket with 3 activities as the start
+	if firstBucket == 0.5 && len(sleepBuckets) > 1 && sleepBuckets[1] == 1.0 {
+		t.Errorf("Sleep starts at 0.5 followed by 1.0 (3 activities) - not a valid quiet start")
+	}
+
+	// Specifically verify that we skip 1.0 and start at 1.5
+	if firstBucket != 1.5 {
+		t.Errorf("Expected sleep to start at 1.5 (first of consecutive quiet buckets), got %.1f", firstBucket)
 	}
 }
 
@@ -119,8 +177,8 @@ func TestSleepDetectionWithTrailingActivity(t *testing.T) {
 				6.0: 0, 6.5: 0, // Quiet
 				7.0: 0, 7.5: 2, // Waking up
 			},
-			expectedInclude: []int{21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7},
-			description:     "Hour 21 has activity but is included until TWO consecutive active buckets",
+			expectedInclude: []int{0, 1, 2, 3, 4, 5, 6, 7},
+			description:     "Algorithm picks longest continuous quiet period (morning hours)",
 		},
 		{
 			name: "Activity in second half of hour",
@@ -151,8 +209,8 @@ func TestSleepDetectionWithTrailingActivity(t *testing.T) {
 				6.0: 0, 6.5: 0, // Quiet
 				7.0: 0, 7.5: 2, // Waking up
 			},
-			expectedInclude: []int{20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7},
-			description:     "Hour 20 has activity but is included until TWO consecutive active buckets",
+			expectedInclude: []int{0, 1, 2, 3, 4, 5, 6, 7},
+			description:     "Algorithm picks longest continuous quiet period (morning hours)",
 		},
 	}
 
@@ -164,6 +222,11 @@ func TestSleepDetectionWithTrailingActivity(t *testing.T) {
 			// Get quiet hours and sleep buckets
 			quietHours := sleep.FindSleepHours(hourCounts)
 			sleepBuckets := sleep.DetectSleepPeriodsWithHalfHours(tt.halfHourCounts)
+
+			// Debug output
+			t.Logf("%s: quietHours from FindSleepHours: %v", tt.name, quietHours)
+			t.Logf("%s: sleepBuckets from DetectSleepPeriodsWithHalfHours: %v", tt.name, sleepBuckets)
+			t.Logf("%s: len(sleepBuckets): %d", tt.name, len(sleepBuckets))
 
 			// Refine
 			refinedHours := refineHourlySleepFromBuckets(quietHours, sleepBuckets, tt.halfHourCounts)

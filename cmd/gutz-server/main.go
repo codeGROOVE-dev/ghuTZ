@@ -264,7 +264,7 @@ func (s *server) wrap(handler http.Handler) http.Handler {
 func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
 	// Get request ID from header (set by wrap middleware)
 	requestID := w.Header().Get("X-Request-ID")
-	
+
 	if r.Method != http.MethodGet {
 		s.logger.Error("Method not allowed",
 			"request_id", requestID,
@@ -614,7 +614,7 @@ func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request)
 func (s *server) handleCleanup(w http.ResponseWriter, r *http.Request) {
 	// Get request ID from header (set by wrap middleware)
 	requestID := w.Header().Get("X-Request-ID")
-	
+
 	w.Header().Set("Content-Type", "application/json")
 
 	if s.diskCache == nil {

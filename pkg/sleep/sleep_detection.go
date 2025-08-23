@@ -142,6 +142,22 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 	// Sort the final buckets for consistent output
 	sort.Float64s(finalBuckets)
 
+	// Trim to find the first continuous quiet sequence
+	// Sleep should start with at least 2 consecutive quiet buckets (0-2 activities)
+	for len(finalBuckets) > 1 {
+		firstBucket := finalBuckets[0]
+		secondBucket := finalBuckets[1]
+
+		// Check if we have a good sleep start (two consecutive quiet buckets)
+		if halfHourCounts[firstBucket] <= 2 && halfHourCounts[secondBucket] <= 2 {
+			// Good start for sleep
+			break
+		}
+
+		// Otherwise, trim the first bucket and keep looking
+		finalBuckets = finalBuckets[1:]
+	}
+
 	// Group consecutive buckets to identify separate quiet periods
 	if len(finalBuckets) == 0 {
 		return finalBuckets
