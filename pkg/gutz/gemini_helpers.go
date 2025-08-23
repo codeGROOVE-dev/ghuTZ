@@ -234,7 +234,8 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		// Summary line shows top candidates
 		// Show top 5 candidates (or more if claimed timezone is lower)
 		maxToShow := 5
-		for i, c := range candidates {
+		for i := range candidates {
+			c := &candidates[i]
 			if c.IsProfile && i >= maxToShow {
 				maxToShow = i + 1 // Include the claimed timezone
 				break
@@ -287,7 +288,8 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 
 		// Show detailed signals for top candidates (including claimed if not in top 3)
 		maxDetailed := maxDetailedCandidates
-		for i, c := range candidates {
+		for i := range candidates {
+			c := &candidates[i]
 			if c.IsProfile && i >= maxDetailedCandidates {
 				maxDetailed = i + 1 // Include the claimed timezone in details
 				break

@@ -249,10 +249,11 @@ func main() {
 	if *verbose && result.TimezoneCandidates != nil && len(result.TimezoneCandidates) > 0 {
 		fmt.Println("\n📊 Timezone Candidates (Activity Analysis)")
 		fmt.Println(strings.Repeat("─", 50))
-		for i, candidate := range result.TimezoneCandidates {
+		for i := range result.TimezoneCandidates {
 			if i >= 5 {
 				break // Only show top 5
 			}
+			candidate := &result.TimezoneCandidates[i]
 			offsetStr := fmt.Sprintf("UTC%+d", int(candidate.Offset))
 			if candidate.Offset == 0 {
 				offsetStr = "UTC+0"
@@ -260,7 +261,7 @@ func main() {
 
 			fmt.Printf("%d. %s (%.1f%% confidence)\n", i+1, offsetStr, candidate.Confidence)
 			fmt.Printf("   Evening activity: %d events\n", candidate.EveningActivity)
-			fmt.Printf("   Lunch: %s\n", formatCandidateLunch(candidate))
+			fmt.Printf("   Lunch: %s\n", formatCandidateLunch(*candidate))
 			fmt.Printf("   Work start: %.1f:00\n", candidate.WorkStartLocal)
 			if len(candidate.ScoringDetails) > 0 {
 				fmt.Printf("   Scoring details:\n")

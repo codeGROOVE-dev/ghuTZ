@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/codeGROOVE-dev/retry"
 )
 
 // GraphQLClient handles GitHub GraphQL API requests.
@@ -411,78 +413,59 @@ func (c *GraphQLClient) FetchComments(ctx context.Context, username string, curs
 
 // executeQuery executes a GraphQL query with retry logic for transient server errors and rate limits.
 func (c *GraphQLClient) executeQuery(ctx context.Context, query string, variables map[string]any) (*GraphQLResponse, error) {
-	// Give up after 15 seconds total
-	deadline := time.Now().Add(15 * time.Second)
-	const maxRetries = 7
+	var resp *GraphQLResponse
 	var lastErr error
 
-	for attempt := range maxRetries {
-		// Check if we've exceeded the 15-second deadline
-		if time.Now().After(deadline) {
-			c.logger.Warn("GraphQL query timeout after 15 seconds",
-				"attempts", attempt,
-				"last_error", lastErr)
+	// Create a context with 15-second timeout for interactive service
+	retryCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	err := retry.Do(
+		func() error {
+			resp, lastErr = c.executeQueryOnce(retryCtx, query, variables)
 			if lastErr != nil {
-				return nil, fmt.Errorf("GraphQL query timeout after 15 seconds: %w", lastErr)
-			}
-			return nil, errors.New("GraphQL query timeout after 15 seconds")
-		}
-
-		if attempt > 0 {
-			// Determine backoff based on error type
-			var backoff time.Duration
-			if lastErr != nil && strings.Contains(lastErr.Error(), "secondary rate limit") {
-				// For secondary rate limits, give up early since we only have 15 seconds
-				c.logger.Warn("GraphQL secondary rate limit detected, giving up due to 15-second timeout",
-					"attempt", attempt+1,
-					"last_error", lastErr)
-				return nil, fmt.Errorf("GitHub secondary rate limit (retry would exceed timeout): %w", lastErr)
-			} else {
-				// Exponential backoff starting at 100ms: 100ms, 200ms, 400ms, 800ms, 1.6s, 3.2s, 6.4s
-				backoff = 100 * time.Millisecond * (1 << (attempt - 1))
-				remainingTime := time.Until(deadline)
-				if backoff > remainingTime {
-					backoff = remainingTime
+				// Check for secondary rate limit - give up immediately
+				if strings.Contains(lastErr.Error(), "secondary rate limit") {
+					c.logger.Warn("GraphQL secondary rate limit detected, not retrying",
+						"error", lastErr)
+					return retry.Unrecoverable(fmt.Errorf("GitHub secondary rate limit: %w", lastErr))
 				}
-				c.logger.Info("retrying GraphQL query",
-					"attempt", attempt+1,
-					"backoff", backoff,
-					"remaining_time", remainingTime,
-					"last_error", lastErr)
-			}
 
-			select {
-			case <-time.After(backoff):
-				// Continue with retry
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
+				// Check if this is a non-transient error
+				errStr := lastErr.Error()
+				if !strings.Contains(errStr, "GraphQL server error (transient)") &&
+					!strings.Contains(errStr, "rate limit") &&
+					!strings.Contains(errStr, "HTTP 403") &&
+					!strings.Contains(errStr, "HTTP 429") &&
+					!strings.Contains(errStr, "HTTP 502") &&
+					!strings.Contains(errStr, "HTTP 503") &&
+					!strings.Contains(errStr, "HTTP 504") {
+					// Non-transient error, don't retry
+					return retry.Unrecoverable(lastErr)
+				}
 
-		resp, err := c.executeQueryOnce(ctx, query, variables)
-		if err != nil {
-			// Check if this is a retryable error
-			errStr := err.Error()
-			if strings.Contains(errStr, "GraphQL server error (transient)") ||
-				strings.Contains(errStr, "rate limit") ||
-				strings.Contains(errStr, "HTTP 403") ||
-				strings.Contains(errStr, "HTTP 429") ||
-				strings.Contains(errStr, "HTTP 502") ||
-				strings.Contains(errStr, "HTTP 503") ||
-				strings.Contains(errStr, "HTTP 504") {
-				lastErr = err
-				continue // Retry
+				return lastErr
 			}
-			// Non-transient error, return immediately
-			return nil, err
-		}
-
-		// Success
-		return resp, nil
+			return nil
+		},
+		retry.Context(retryCtx),
+		retry.Attempts(10),                // Fewer attempts for 15-second window
+		retry.Delay(100*time.Millisecond), // Start at 100ms
+		retry.MaxDelay(3*time.Second),     // Cap individual delay at 3 seconds
+		retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)), // Exponential backoff with jitter
+		retry.MaxJitter(200*time.Millisecond),                                      // Add up to 200ms of jitter
+		retry.OnRetry(func(n uint, err error) {
+			c.logger.Info("Retrying GraphQL query",
+				"attempt", n+1,
+				"error", err.Error())
+		}),
+		retry.LastErrorOnly(true),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("GraphQL query failed: %w", err)
 	}
 
-	// All retries exhausted
-	return nil, fmt.Errorf("GraphQL query failed after %d retries: %w", maxRetries, lastErr)
+	return resp, nil
 }
 
 // executeQueryOnce executes a single GraphQL query attempt.

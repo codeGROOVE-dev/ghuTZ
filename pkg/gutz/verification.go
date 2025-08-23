@@ -35,7 +35,11 @@ func (d *Detector) verifyLocationAndTimezone(ctx context.Context, profile *githu
 	if profileTimezone != "" && profileLocationTimezone != "" {
 		profileLocationDiff := d.calculateTimezoneOffsetDiff(profileTimezone, profileLocationTimezone)
 		if profileLocationDiff != 0 {
-			result.ProfileLocationDiff = abs(profileLocationDiff)
+			if profileLocationDiff < 0 {
+				result.ProfileLocationDiff = -profileLocationDiff
+			} else {
+				result.ProfileLocationDiff = profileLocationDiff
+			}
 			d.logger.Debug("profile timezone vs profile location timezone difference",
 				"username", profile.Login,
 				"profile_timezone", profileTimezone,
@@ -76,10 +80,14 @@ func (d *Detector) verifyLocationAndTimezone(ctx context.Context, profile *githu
 	if timezoneToCheck != "" && detectedTimezone != "" {
 		offsetDiff := d.calculateTimezoneOffsetDiff(timezoneToCheck, detectedTimezone)
 		if offsetDiff != 0 {
-			result.TimezoneOffsetDiff = abs(offsetDiff)
-			if abs(offsetDiff) > 3 {
+			absOffsetDiff := offsetDiff
+			if absOffsetDiff < 0 {
+				absOffsetDiff = -absOffsetDiff
+			}
+			result.TimezoneOffsetDiff = absOffsetDiff
+			if absOffsetDiff > 3 {
 				result.TimezoneMismatch = "major"
-			} else if abs(offsetDiff) > 1 {
+			} else if absOffsetDiff > 1 {
 				result.TimezoneMismatch = "minor"
 			}
 
@@ -102,10 +110,14 @@ func (d *Detector) verifyLocationAndTimezone(ctx context.Context, profile *githu
 
 		if compareToTimezone != "" {
 			activityDiff := d.calculateTimezoneOffsetDiff(activityTimezone, compareToTimezone)
-			result.ActivityOffsetDiff = abs(activityDiff)
+			absActivityDiff := activityDiff
+			if absActivityDiff < 0 {
+				absActivityDiff = -absActivityDiff
+			}
+			result.ActivityOffsetDiff = absActivityDiff
 
 			// Flag as activity mismatch if difference is >4 hours
-			if abs(activityDiff) > 4 {
+			if absActivityDiff > 4 {
 				result.ActivityMismatch = true
 				d.logger.Warn("large activity timezone discrepancy detected",
 					"username", profile.Login,
@@ -204,12 +216,4 @@ func timezoneOffset(tz string) float64 {
 	}
 
 	return 0
-}
-
-// abs returns the absolute value of an integer.
-func abs(n int) int {
-	if n < 0 {
-		return -n
-	}
-	return n
 }

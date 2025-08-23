@@ -3,15 +3,14 @@ package gemini
 
 import (
 	"context"
-	cryptorand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/codeGROOVE-dev/retry"
 	"google.golang.org/genai"
 )
 
@@ -224,74 +223,49 @@ func (*Client) createResponseSchema() *genai.Schema {
 func (c *Client) makeAPICallWithRetry(ctx context.Context, client *genai.Client, modelName string,
 	contents []*genai.Content, config *genai.GenerateContentConfig, logger Logger,
 ) (*genai.GenerateContentResponse, error) {
-	// Give up after 15 seconds total
-	deadline := time.Now().Add(15 * time.Second)
-	maxRetries := 10 // More attempts with shorter delays
-	baseDelay := 100 * time.Millisecond
-	jitter := 50 * time.Millisecond
+	var resp *genai.GenerateContentResponse
+	var lastErr error
 
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		// Check if we've exceeded the 15-second deadline
-		if time.Now().After(deadline) {
-			logger.Warn("Gemini API call timeout after 15 seconds",
-				"attempts", attempt,
-				"model", modelName)
-			return nil, errors.New("gemini API call timeout after 15 seconds")
-		}
+	// Create a context with 15-second timeout for interactive service
+	retryCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 
-		// Log each attempt
-		if attempt > 0 {
-			remainingTime := time.Until(deadline)
-			logger.Info("retrying Gemini API call",
-				"attempt", attempt+1,
-				"remaining_time", remainingTime,
-				"model", modelName)
-		}
-
-		resp, err := client.Models.GenerateContent(ctx, modelName, contents, config)
-
-		if err == nil {
-			return resp, nil
-		}
-
-		if attempt == maxRetries {
-			return nil, fmt.Errorf("gemini API call failed after %d attempts: %w", maxRetries+1, err)
-		}
-
-		if !c.isTransientError(err) {
-			logger.Warn("Non-transient Gemini API error - giving up", "error", err)
-			return nil, fmt.Errorf("non-transient gemini API error: %w", err)
-		}
-
-		// Calculate delay with exponential backoff, capped at 3 seconds
-		delay := baseDelay * time.Duration(1<<uint(attempt))
-		if delay > 3*time.Second {
-			delay = 3 * time.Second
-		}
-
-		// Add jitter
-		jitterBig, randErr := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(jitter)))
-		if randErr != nil {
-			jitterBig = big.NewInt(0) // Fall back to no jitter on error
-		}
-		jitterDelay := time.Duration(jitterBig.Int64())
-		totalDelay := delay + jitterDelay
-
-		// Don't sleep beyond the deadline
-		remainingTime := time.Until(deadline)
-		if totalDelay > remainingTime {
-			totalDelay = remainingTime
-		}
-
-		logger.Info("Retrying Gemini API call",
-			"attempt", attempt+1,
-			"delay", totalDelay,
-			"remaining_time", remainingTime,
-			"error", err.Error())
-		time.Sleep(totalDelay)
+	err := retry.Do(
+		func() error {
+			resp, lastErr = client.Models.GenerateContent(retryCtx, modelName, contents, config)
+			if lastErr != nil {
+				// Check if it's a non-transient error
+				if !c.isTransientError(lastErr) {
+					logger.Warn("Non-transient Gemini API error - giving up", "error", lastErr)
+					return retry.Unrecoverable(fmt.Errorf("non-transient gemini API error: %w", lastErr))
+				}
+				return lastErr
+			}
+			return nil
+		},
+		retry.Context(retryCtx),
+		retry.Attempts(10),                // Fewer attempts for 15-second window
+		retry.Delay(100*time.Millisecond), // Start at 100ms
+		retry.MaxDelay(3*time.Second),     // Cap individual delay at 3 seconds for interactive service
+		retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)), // Exponential backoff with jitter
+		retry.MaxJitter(200*time.Millisecond),                                      // Add up to 200ms of jitter
+		retry.OnRetry(func(n uint, err error) {
+			logger.Info("Retrying Gemini API call",
+				"attempt", n+1,
+				"model", modelName,
+				"error", err.Error())
+		}),
+		retry.RetryIf(func(err error) bool {
+			// Only retry on transient errors
+			return c.isTransientError(err)
+		}),
+		retry.LastErrorOnly(true),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gemini API call failed: %w", err)
 	}
 
-	return nil, errors.New("unexpected end of retry loop")
+	return resp, nil
 }
 
 // isTransientError determines if an error should trigger a retry.

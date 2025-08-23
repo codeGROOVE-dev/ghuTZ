@@ -1152,7 +1152,11 @@ func (d *Detector) createVerification(ctx context.Context, userCtx *UserContext,
 	if verification.ProfileTimezone != "" && verification.ProfileLocationTimezone != "" {
 		offsetDiff := d.calculateTimezoneOffsetDiff(verification.ProfileTimezone, verification.ProfileLocationTimezone)
 		if offsetDiff != 0 {
-			verification.ProfileLocationDiff = abs(offsetDiff)
+			if offsetDiff < 0 {
+				verification.ProfileLocationDiff = -offsetDiff
+			} else {
+				verification.ProfileLocationDiff = offsetDiff
+			}
 		}
 	}
 
@@ -1160,10 +1164,14 @@ func (d *Detector) createVerification(ctx context.Context, userCtx *UserContext,
 	if detectedTimezone != "" && verification.ProfileTimezone != "" && detectedTimezone != verification.ProfileTimezone {
 		offsetDiff := d.calculateTimezoneOffsetDiff(verification.ProfileTimezone, detectedTimezone)
 		if offsetDiff != 0 {
-			verification.TimezoneOffsetDiff = abs(offsetDiff)
-			if abs(offsetDiff) > 3 {
+			absOffsetDiff := offsetDiff
+			if absOffsetDiff < 0 {
+				absOffsetDiff = -absOffsetDiff
+			}
+			verification.TimezoneOffsetDiff = absOffsetDiff
+			if absOffsetDiff > 3 {
 				verification.TimezoneMismatch = "major"
-			} else if abs(offsetDiff) > 1 {
+			} else if absOffsetDiff > 1 {
 				verification.TimezoneMismatch = "minor"
 			}
 		}

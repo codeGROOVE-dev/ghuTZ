@@ -51,8 +51,25 @@ async function detectUser(username) {
         });
 
         if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(errorText || 'Detection failed');
+            let errorMessage = 'Detection failed';
+            let errorDetails = '';
+            
+            try {
+                const errorData = await response.json();
+                errorMessage = errorData.error || errorMessage;
+                errorDetails = errorData.details || '';
+            } catch (e) {
+                // Fallback if response isn't JSON
+                const errorText = await response.text();
+                if (errorText) {
+                    errorMessage = errorText;
+                }
+            }
+            
+            const error = new Error(errorMessage);
+            error.details = errorDetails;
+            error.status = response.status;
+            throw error;
         }
 
         const data = await response.json();
@@ -60,12 +77,25 @@ async function detectUser(username) {
         displayResults(data);
 
     } catch (error) {
-        // Check if it's a 404 (user not found)
-        if (error.message.includes('404') || error.message.includes('not found')) {
-            errorDiv.innerHTML = 'SUSPECT NOT FOUND: "' + username + '" - They\'ve gone off the grid!';
+        // Format error message based on the error type
+        let errorHTML = '';
+        
+        if (error.status === 404 || error.message.toLowerCase().includes('not found')) {
+            errorHTML = '<strong>SUSPECT NOT FOUND:</strong> "' + username + '" - They\'ve gone off the grid!';
+        } else if (error.status === 429 || error.message.toLowerCase().includes('rate limit')) {
+            errorHTML = '<strong>SURVEILLANCE OVERLOAD:</strong> ' + error.message;
+        } else if (error.status === 504 || error.message.toLowerCase().includes('timeout')) {
+            errorHTML = '<strong>TRAIL TOO LONG:</strong> ' + error.message;
         } else {
-            errorDiv.innerHTML = 'TRAIL WENT COLD: ' + error.message;
+            errorHTML = '<strong>TRAIL WENT COLD:</strong> ' + error.message;
         }
+        
+        // Add details if available
+        if (error.details) {
+            errorHTML += '<br><span style="font-size: 0.9em; color: #666; margin-top: 8px; display: inline-block;">' + error.details + '</span>';
+        }
+        
+        errorDiv.innerHTML = errorHTML;
         errorDiv.classList.add('show');
     } finally {
         submitBtn.disabled = false;

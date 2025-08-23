@@ -530,15 +530,16 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		if overnightActivity > 10 && overnightActivity > afternoonActivity {
 			productivityRatio := float64(overnightActivity) / math.Max(float64(afternoonActivity), 1.0)
 			var penalty float64
-			if productivityRatio > 2.0 {
+			switch {
+			case productivityRatio > 2.0:
 				// Overnight is more than 2x afternoon productivity - very suspicious
 				penalty = -30.0
 				adjustments = append(adjustments, fmt.Sprintf("-30 (overnight %d >> afternoon %d events - %.1fx more productive)", overnightActivity, afternoonActivity, productivityRatio))
-			} else if productivityRatio > 1.5 {
+			case productivityRatio > 1.5:
 				// Overnight is 1.5x+ afternoon productivity - suspicious
 				penalty = -15.0
 				adjustments = append(adjustments, fmt.Sprintf("-15 (overnight %d > afternoon %d events - %.1fx more productive)", overnightActivity, afternoonActivity, productivityRatio))
-			} else {
+			default:
 				// Overnight is moderately higher than afternoon
 				penalty = -5.0
 				adjustments = append(adjustments, fmt.Sprintf("-5 (overnight %d > afternoon %d events - %.1fx more productive)", overnightActivity, afternoonActivity, productivityRatio))

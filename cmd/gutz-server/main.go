@@ -7,6 +7,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"html/template"
@@ -17,6 +18,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -116,6 +118,17 @@ func main() {
 		*cacheDir = os.Getenv("CACHE_DIR")
 	}
 
+	// Log configuration (without exposing sensitive keys)
+	logger.Info("Server configuration",
+		"port", *port,
+		"verbose", *verbose,
+		"cache_dir", *cacheDir,
+		"gemini_model", *geminiModel,
+		"has_github_token", *githubToken != "",
+		"has_gemini_key", *geminiAPIKey != "",
+		"has_maps_key", *mapsAPIKey != "",
+		"has_gcp_project", *gcpProject != "")
+
 	detector := gutz.NewWithLogger(context.Background(), logger,
 		gutz.WithGitHubToken(*githubToken),
 		gutz.WithGeminiAPIKey(*geminiAPIKey),
@@ -206,7 +219,18 @@ func (s *server) wrap(handler http.Handler) http.Handler {
 
 		defer func() {
 			if err := recover(); err != nil {
-				s.logger.Error("Panic", "error", err, "path", r.URL.Path, "request_id", requestID)
+				// Get stack trace
+				const size = 64 << 10
+				buf := make([]byte, size)
+				buf = buf[:runtime.Stack(buf, false)]
+
+				s.logger.Error("Panic recovered",
+					"error", err,
+					"path", r.URL.Path,
+					"method", r.Method,
+					"request_id", requestID,
+					"user_agent", r.Header.Get("User-Agent"),
+					"stack", string(buf))
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
 			}
 		}()
@@ -238,8 +262,15 @@ func (s *server) wrap(handler http.Handler) http.Handler {
 }
 
 func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
+	// Get request ID from header (set by wrap middleware)
+	requestID := w.Header().Get("X-Request-ID")
+	
 	if r.Method != http.MethodGet {
-		s.logger.Error("Method not allowed", "method", r.Method, "path", r.URL.Path)
+		s.logger.Error("Method not allowed",
+			"request_id", requestID,
+			"method", r.Method,
+			"path", r.URL.Path,
+			"client_ip", strings.Split(r.RemoteAddr, ":")[0])
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -258,23 +289,43 @@ func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
 	// Render template
 	tmpl, err := template.New("home").Parse(homeTemplate)
 	if err != nil {
-		s.logger.Error("Template parsing failed", "error", err)
+		s.logger.Error("Template parsing failed",
+			"request_id", requestID,
+			"error", err,
+			"path", r.URL.Path)
 		http.Error(w, "Template error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
 	if err := tmpl.Execute(w, struct{ Username string }{username}); err != nil {
-		s.logger.Error("Template execution failed", "error", err)
+		s.logger.Error("Template execution failed",
+			"request_id", requestID,
+			"error", err,
+			"username", username)
 	}
 }
 
 func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request) {
+	start := time.Now()
+	clientIP := strings.Split(request.RemoteAddr, ":")[0]
+	userAgent := request.Header.Get("User-Agent")
+	requestID := writer.Header().Get("X-Request-ID")
+
+	s.logger.Info("Detection request started",
+		"request_id", requestID,
+		"client_ip", clientIP,
+		"user_agent", userAgent,
+		"method", request.Method,
+		"path", request.URL.Path)
+
 	// Rate limit (bypass for Precache User-Agent)
-	if request.Header.Get("User-Agent") != "Precache" {
-		ip := strings.Split(request.RemoteAddr, ":")[0]
-		if !s.limiter.allow(ip) {
-			s.logger.Error("Rate limit exceeded", "client_ip", ip)
+	if userAgent != "Precache" {
+		if !s.limiter.allow(clientIP) {
+			s.logger.Error("Rate limit exceeded",
+				"request_id", requestID,
+				"client_ip", clientIP,
+				"user_agent", userAgent)
 			http.Error(writer, "Rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
@@ -285,17 +336,30 @@ func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request)
 		Username string `json:"username"`
 	}
 	if err := json.NewDecoder(request.Body).Decode(&req); err != nil {
-		s.logger.Error("Invalid request body", "error", err, "client_ip", strings.Split(request.RemoteAddr, ":")[0])
+		s.logger.Error("Invalid request body",
+			"request_id", requestID,
+			"error", err,
+			"client_ip", clientIP,
+			"duration_ms", time.Since(start).Milliseconds())
 		http.Error(writer, "Invalid request", http.StatusBadRequest)
 		return
 	}
 
 	req.Username = strings.TrimSpace(req.Username)
 	if !gutz.IsValidGitHubUsername(req.Username) {
-		s.logger.Error("Invalid username", "username", req.Username, "client_ip", strings.Split(request.RemoteAddr, ":")[0])
+		s.logger.Error("Invalid username",
+			"request_id", requestID,
+			"username", req.Username,
+			"client_ip", clientIP,
+			"duration_ms", time.Since(start).Milliseconds())
 		http.Error(writer, "Invalid username", http.StatusBadRequest)
 		return
 	}
+
+	s.logger.Debug("Processing detection request",
+		"request_id", requestID,
+		"username", req.Username,
+		"client_ip", clientIP)
 
 	// Check memory cache
 	cacheKey := "detect:" + req.Username
@@ -303,8 +367,16 @@ func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request)
 		writer.Header().Set("Content-Type", "application/json")
 		writer.Header().Set("X-Cache", "memory-hit")
 		if _, err := writer.Write(data); err != nil {
-			s.logger.Error("Failed to write cached response", "error", err)
+			s.logger.Error("Failed to write cached response",
+				"request_id", requestID,
+				"error", err,
+				"username", req.Username)
 		}
+		s.logger.Info("Detection request completed (memory cache)",
+			"request_id", requestID,
+			"username", req.Username,
+			"cache", "memory-hit",
+			"duration_ms", time.Since(start).Milliseconds())
 		return
 	}
 
@@ -315,8 +387,16 @@ func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request)
 			writer.Header().Set("Content-Type", "application/json")
 			writer.Header().Set("X-Cache", "disk-hit")
 			if _, err := writer.Write(data); err != nil {
-				s.logger.Error("Failed to write disk cached response", "error", err)
+				s.logger.Error("Failed to write disk cached response",
+					"request_id", requestID,
+					"error", err,
+					"username", req.Username)
 			}
+			s.logger.Info("Detection request completed (disk cache)",
+				"request_id", requestID,
+				"username", req.Username,
+				"cache", "disk-hit",
+				"duration_ms", time.Since(start).Milliseconds())
 			return
 		}
 	}
@@ -325,12 +405,125 @@ func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request)
 	ctx, cancel := context.WithTimeout(request.Context(), 30*time.Second)
 	defer cancel()
 
+	s.logger.Info("Starting detection",
+		"request_id", requestID,
+		"username", req.Username,
+		"timeout", "30s")
+
+	detectStart := time.Now()
 	result, err := s.detector.Detect(ctx, req.Username)
+	detectDuration := time.Since(detectStart)
+
 	if err != nil {
-		s.logger.Error("Detection failed", "username", req.Username, "error", err)
-		http.Error(writer, "Detection failed", http.StatusInternalServerError)
+		statusCode := http.StatusInternalServerError
+		var errorResponse struct {
+			Error   string `json:"error"`
+			Details string `json:"details,omitempty"`
+			Code    string `json:"code,omitempty"`
+		}
+
+		// Check for specific error types and provide helpful messages
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			statusCode = http.StatusGatewayTimeout
+			errorResponse.Error = "Detection took too long"
+			errorResponse.Details = "The analysis exceeded the 30-second timeout. This usually happens with very active users. Please try again."
+			errorResponse.Code = "TIMEOUT"
+			s.logger.Error("Detection timeout",
+				"request_id", requestID,
+				"username", req.Username,
+				"error", err,
+				"detect_duration_ms", detectDuration.Milliseconds(),
+				"total_duration_ms", time.Since(start).Milliseconds())
+		case errors.Is(err, context.Canceled):
+			statusCode = http.StatusRequestTimeout
+			errorResponse.Error = "Request was canceled"
+			errorResponse.Details = "The request was canceled before completion. Please try again."
+			errorResponse.Code = "CANCELED"
+			s.logger.Error("Detection canceled",
+				"request_id", requestID,
+				"username", req.Username,
+				"error", err,
+				"detect_duration_ms", detectDuration.Milliseconds(),
+				"total_duration_ms", time.Since(start).Milliseconds())
+		case strings.Contains(err.Error(), "rate limit"):
+			statusCode = http.StatusTooManyRequests
+			errorResponse.Error = "GitHub API rate limit exceeded"
+			errorResponse.Details = "We've hit GitHub's rate limit. Please try again in a few minutes, or provide a GitHub token for higher limits."
+			errorResponse.Code = "GITHUB_RATE_LIMIT"
+			s.logger.Error("GitHub rate limit hit",
+				"request_id", requestID,
+				"username", req.Username,
+				"error", err,
+				"detect_duration_ms", detectDuration.Milliseconds(),
+				"total_duration_ms", time.Since(start).Milliseconds())
+		case strings.Contains(err.Error(), "not found"):
+			statusCode = http.StatusNotFound
+			errorResponse.Error = "GitHub user not found"
+			errorResponse.Details = fmt.Sprintf("The username '%s' doesn't exist on GitHub. Please check the spelling.", req.Username)
+			errorResponse.Code = "USER_NOT_FOUND"
+			s.logger.Error("User not found",
+				"request_id", requestID,
+				"username", req.Username,
+				"error", err,
+				"detect_duration_ms", detectDuration.Milliseconds(),
+				"total_duration_ms", time.Since(start).Milliseconds())
+		case strings.Contains(err.Error(), "unable to fetch GitHub profile"):
+			statusCode = http.StatusBadGateway
+			errorResponse.Error = "Unable to fetch GitHub profile"
+			if strings.Contains(err.Error(), "permission") || strings.Contains(err.Error(), "scope") {
+				errorResponse.Details = "The GitHub token doesn't have required permissions. Please ensure the token has 'read:user' scope."
+				errorResponse.Code = "INSUFFICIENT_PERMISSIONS"
+			} else {
+				errorResponse.Details = "GitHub's API is temporarily unavailable. Please try again in a moment."
+				errorResponse.Code = "GITHUB_API_ERROR"
+			}
+			s.logger.Error("GitHub API error",
+				"request_id", requestID,
+				"username", req.Username,
+				"error", err,
+				"detect_duration_ms", detectDuration.Milliseconds(),
+				"total_duration_ms", time.Since(start).Milliseconds())
+		case strings.Contains(err.Error(), "Gemini"):
+			statusCode = http.StatusServiceUnavailable
+			errorResponse.Error = "AI analysis service unavailable"
+			errorResponse.Details = "The Gemini AI service is temporarily unavailable. Detection will use fallback methods."
+			errorResponse.Code = "GEMINI_ERROR"
+			s.logger.Error("Gemini API error",
+				"request_id", requestID,
+				"username", req.Username,
+				"error", err,
+				"detect_duration_ms", detectDuration.Milliseconds(),
+				"total_duration_ms", time.Since(start).Milliseconds())
+		default:
+			errorResponse.Error = "Detection failed"
+			errorResponse.Details = "An unexpected error occurred during timezone detection. Please try again."
+			errorResponse.Code = "INTERNAL_ERROR"
+			s.logger.Error("Detection failed",
+				"request_id", requestID,
+				"username", req.Username,
+				"error", err,
+				"error_type", fmt.Sprintf("%T", err),
+				"detect_duration_ms", detectDuration.Milliseconds(),
+				"total_duration_ms", time.Since(start).Milliseconds())
+		}
+
+		// Send JSON error response
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(statusCode)
+		if err := json.NewEncoder(writer).Encode(errorResponse); err != nil {
+			s.logger.Error("Failed to encode error response",
+				"request_id", requestID,
+				"encode_error", err)
+		}
 		return
 	}
+
+	s.logger.Info("Detection completed successfully",
+		"request_id", requestID,
+		"username", req.Username,
+		"timezone", result.Timezone,
+		"detect_duration_ms", detectDuration.Milliseconds())
 
 	// Clear sensitive data
 	if !*verbose {
@@ -358,7 +551,11 @@ func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request)
 		}
 		data, err := json.Marshal(jsonResult)
 		if err != nil {
-			s.logger.Error("JSON encoding failed", "error", err, "username", req.Username)
+			s.logger.Error("JSON encoding failed",
+				"request_id", requestID,
+				"error", err,
+				"username", req.Username,
+				"duration_ms", time.Since(start).Milliseconds())
 			http.Error(writer, "Encoding failed", http.StatusInternalServerError)
 			return
 		}
@@ -371,7 +568,11 @@ func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request)
 		// Send response
 		writer.Header().Set("Content-Type", "application/json")
 		if _, err := writer.Write(data); err != nil {
-			s.logger.Error("Failed to write response", "error", err)
+			s.logger.Error("Failed to write response",
+				"request_id", requestID,
+				"error", err,
+				"username", req.Username,
+				"duration_ms", time.Since(start).Milliseconds())
 		}
 		return
 	}
@@ -394,16 +595,34 @@ func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request)
 	writer.Header().Set("Content-Type", "application/json")
 	writer.Header().Set("X-Cache", "miss")
 	if _, err := writer.Write(data); err != nil {
-		s.logger.Error("Failed to write response", "error", err)
+		s.logger.Error("Failed to write response",
+			"request_id", requestID,
+			"error", err,
+			"username", req.Username,
+			"response_size", len(data),
+			"duration_ms", time.Since(start).Milliseconds())
+	} else {
+		s.logger.Info("Detection request completed",
+			"request_id", requestID,
+			"username", req.Username,
+			"timezone", result.Timezone,
+			"cache", "miss",
+			"duration_ms", time.Since(start).Milliseconds())
 	}
 }
 
-func (s *server) handleCleanup(w http.ResponseWriter, _ *http.Request) {
+func (s *server) handleCleanup(w http.ResponseWriter, r *http.Request) {
+	// Get request ID from header (set by wrap middleware)
+	requestID := w.Header().Get("X-Request-ID")
+	
 	w.Header().Set("Content-Type", "application/json")
 
 	if s.diskCache == nil {
 		if err := json.NewEncoder(w).Encode(map[string]string{"status": "no cache"}); err != nil {
-			s.logger.Error("Failed to encode response", "error", err)
+			s.logger.Error("Failed to encode response",
+				"request_id", requestID,
+				"error", err,
+				"path", r.URL.Path)
 		}
 		return
 	}
@@ -413,7 +632,10 @@ func (s *server) handleCleanup(w http.ResponseWriter, _ *http.Request) {
 		"status":  "success",
 		"deleted": deleted,
 	}); err != nil {
-		s.logger.Error("Failed to encode response", "error", err)
+		s.logger.Error("Failed to encode response",
+			"request_id", requestID,
+			"error", err,
+			"deleted_count", deleted)
 	}
 }
 
