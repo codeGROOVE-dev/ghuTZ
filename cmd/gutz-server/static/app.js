@@ -114,11 +114,19 @@ document.getElementById('detectForm').addEventListener('submit', async (e) => {
     await detectUser(username);
 });
 
+function extractUTCOffset(timezone) {
+    // Extract numeric offset from strings like "UTC-4" or "America/New_York"
+    if (timezone.startsWith('UTC')) {
+        const match = timezone.match(/UTC([+-]?\d+(?:\.\d+)?)/);
+        return match ? parseFloat(match[1]) : 0;
+    }
+    // For named timezones, we'd need a full lookup, so return null
+    return null;
+}
+
 function displayResults(data) {
     // Reset all optional fields first
-    document.getElementById('nameRow').style.display = 'none';
     document.getElementById('dataSourcesRow').style.display = 'none';
-    document.getElementById('activityRow').style.display = 'none';
     document.getElementById('hoursRow').style.display = 'none';
     document.getElementById('lunchRow').style.display = 'none';
     document.getElementById('peakRow').style.display = 'none';
@@ -135,62 +143,99 @@ function displayResults(data) {
         warningDiv.style.display = 'none';
     }
     
-    // Set required fields with GitHub profile link
-    const usernameElement = document.getElementById('displayUsername');
-    usernameElement.innerHTML = `<a href="https://github.com/${data.username}" target="_blank" style="color: inherit; text-decoration: none;">${data.username}</a>`;
+    // Set user field with combined username and full name
+    const userElement = document.getElementById('displayUser');
+    let userDisplay = '';
+    
+    if (data.name) {
+        // Apple-style: "Full Name (username)" with GitHub link on username
+        userDisplay = `${data.name} (<a href="https://github.com/${data.username}" target="_blank" style="color: inherit; text-decoration: none;">${data.username}</a>)`;
+    } else {
+        // Just username with GitHub link if no name available
+        userDisplay = `<a href="https://github.com/${data.username}" target="_blank" style="color: inherit; text-decoration: none;">${data.username}</a>`;
+    }
+    userElement.innerHTML = userDisplay;
     
     // Show timezone with current local time and UTC offset
     const currentTime = getCurrentTimeInTimezone(data.timezone);
     const utcOffsetStr = getUTCOffsetString(data.timezone);
     let timezoneHTML = `${data.timezone} (${currentTime}, ${utcOffsetStr})`;
     
-    // Check for verification discrepancy - only show if timezone offset differs
-    if (data.verification && data.verification.claimed_timezone && data.verification.timezone_offset_diff > 0) {
-        let claimHTML = ` — user claims `;
+    // Show additional timezone information as sub-items
+    let subItems = [];
+    
+    // Show GitHub profile timezone if it exists
+    if (data.verification && data.verification.profile_timezone) {
+        let profileTzHTML = `GitHub Profile: ${data.verification.profile_timezone}`;
         
-        // Check if we have a Gemini mismatch reason to show as tooltip
-        let hasTooltip = data.gemini_suspicious_mismatch && data.gemini_mismatch_reason;
-        
-        if (hasTooltip) {
-            // Create tooltip container for claimed timezone
-            claimHTML += `<span class="tooltip-container">`;
-            claimHTML += `<span style="text-decoration: underline; text-decoration-style: dotted; cursor: help;">`;
-            claimHTML += data.verification.claimed_timezone;
-            claimHTML += `</span>`;
-            claimHTML += `<span class="tooltip">${data.gemini_mismatch_reason}</span>`;
-            claimHTML += `</span>`;
-        } else {
-            claimHTML += data.verification.claimed_timezone;
+        // Only show discrepancy warning if 4+ hours off
+        if (data.verification.timezone_offset_diff >= 4) {
+            const hourText = data.verification.timezone_offset_diff === 1 ? 'hour' : 'hours';
+            if (data.verification.timezone_mismatch === 'major') {
+                profileTzHTML += ` <span style="color: #dc2626; font-weight: 500;">⚠️ ${data.verification.timezone_offset_diff} ${hourText} off</span>`;
+            } else {
+                profileTzHTML += ` <span style="color: #ea580c;">(${data.verification.timezone_offset_diff} ${hourText} off)</span>`;
+            }
         }
+        subItems.push(profileTzHTML);
+    }
+    
+    // Show GitHub location-derived timezone if different from profile timezone
+    if (data.verification && data.verification.profile_location_timezone && 
+        data.verification.profile_location_timezone !== data.verification.profile_timezone) {
+        let locTzHTML = `GitHub Location: ${data.verification.profile_location_timezone}`;
         
-        if (data.verification.timezone_offset_diff > 0) {
-            claimHTML += ` (${data.verification.timezone_offset_diff} hours off)`;
-        }
+        // Calculate offset from detected timezone
+        const detectedOffset = extractUTCOffset(data.timezone) || extractUTCOffset(utcOffsetStr);
+        const locationOffset = extractUTCOffset(data.verification.profile_location_timezone);
         
-        // Apply color based on mismatch level
-        if (data.verification.timezone_mismatch === 'major' || data.gemini_suspicious_mismatch) {
-            // Red for >3 timezone difference or suspicious mismatch
-            claimHTML = `<span style="color: #dc2626;">${claimHTML}</span>`;
-        } else if (data.verification.timezone_mismatch === 'minor') {
-            // Black (normal) for >1 timezone difference
-            claimHTML = `<span>${claimHTML}</span>`;
+        if (detectedOffset !== null && locationOffset !== null) {
+            const diff = Math.abs(locationOffset - detectedOffset);
+            // Show warning if 4+ hours off from detected
+            if (diff >= 4) {
+                const hourText = diff === 1 ? 'hour' : 'hours';
+                // Use red warning for extreme differences (10+ hours)
+                if (diff >= 10) {
+                    locTzHTML += ` <span style="color: #dc2626; font-weight: 500;">⚠️ ${diff} ${hourText} off</span>`;
+                } else {
+                    locTzHTML += ` <span style="color: #ea580c;">⚠️ ${diff} ${hourText} off</span>`;
+                }
+            }
         }
-        timezoneHTML += claimHTML;
+        subItems.push(locTzHTML);
+    }
+    
+    // Show activity-based timezone if it exists and is different
+    if (data.activity_timezone && data.activity_timezone !== data.timezone) {
+        let activityTzHTML = `GitHub Activity: ${data.activity_timezone}`;
+        
+        // Calculate offset difference for activity timezone
+        const detectedOffset = extractUTCOffset(data.timezone) || extractUTCOffset(utcOffsetStr);
+        const activityOffset = extractUTCOffset(data.activity_timezone);
+        
+        if (detectedOffset !== null && activityOffset !== null) {
+            const diff = Math.abs(activityOffset - detectedOffset);
+            // Only show warning if 4+ hours off
+            if (diff >= 4) {
+                const hourText = diff === 1 ? 'hour' : 'hours';
+                activityTzHTML += ` <span style="color: #ea580c;">(${diff} ${hourText} off)</span>`;
+            }
+        }
+        subItems.push(activityTzHTML);
+    }
+    
+    // Add sub-items with proper formatting
+    if (subItems.length > 0) {
+        for (const item of subItems) {
+            timezoneHTML += `<br><span style="margin-left: 1.5em; color: #6b7280;">└─ ${item}</span>`;
+        }
     }
     
     document.getElementById('timezone').innerHTML = timezoneHTML;
 
-    // Display full name if available
-    if (data.name) {
-        document.getElementById('displayName').textContent = data.name;
-        document.getElementById('nameRow').style.display = 'table-row';
-    }
+    // Name is now combined with username, no separate field needed
 
 
-    if (data.activity_timezone) {
-        document.getElementById('activityTz').textContent = data.activity_timezone;
-        document.getElementById('activityRow').style.display = 'table-row';
-    }
 
     // Get UTC offset for timezone conversion
     const utcOffset = getUTCOffsetFromTimezone(data.timezone, data.activity_timezone);
@@ -350,65 +395,45 @@ function displayResults(data) {
     
     if (locationText) {
         let locationHTML = locationText;
+        let locationSubItems = [];
         
-        // Check for verification discrepancy
-        // Show claimed location if:
-        // 1. Distance > 50 miles OR
-        // 2. Distance is -1 (geocoding failed) OR  
-        // 3. No detected location but claimed location exists
-        if (data.verification && data.verification.claimed_location) {
-            const showClaimed = 
-                data.verification.location_distance_miles > 50 || 
-                data.verification.location_distance_miles === -1 ||
-                !locationText;
+        // Check for profile location discrepancy
+        if (data.verification && data.verification.profile_location) {
+            const distanceKm = Math.round(data.verification.location_distance_km);
+            
+            // Always show profile location if it exists
+            let profileLocHTML = `GitHub Profile: ${data.verification.profile_location}`;
+            
+            // Only show distance warning if significant (800+ km)
+            if (distanceKm > 0 && distanceKm >= 800) {
+                const distanceText = `${distanceKm.toLocaleString()} km`;
                 
-            if (showClaimed) {
-                let claimHTML = ` — user claims `;
-                
-                // Check if we have a Gemini mismatch reason to show as tooltip
-                let hasTooltip = data.gemini_suspicious_mismatch && data.gemini_mismatch_reason;
-                
-                if (hasTooltip) {
-                    // Create tooltip container for claimed location
-                    claimHTML += `<span class="tooltip-container">`;
-                    claimHTML += `<span style="text-decoration: underline; text-decoration-style: dotted; cursor: help;">`;
-                    claimHTML += data.verification.claimed_location;
-                    claimHTML += `</span>`;
-                    claimHTML += `<span class="tooltip">${data.gemini_mismatch_reason}</span>`;
-                    claimHTML += `</span>`;
+                if (data.verification.location_mismatch === 'major') {
+                    profileLocHTML += ` <span style="color: #dc2626; font-weight: 500;">⚠️ ${distanceText} away</span>`;
                 } else {
-                    claimHTML += data.verification.claimed_location;
+                    profileLocHTML += ` <span style="color: #ea580c;">(${distanceText} away)</span>`;
                 }
-                
-                // Only show distance if it's a valid positive number
-                if (data.verification.location_distance_miles > 0) {
-                    claimHTML += ` (${Math.round(data.verification.location_distance_miles)} mi away)`;
-                } else if (data.verification.location_distance_miles === -1) {
-                    // Geocoding failed - can't determine distance
-                    claimHTML += ` (location unrecognized)`;
-                }
-                
-                // Apply color based on mismatch level
-                if (data.verification.location_mismatch === 'major' || data.gemini_suspicious_mismatch) {
-                    // Red for >1000 miles or suspicious mismatch
-                    claimHTML = `<span style="color: #dc2626;">${claimHTML}</span>`;
-                } else if (data.verification.location_mismatch === 'minor') {
-                    // Black (normal) for >250 miles
-                    claimHTML = `<span>${claimHTML}</span>`;
-                } else if (data.verification.location_distance_miles === -1) {
-                    // Gray for unrecognized locations
-                    claimHTML = `<span style="color: #6b7280;">${claimHTML}</span>`;
-                }
-                locationHTML += claimHTML;
+            } else if (data.verification.location_distance_km === -1) {
+                // Geocoding failed
+                profileLocHTML += ` <span style="color: #6b7280;">(unrecognized)</span>`;
+            }
+            
+            locationSubItems.push(profileLocHTML);
+        }
+        
+        // Add sub-items with proper formatting
+        if (locationSubItems.length > 0) {
+            for (const item of locationSubItems) {
+                locationHTML += `<br><span style="margin-left: 1.5em; color: #6b7280;">└─ ${item}</span>`;
             }
         }
         
         document.getElementById('location').innerHTML = locationHTML;
         document.getElementById('locationRow').style.display = 'table-row';
-    } else if (data.verification && data.verification.claimed_location) {
+    } else if (data.verification && data.verification.profile_location) {
         // No detected location but user claims a location
-        let locationHTML = 'Unknown — user claims ';
-        locationHTML += `<span style="color: #6b7280;">${data.verification.claimed_location}</span>`;
+        let locationHTML = 'Unknown';
+        locationHTML += `<br><span style="margin-left: 1.5em; color: #6b7280;">└─ GitHub Profile: ${data.verification.profile_location}</span>`;
         document.getElementById('location').innerHTML = locationHTML;
         document.getElementById('locationRow').style.display = 'table-row';
     }
