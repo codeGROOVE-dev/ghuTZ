@@ -2,7 +2,6 @@ package gutz
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -440,10 +439,6 @@ func applyProgressiveTimeWindow(allTimestamps []timestampEntry, targetMin int) [
 		sourceCounts := make(map[string]int)
 		for _, ts := range filtered {
 			sourceCounts[ts.source]++
-		}
-
-		for source, count := range sourceCounts {
-			fmt.Printf("  - %s: %d events\n", source, count)
 		}
 
 		// Stop if we have enough events AND sufficient time span, or hit max window
