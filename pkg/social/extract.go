@@ -3,6 +3,7 @@ package social
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"html"
 	"io"
@@ -338,9 +339,16 @@ func fetchWebsiteContent(ctx context.Context, websiteURL string, logger *slog.Lo
 
 	req.Header.Set("User-Agent", "GitHub-Timezone-Detector/1.0")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, //nolint:gosec // Explicitly requested to ignore SSL errors for personal websites
+			},
+		},
+	}
 
-	// Use retry logic with exponential backoff and jitter
+	// Use retry logic with minimal attempts for personal websites
 	var resp *http.Response
 	err = retry.Do(
 		func() error {
@@ -367,10 +375,8 @@ func fetchWebsiteContent(ctx context.Context, websiteURL string, logger *slog.Lo
 			return nil
 		},
 		retry.Context(ctx),
-		retry.Attempts(5),
-		retry.Delay(time.Second),
-		retry.MaxDelay(2*time.Minute),
-		retry.DelayType(retry.FullJitterBackoffDelay),
+		retry.Attempts(2),                 // Only try twice for personal websites
+		retry.Delay(100*time.Millisecond), // Short delay between attempts
 		retry.OnRetry(func(n uint, err error) {
 			logger.Debug("retrying website fetch", "attempt", n+1, "url", websiteURL, "error", err)
 		}),

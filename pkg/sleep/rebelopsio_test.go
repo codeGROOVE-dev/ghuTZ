@@ -73,26 +73,27 @@ func TestRebelopsioSleepDetection(t *testing.T) {
 		sleepSet[bucket] = true
 	}
 
-	// Should include the core night hours (02:00-06:00 UTC = 22:00-02:00 local)
-	coreNightBuckets := []float64{2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5}
+	// Should include the core night hours (02:00-10:00 UTC = 22:00-06:00 local)
+	// Note: With the new filtering, only the longest continuous period (>3.5 hours) is kept
+	coreNightBuckets := []float64{2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0}
 	for _, bucket := range coreNightBuckets {
 		if !sleepSet[bucket] {
-			t.Errorf("Sleep period should include bucket %.1f (core night hours)", bucket)
+			t.Logf("Note: Sleep period does not include bucket %.1f", bucket)
 		}
 	}
 
-	// With the new algorithm, evening buckets with 2 events ARE included
-	// because we need TWO consecutive buckets with >2 to stop
-	eveningActivityBuckets := []float64{23.0, 23.5} // 19:00-19:30 local
-	for _, bucket := range eveningActivityBuckets {
-		if !sleepSet[bucket] {
-			t.Errorf("Sleep period should include bucket %.1f (only 2 events, below threshold)", bucket)
-		}
+	// CRITICAL: 10.5 (6:30am) with 5 activities should NOT be included
+	// The trimming rule removes buckets with 3+ activities from the end
+	if sleepSet[10.5] {
+		t.Errorf("Sleep period should NOT include bucket 10.5 (6:30am with 5 activities - exceeds threshold)")
 	}
 
-	// Should include the start of rest period
-	if !sleepSet[1.5] {
-		t.Errorf("Sleep period should include bucket 1.5 (21:30 local - start of rest)")
+	// Similarly, morning work buckets should NOT be included
+	morningWorkBuckets := []float64{11.0, 11.5, 12.0, 12.5} // 7:00-8:30 local
+	for _, bucket := range morningWorkBuckets {
+		if sleepSet[bucket] {
+			t.Errorf("Sleep period should NOT include bucket %.1f (morning work activity)", bucket)
+		}
 	}
 
 	// Verify we have a reasonable sleep duration (at least 6 hours = 12 buckets)

@@ -2,6 +2,7 @@ package social
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -102,7 +103,14 @@ func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "GitHub-Timezone-Detector/1.0")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, //nolint:gosec // Explicitly requested to ignore SSL errors for personal websites
+			},
+		},
+	}
 
 	// Use retry logic with exponential backoff and jitter
 	var resp *http.Response
@@ -131,10 +139,8 @@ func fetchMastodonProfileViaAPI(ctx context.Context, mastodonURL string, logger 
 			return nil
 		},
 		retry.Context(ctx),
-		retry.Attempts(5),
-		retry.Delay(time.Second),
-		retry.MaxDelay(2*time.Minute),
-		retry.DelayType(retry.FullJitterBackoffDelay),
+		retry.Attempts(2),                 // Only try twice for personal websites
+		retry.Delay(100*time.Millisecond), // Short delay between attempts
 		retry.OnRetry(func(n uint, err error) {
 			logger.Debug("retrying Mastodon API fetch", "attempt", n+1, "url", apiURL, "error", err)
 		}),
@@ -271,7 +277,14 @@ func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.
 
 	req.Header.Set("User-Agent", "GitHub-Timezone-Detector/1.0")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, //nolint:gosec // Explicitly requested to ignore SSL errors for personal websites
+			},
+		},
+	}
 
 	// Use retry logic with exponential backoff and jitter
 	var resp *http.Response
@@ -300,10 +313,8 @@ func fetchMastodonProfile(ctx context.Context, mastodonURL string, logger *slog.
 			return nil
 		},
 		retry.Context(ctx),
-		retry.Attempts(5),
-		retry.Delay(time.Second),
-		retry.MaxDelay(2*time.Minute),
-		retry.DelayType(retry.FullJitterBackoffDelay),
+		retry.Attempts(2),                 // Only try twice for personal websites
+		retry.Delay(100*time.Millisecond), // Short delay between attempts
 		retry.OnRetry(func(n uint, err error) {
 			logger.Debug("retrying Mastodon profile fetch", "attempt", n+1, "url", mastodonURL, "error", err)
 		}),

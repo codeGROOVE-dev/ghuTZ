@@ -3,6 +3,7 @@ package gutz
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -113,7 +114,7 @@ func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *De
 
 		if cacheDir != "" {
 			var err error
-			cache, err = httpcache.NewOtterCache(ctx, cacheDir, 30*24*time.Hour, logger)
+			cache, err = httpcache.NewOtterCache(ctx, cacheDir, 14*24*time.Hour, logger)
 			if err != nil {
 				logger.Warn("cache initialization failed", "error", err, "cache_dir", cacheDir)
 				// Cache is optional, continue without it
@@ -136,6 +137,9 @@ func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *De
 				MaxIdleConnsPerHost: 10,
 				IdleConnTimeout:     90 * time.Second,
 				DisableKeepAlives:   false, // Enable keep-alive for connection reuse
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true, //nolint:gosec // Explicitly requested to ignore SSL errors for personal websites
+				},
 			},
 		},
 		forceActivity: optHolder.forceActivity,
@@ -154,6 +158,63 @@ func NewWithLogger(ctx context.Context, logger *slog.Logger, opts ...Option) *De
 
 // retryableHTTPDo performs an HTTP request with exponential backoff and jitter.
 // The returned response body must be closed by the caller.
+// fetchPersonalWebsite fetches personal websites with minimal retries and ignoring SSL errors.
+func (d *Detector) fetchPersonalWebsite(ctx context.Context, req *http.Request) (*http.Response, error) {
+	var resp *http.Response
+	var lastErr error
+
+	err := retry.Do(
+		func() error {
+			var err error
+			resp, err = d.httpClient.Do(req)
+			if err != nil {
+				lastErr = err
+				return err
+			}
+
+			// Don't retry on client errors (4xx) except rate limiting
+			if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
+				return nil // Don't retry client errors
+			}
+
+			// Check for rate limiting or server errors
+			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
+				body, readErr := io.ReadAll(resp.Body)
+				closeErr := resp.Body.Close()
+				if readErr != nil {
+					d.logger.Debug("failed to read error response body", "error", readErr)
+				}
+				if closeErr != nil {
+					d.logger.Debug("failed to close error response body", "error", closeErr)
+				}
+				lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+				return lastErr
+			}
+
+			// Success - response body will be handled by caller
+			return nil
+		},
+		retry.Context(ctx),
+		retry.Attempts(2),                 // Only try twice for personal websites
+		retry.Delay(100*time.Millisecond), // Short delay between attempts
+		retry.OnRetry(func(n uint, err error) {
+			d.logger.Debug("retrying personal website fetch",
+				"attempt", n+1,
+				"url", req.URL.String(),
+				"error", err)
+		}),
+		retry.RetryIf(func(err error) bool {
+			// Retry on network errors and rate limits
+			return err != nil
+		}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("personal website fetch failed: %w", lastErr)
+	}
+
+	return resp, nil
+}
+
 func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*http.Response, error) {
 	var resp *http.Response
 	var lastErr error
@@ -890,6 +951,14 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 				}
 			}
 
+			// Recalculate SleepRangesLocal with Gemini-corrected timezone
+			if len(locationResult.SleepBucketsUTC) > 0 {
+				d.logger.Debug("recalculating SleepRangesLocal after Gemini correction",
+					"timezone", locationResult.Timezone,
+					"sleepBucketsUTC", locationResult.SleepBucketsUTC)
+				locationResult.SleepRangesLocal = CalculateSleepRangesFromBuckets(locationResult.SleepBucketsUTC, locationResult.Timezone)
+			}
+
 			// Add location distance calculation if coordinates are available
 			if verification.ProfileLocation != "" && geminiResult.Location != nil && locationResult.Location != nil {
 				distance := haversineDistance(locationResult.Location.Latitude, locationResult.Location.Longitude,
@@ -1095,7 +1164,8 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 
 	req.Header.Set("User-Agent", "GitHub-Timezone-Detector/1.0")
 
-	resp, err := d.cachedHTTPDo(ctx, req)
+	// Use a custom retry for personal websites with only 2 attempts and short delay
+	resp, err := d.fetchPersonalWebsite(ctx, req)
 	if err != nil {
 		d.logger.Debug("failed to fetch website", "url", blogURL, "error", err)
 		return ""

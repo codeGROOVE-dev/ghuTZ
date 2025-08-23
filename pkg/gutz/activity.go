@@ -951,10 +951,31 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 
 	// Detect sleep periods using 30-minute resolution with buffer
 	sleepBuckets := sleep.DetectSleepPeriodsWithHalfHours(halfHourCounts)
-	d.logger.Debug("detected sleep buckets",
+	d.logger.Info("detected sleep buckets UTC",
 		"username", username,
 		"sleepBuckets", sleepBuckets,
 		"numBuckets", len(sleepBuckets))
+
+	// Log what this translates to in local time for debugging
+	if len(sleepBuckets) > 0 && offsetInt != 0 {
+		localStart := sleepBuckets[0] + float64(offsetInt)
+		if localStart < 0 {
+			localStart += 24
+		} else if localStart >= 24 {
+			localStart -= 24
+		}
+		localEnd := sleepBuckets[len(sleepBuckets)-1] + 0.5 + float64(offsetInt)
+		if localEnd < 0 {
+			localEnd += 24
+		} else if localEnd >= 24 {
+			localEnd -= 24
+		}
+		d.logger.Info("sleep period in local time",
+			"username", username,
+			"local_start", localStart,
+			"local_end", localEnd,
+			"offset", offsetInt)
+	}
 
 	// Refine sleep hours using the more precise half-hour data
 	// If we have half-hour sleep data, use it to create more accurate hourly sleep hours

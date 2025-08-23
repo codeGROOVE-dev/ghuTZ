@@ -157,16 +157,44 @@ func convertBucketsToLocal(sleepBucketsUTC []float64, tz string) []float64 {
 }
 
 func tryCreateWraparoundRange(localSleepBuckets []float64) *SleepRange {
-	var eveningBuckets, morningBuckets []float64
+	// First check if we have a clear morning period
+	var morningBuckets []float64
+	hasEarlyMorning := false
+
 	for _, bucket := range localSleepBuckets {
-		if bucket >= 22 {
-			eveningBuckets = append(eveningBuckets, bucket)
-		} else if bucket <= 6 {
+		if bucket <= 10 { // Morning buckets up to 10am
 			morningBuckets = append(morningBuckets, bucket)
+			if bucket <= 3 {
+				hasEarlyMorning = true
+			}
 		}
 	}
 
-	if len(eveningBuckets) == 0 || len(morningBuckets) == 0 {
+	// If we have early morning buckets (midnight-3am), this likely wraps from evening
+	if !hasEarlyMorning || len(morningBuckets) == 0 {
+		return nil
+	}
+
+	// Find evening buckets - anything >= 21
+	var eveningBuckets []float64
+	for _, bucket := range localSleepBuckets {
+		if bucket >= 21 {
+			eveningBuckets = append(eveningBuckets, bucket)
+		}
+	}
+
+	// If no evening buckets found but we have early morning (0-3am),
+	// assume sleep started just before midnight (23:00)
+	if len(eveningBuckets) == 0 && hasEarlyMorning {
+		// Check if first morning bucket is very early (0-2am)
+		sort.Float64s(morningBuckets)
+		if morningBuckets[0] <= 2 {
+			// Assume sleep started at 23:00
+			eveningBuckets = []float64{23}
+		}
+	}
+
+	if len(eveningBuckets) == 0 {
 		return nil
 	}
 

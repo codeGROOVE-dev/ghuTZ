@@ -2,6 +2,7 @@ package social
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -135,6 +136,11 @@ func fetchBlueSkyProfile(ctx context.Context, handle string, logger *slog.Logger
 
 	client := &http.Client{
 		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, //nolint:gosec // Explicitly requested to ignore SSL errors for personal websites
+			},
+		},
 	}
 
 	// Use retry logic with exponential backoff and jitter
@@ -164,10 +170,8 @@ func fetchBlueSkyProfile(ctx context.Context, handle string, logger *slog.Logger
 			return nil
 		},
 		retry.Context(ctx),
-		retry.Attempts(5),
-		retry.Delay(time.Second),
-		retry.MaxDelay(2*time.Minute),
-		retry.DelayType(retry.FullJitterBackoffDelay),
+		retry.Attempts(2),                 // Only try twice for personal websites
+		retry.Delay(100*time.Millisecond), // Short delay between attempts
 		retry.OnRetry(func(n uint, err error) {
 			logger.Debug("retrying BlueSky API fetch", "attempt", n+1, "url", apiURL, "error", err)
 		}),
