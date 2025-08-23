@@ -46,7 +46,7 @@
                 display: flex;
                 align-items: center;
                 margin-bottom: 32px;
-                border-bottom: 3px solid #ffcc00; /* Apple yellow with better contrast */
+                border-bottom: 4px solid #ffcc00; /* Important yellow border */
                 padding-bottom: 20px;
                 position: relative;
                 transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
@@ -61,13 +61,14 @@
                 width: 36px;
                 height: 36px;
                 margin-right: 16px;
-                transition: transform 0.4s
-                    cubic-bezier(0.68, -0.55, 0.265, 1.55);
+                transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
                 flex-shrink: 0;
+                filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
             }
 
             .header:hover .logo {
-                transform: rotate(15deg) scale(1.05);
+                transform: rotate(15deg) scale(1.1);
+                filter: drop-shadow(0 3px 6px rgba(255, 204, 0, 0.3));
             }
 
             h1 {
@@ -75,7 +76,7 @@
                 font-weight: 700;
                 margin: 0;
                 letter-spacing: -0.03em;
-                transition: letter-spacing 0.3s ease;
+                transition: all 0.3s ease;
             }
 
             .header:hover h1 {
@@ -107,6 +108,7 @@
                 margin-bottom: 28px;
                 font-weight: 400;
                 letter-spacing: -0.01em;
+                position: relative;
             }
 
             @media (max-width: 480px) {
@@ -190,8 +192,8 @@
                 left: -100%;
                 width: 100%;
                 height: 100%;
-                background: #ffcc00; /* Better contrast yellow */
-                transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                background: #ffcc00; /* Solid yellow matching header */
+                transition: left 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
                 z-index: -1;
             }
 
@@ -205,7 +207,7 @@
 
             button:hover {
                 transform: translateY(-1px);
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); /* Subtle Apple-style shadow */
+                box-shadow: 0 4px 12px rgba(0, 122, 255, 0.2); /* Subtle shadow */
             }
 
             button:hover::before {
@@ -213,8 +215,8 @@
             }
 
             button:active {
-                transform: translateY(0) scale(1);
-                box-shadow: 0 2px 0 #000;
+                transform: translateY(0) scale(0.99);
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
             }
 
             button:disabled {
@@ -245,25 +247,28 @@
             .loading::after {
                 content: "...";
                 display: inline-block;
-                animation: dots 1.5s steps(4, end) infinite;
+                animation: funkDots 1.5s ease-in-out infinite;
                 width: 20px;
                 position: absolute;
+                color: #007aff;
             }
 
-            @keyframes dots {
-                0%,
-                20% {
-                    content: "";
+            @keyframes funkDots {
+                0%, 20% {
+                    content: ".";
+                    color: #007aff;
                 }
                 40% {
-                    content: ".";
+                    content: "..";
+                    color: #ff9500;
                 }
                 60% {
-                    content: "..";
-                }
-                80%,
-                100% {
                     content: "...";
+                    color: #af52de;
+                }
+                80%, 100% {
+                    content: "...";
+                    color: #007aff;
                 }
             }
 
@@ -293,14 +298,20 @@
             @keyframes slideInFunk {
                 0% {
                     opacity: 0;
-                    transform: translateY(20px);
+                    transform: translateY(20px) rotate(-2deg);
                 }
-                60% {
-                    transform: translateY(-5px);
+                25% {
+                    transform: translateY(-5px) rotate(1deg);
+                }
+                50% {
+                    transform: translateY(-8px) rotate(-1deg);
+                }
+                75% {
+                    transform: translateY(-3px) rotate(0.5deg);
                 }
                 100% {
                     opacity: 1;
-                    transform: translateY(0);
+                    transform: translateY(0) rotate(0deg);
                 }
             }
 
@@ -314,8 +325,13 @@
                 display: table-row;
             }
 
+            .result-row {
+                transition: all 0.2s ease;
+            }
+            
             .result-row:hover {
-                background: #fafafa;
+                background: linear-gradient(90deg, #fafafa 0%, #ffffff 100%);
+                transform: translateX(2px);
             }
 
             .result-label {
@@ -382,6 +398,12 @@
                 background: #f9f9f9;
                 margin-top: 10px;
                 position: relative;
+                transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            }
+            
+            #map:hover {
+                transform: scale(1.02) rotate(0.5deg);
+                box-shadow: 0 8px 24px rgba(0, 122, 255, 0.1);
             }
 
             #histogramContainer {
@@ -454,10 +476,11 @@
                 text-decoration: underline;
             }
 
-            /* Funk up the goose */
+            /* Funk up the goose - James Brown style */
             .goose-wrapper {
                 display: inline-block;
                 transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+                cursor: pointer;
             }
 
             .goose-wrapper:hover {
@@ -465,25 +488,30 @@
             }
 
             .goose-wrapper:hover .goose {
-                animation: groovyWiggle 0.6s ease;
+                animation: getOnUp 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
             }
 
-            @keyframes groovyWiggle {
-                0%,
-                100% {
-                    transform: rotate(0deg);
+            @keyframes getOnUp {
+                0%, 100% {
+                    transform: rotate(0deg) scale(1);
                 }
-                20% {
-                    transform: rotate(-10deg) translateY(-2px);
+                15% {
+                    transform: rotate(-15deg) translateY(-5px) scale(1.1);
                 }
-                40% {
-                    transform: rotate(10deg) translateY(-2px);
+                30% {
+                    transform: rotate(15deg) translateY(-8px) scale(1.2);
+                }
+                45% {
+                    transform: rotate(-10deg) translateY(-3px) scale(1.15);
                 }
                 60% {
-                    transform: rotate(-5deg);
+                    transform: rotate(10deg) translateY(-6px) scale(1.1);
                 }
-                80% {
-                    transform: rotate(5deg);
+                75% {
+                    transform: rotate(-5deg) translateY(-2px) scale(1.05);
+                }
+                90% {
+                    transform: rotate(5deg) translateY(-1px) scale(1.02);
                 }
             }
 
@@ -505,10 +533,10 @@
                 border-bottom-color: #666;
             }
 
-            /* Style the applications box on hover with funk */
+            /* Style the applications box on hover with subtle funk */
             .applications-box:hover {
-                transform: translateY(-2px) rotate(-0.5deg);
-                box-shadow: 0 8px 20px rgba(255, 204, 0, 0.15) !important;
+                transform: translateY(-2px);
+                box-shadow: 0 6px 16px rgba(255, 204, 0, 0.12) !important;
                 background: linear-gradient(
                     135deg,
                     #fff 0%,
@@ -747,7 +775,7 @@
                     letter-spacing: -0.02em;
                 "
             >
-                💡 Why Though?
+                Why Though?
             </h3>
             <p style="margin: 0 0 12px 0; line-height: 1.5">
                 guTZ powers

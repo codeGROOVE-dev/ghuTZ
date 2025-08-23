@@ -34,7 +34,8 @@ async function detectUser(username) {
     if (!username) return;
 
     submitBtn.disabled = true;
-    submitBtn.innerHTML = 'TRACKING...';
+    submitBtn.innerHTML = 'Searching...';
+    
     const loadingEl = document.getElementById('loading');
     if (loadingEl) {
         loadingEl.classList.add('show');
@@ -81,13 +82,13 @@ async function detectUser(username) {
         let errorHTML = '';
         
         if (error.status === 404 || error.message.toLowerCase().includes('not found')) {
-            errorHTML = '<strong>SUSPECT NOT FOUND:</strong> "' + username + '" - They\'ve gone off the grid!';
+            errorHTML = '<strong>User not found:</strong> "' + username + '" doesn\'t appear to exist on GitHub.';
         } else if (error.status === 429 || error.message.toLowerCase().includes('rate limit')) {
-            errorHTML = '<strong>SURVEILLANCE OVERLOAD:</strong> ' + error.message;
+            errorHTML = '<strong>Rate limited:</strong> ' + error.message;
         } else if (error.status === 504 || error.message.toLowerCase().includes('timeout')) {
-            errorHTML = '<strong>TRAIL TOO LONG:</strong> ' + error.message;
+            errorHTML = '<strong>Request timeout:</strong> ' + error.message;
         } else {
-            errorHTML = '<strong>TRAIL WENT COLD:</strong> ' + error.message;
+            errorHTML = '<strong>Error:</strong> ' + error.message;
         }
         
         // Add details if available
@@ -99,7 +100,7 @@ async function detectUser(username) {
         errorDiv.classList.add('show');
     } finally {
         submitBtn.disabled = false;
-        submitBtn.innerHTML = 'TRACK DEVELOPER';
+        submitBtn.innerHTML = 'Search';
         const loadingEl = document.getElementById('loading');
         if (loadingEl) {
             loadingEl.classList.remove('show');
@@ -1121,7 +1122,29 @@ function drawHistogram(data) {
                 }
             },
             animation: {
-                duration: 500 // Smooth animation
+                duration: 800, // Funkier animation
+                easing: 'easeOutBounce', // Bouncy!
+                onComplete: function() {
+                    // Add a subtle wiggle to the chart after load
+                    const canvas = document.getElementById('activityChart');
+                    if (canvas) {
+                        canvas.style.animation = 'subtleGroove 10s ease-in-out infinite';
+                        // Define the animation
+                        if (!document.getElementById('grooveStyles')) {
+                            const style = document.createElement('style');
+                            style.id = 'grooveStyles';
+                            style.textContent = `
+                                @keyframes subtleGroove {
+                                    0%, 100% { transform: rotate(0deg) scale(1); }
+                                    25% { transform: rotate(0.1deg) scale(1.001); }
+                                    50% { transform: rotate(-0.1deg) scale(1.002); }
+                                    75% { transform: rotate(0.05deg) scale(1.001); }
+                                }
+                            `;
+                            document.head.appendChild(style);
+                        }
+                    }
+                }
             },
             interaction: {
                 intersect: false,
