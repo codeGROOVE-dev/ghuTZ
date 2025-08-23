@@ -197,6 +197,8 @@ func (d *Detector) fetchPersonalWebsite(ctx context.Context, req *http.Request) 
 		retry.Context(ctx),
 		retry.Attempts(2),                 // Only try twice for personal websites
 		retry.Delay(100*time.Millisecond), // Short delay between attempts
+		retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)), // Add jitter
+		retry.MaxJitter(50*time.Millisecond),                                       // Small jitter for personal websites
 		retry.OnRetry(func(n uint, err error) {
 			d.logger.Debug("retrying personal website fetch",
 				"attempt", n+1,
@@ -216,11 +218,18 @@ func (d *Detector) fetchPersonalWebsite(ctx context.Context, req *http.Request) 
 }
 
 func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*http.Response, error) {
+	// Give up after 15 seconds total
+	deadline := time.Now().Add(15 * time.Second)
 	var resp *http.Response
 	var lastErr error
 
 	err := retry.Do(
 		func() error {
+			// Check if we've exceeded the 15-second deadline
+			if time.Now().After(deadline) {
+				return retry.Unrecoverable(errors.New("timeout after 15 seconds"))
+			}
+
 			var err error
 			resp, err = d.httpClient.Do(req.WithContext(ctx)) //nolint:bodyclose // Body closed on error, returned open on success for caller
 			if err != nil {
@@ -241,10 +250,22 @@ func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*htt
 					d.logger.Debug("failed to close error response body", "error", closeErr)
 				}
 				lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
-				d.logger.Debug("retryable HTTP error",
-					"status", resp.StatusCode,
-					"url", req.URL.String(),
-					"body", string(body))
+				// Check if this is a secondary rate limit error
+				bodyStr := string(body)
+				isSecondaryRateLimit := strings.Contains(bodyStr, "secondary rate limit")
+
+				if isSecondaryRateLimit {
+					// Secondary rate limits need minutes to reset, but we only have 15 seconds
+					d.logger.Warn("GitHub secondary rate limit detected, giving up due to 15-second timeout",
+						"status", resp.StatusCode,
+						"url", req.URL.String())
+					return retry.Unrecoverable(fmt.Errorf("GitHub secondary rate limit (retry would exceed timeout): %s", bodyStr))
+				} else {
+					d.logger.Debug("retryable HTTP error",
+						"status", resp.StatusCode,
+						"url", req.URL.String(),
+						"body", bodyStr)
+				}
 				return lastErr
 			}
 
@@ -252,19 +273,26 @@ func (d *Detector) retryableHTTPDo(ctx context.Context, req *http.Request) (*htt
 			return nil
 		},
 		retry.Context(ctx),
-		retry.Attempts(5),
-		retry.Delay(time.Second),
-		retry.MaxDelay(2*time.Minute),
-		retry.DelayType(retry.FullJitterBackoffDelay),
+		retry.Attempts(10),                // More attempts with shorter delays
+		retry.Delay(100*time.Millisecond), // Start with 100ms
+		retry.MaxDelay(3*time.Second),     // Cap at 3 seconds to fit within 15-second limit
+		retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)), // Exponential backoff with jitter
+		retry.MaxJitter(100*time.Millisecond),                                      // Add up to 100ms of jitter
 		retry.OnRetry(func(n uint, err error) {
-			d.logger.Debug("retrying HTTP request",
+			remainingTime := time.Until(deadline)
+			d.logger.Info("retrying HTTP request",
 				"attempt", n+1,
 				"url", req.URL.String(),
+				"remaining_time", remainingTime,
 				"error", err)
 		}),
 		retry.RetryIf(func(err error) bool {
-			// Retry on network errors and rate limits
-			return err != nil
+			// Don't retry if we've hit the deadline
+			if time.Now().After(deadline) {
+				return false
+			}
+			// Retry on network errors and rate limits (but not secondary rate limits)
+			return err != nil && !strings.Contains(err.Error(), "retry would exceed timeout")
 		}),
 	)
 	if err != nil {
@@ -534,31 +562,45 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) (*User
 		FromCache: make(map[string]bool),
 	}
 
+	// STEP 1: First fetch profile HTML to verify username exists
+	d.logger.Debug("checking profile HTML", "username", username)
+	html := d.githubClient.FetchProfileHTML(ctx, username)
+	userCtx.ProfileHTML = html
+
+	// Check if user exists by looking for 404 indicators
+	if strings.Contains(html, "Not Found") || strings.Contains(html, "This is not the web page you are looking for") {
+		d.logger.Info("GitHub user not found", "username", username)
+		return nil, github.ErrUserNotFound
+	}
+
 	var wg sync.WaitGroup
 	var mu sync.Mutex     // For safe concurrent writes to userCtx
 	var criticalErr error // Track critical errors that should fail the entire detection
 
-	// Fetch user profile (with GraphQL for social accounts)
+	// STEP 2: Fetch user profile with GraphQL (includes social accounts)
+	// This is second priority after HTML verification
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		d.logger.Debug("checking user profile", "username", username)
+		d.logger.Debug("checking user profile with GraphQL", "username", username)
 		user, err := d.githubClient.FetchUserEnhancedGraphQL(ctx, username)
 		if err != nil {
-			// User not found is expected, not critical
-			if errors.Is(err, github.ErrUserNotFound) {
-				d.logger.Debug("user not found", "username", username)
-				return
-			}
 			// No token is acceptable, we can work without it
 			if errors.Is(err, github.ErrNoGitHubToken) {
-				d.logger.Debug("no GitHub token available", "username", username)
+				d.logger.Debug("no GitHub token available, will parse from HTML instead", "username", username)
+				// Try to extract basic user info from HTML as fallback
+				user := d.parseUserFromHTML(html, username)
+				if user != nil {
+					mu.Lock()
+					userCtx.User = user
+					mu.Unlock()
+				}
 				return
 			}
-			// Any other error (like JSON unmarshaling) is critical - API is broken
-			d.logger.Error("Critical: User profile fetch failed", "username", username, "error", err)
+			// Any other GraphQL error is critical - fail the detection
+			d.logger.Error("GraphQL user profile fetch failed", "username", username, "error", err)
 			mu.Lock()
-			criticalErr = fmt.Errorf("failed to fetch GitHub user profile: %w", err)
+			criticalErr = fmt.Errorf("unable to fetch GitHub profile: %w", err)
 			mu.Unlock()
 			return
 		}
@@ -567,6 +609,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) (*User
 		mu.Unlock()
 	}()
 
+	// STEP 3: Fetch other data in parallel after verification
 	// Fetch public events
 	wg.Add(1)
 	go func() {
@@ -579,17 +622,6 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) (*User
 		}
 		mu.Lock()
 		userCtx.Events = events
-		mu.Unlock()
-	}()
-
-	// Fetch profile HTML for scraping
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		d.logger.Debug("checking profile HTML", "username", username)
-		html := d.githubClient.FetchProfileHTML(ctx, username)
-		mu.Lock()
-		userCtx.ProfileHTML = html
 		mu.Unlock()
 	}()
 
@@ -1282,6 +1314,95 @@ func (d *Detector) fetchWebsiteContent(ctx context.Context, blogURL string) stri
 		d.logger.Debug("failed to cache markdown conversion", "error", err)
 	}
 	return markdown
+}
+
+// parseUserFromHTML extracts user information from GitHub profile HTML.
+// This is used as a fallback when GraphQL is not available (no token).
+func (d *Detector) parseUserFromHTML(html string, username string) *github.User {
+	if html == "" {
+		return nil
+	}
+
+	user := &github.User{
+		Login: username,
+	}
+
+	// Extract name - look for itemprop="name"
+	nameRegex := regexp.MustCompile(`<span[^>]*itemprop="name"[^>]*>([^<]+)</span>`)
+	if matches := nameRegex.FindStringSubmatch(html); len(matches) > 1 {
+		user.Name = strings.TrimSpace(matches[1])
+	}
+
+	// Extract location - look for itemprop="homeLocation"
+	locationRegex := regexp.MustCompile(`<span[^>]*itemprop="homeLocation"[^>]*>([^<]+)</span>`)
+	if matches := locationRegex.FindStringSubmatch(html); len(matches) > 1 {
+		user.Location = strings.TrimSpace(matches[1])
+	}
+
+	// Extract bio - look for the bio element
+	bioRegex := regexp.MustCompile(`<div[^>]*data-bio-text[^>]*>([^<]+)</div>`)
+	if matches := bioRegex.FindStringSubmatch(html); len(matches) > 1 {
+		user.Bio = strings.TrimSpace(matches[1])
+	}
+
+	// Extract company - look for itemprop="worksFor"
+	companyRegex := regexp.MustCompile(`<span[^>]*itemprop="worksFor"[^>]*>([^<]+)</span>`)
+	if matches := companyRegex.FindStringSubmatch(html); len(matches) > 1 {
+		user.Company = strings.TrimSpace(matches[1])
+	}
+
+	// Extract blog/website - look for itemprop="url"
+	blogRegex := regexp.MustCompile(`<a[^>]*itemprop="url"[^>]*href="([^"]+)"`)
+	if matches := blogRegex.FindStringSubmatch(html); len(matches) > 1 {
+		user.Blog = strings.TrimSpace(matches[1])
+	}
+
+	// Extract social accounts - look for itemprop="social" links
+	// These include Twitter, Mastodon, LinkedIn, etc.
+	socialRegex := regexp.MustCompile(`<li[^>]*itemprop="social"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>([^<]*)</a>`)
+	socialMatches := socialRegex.FindAllStringSubmatch(html, -1)
+
+	var socialAccounts []github.SocialAccount
+	for _, match := range socialMatches {
+		if len(match) > 1 {
+			url := strings.TrimSpace(match[1])
+			provider := ""
+
+			// Determine provider from URL
+			switch {
+			case strings.Contains(url, "twitter.com"):
+				provider = "twitter"
+			case strings.Contains(url, "mastodon"):
+				provider = "mastodon"
+			case strings.Contains(url, "linkedin.com"):
+				provider = "linkedin"
+			case strings.Contains(url, "facebook.com"):
+				provider = "facebook"
+			case strings.Contains(url, "instagram.com"):
+				provider = "instagram"
+			case strings.Contains(url, "youtube.com"):
+				provider = "youtube"
+			default:
+				provider = "generic"
+			}
+
+			socialAccounts = append(socialAccounts, github.SocialAccount{
+				Provider: provider,
+				URL:      url,
+			})
+		}
+	}
+	user.SocialAccounts = socialAccounts
+
+	d.logger.Debug("parsed user from HTML",
+		"username", username,
+		"name", user.Name,
+		"location", user.Location,
+		"company", user.Company,
+		"blog", user.Blog,
+		"social_accounts", len(socialAccounts))
+
+	return user
 }
 
 // extractGitHubTimezoneFromHTML extracts the GitHub profile timezone from HTML and stores it in userCtx.

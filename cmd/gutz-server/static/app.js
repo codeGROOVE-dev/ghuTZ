@@ -1104,9 +1104,15 @@ function startRotatingMessages(loadingEl) {
 
 function updateMessage(loadingEl) {
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
-    const currentMessage = funkyMessages[messageIndex % funkyMessages.length];
-    loadingEl.innerHTML = `${currentMessage} (${elapsed}s)`;
-    messageIndex++;
+    
+    // After 10 seconds, show rate limit message
+    if (elapsed >= 10) {
+        loadingEl.innerHTML = `Sorry, we probably got GitHub rate limited ... (${elapsed}s)`;
+    } else {
+        const currentMessage = funkyMessages[messageIndex % funkyMessages.length];
+        loadingEl.innerHTML = `${currentMessage} (${elapsed}s)`;
+        messageIndex++;
+    }
 }
 
 function stopRotatingMessages() {

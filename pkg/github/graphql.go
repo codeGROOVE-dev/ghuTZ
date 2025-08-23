@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -408,20 +409,47 @@ func (c *GraphQLClient) FetchComments(ctx context.Context, username string, curs
 // NOTE: FetchCommitActivities was removed because GitHub's GraphQL search API
 // doesn't support COMMIT type. Use REST API for commit search instead.
 
-// executeQuery executes a GraphQL query with retry logic for transient server errors.
+// executeQuery executes a GraphQL query with retry logic for transient server errors and rate limits.
 func (c *GraphQLClient) executeQuery(ctx context.Context, query string, variables map[string]any) (*GraphQLResponse, error) {
-	// Retry up to 3 times for transient GraphQL server errors
-	const maxRetries = 3
+	// Give up after 15 seconds total
+	deadline := time.Now().Add(15 * time.Second)
+	const maxRetries = 7
 	var lastErr error
 
 	for attempt := range maxRetries {
-		if attempt > 0 {
-			// Exponential backoff: 1s, 2s, 4s
-			backoff := time.Second * (1 << (attempt - 1))
-			c.logger.Debug("retrying GraphQL query after transient error",
-				"attempt", attempt+1,
-				"backoff", backoff,
+		// Check if we've exceeded the 15-second deadline
+		if time.Now().After(deadline) {
+			c.logger.Warn("GraphQL query timeout after 15 seconds",
+				"attempts", attempt,
 				"last_error", lastErr)
+			if lastErr != nil {
+				return nil, fmt.Errorf("GraphQL query timeout after 15 seconds: %w", lastErr)
+			}
+			return nil, errors.New("GraphQL query timeout after 15 seconds")
+		}
+
+		if attempt > 0 {
+			// Determine backoff based on error type
+			var backoff time.Duration
+			if lastErr != nil && strings.Contains(lastErr.Error(), "secondary rate limit") {
+				// For secondary rate limits, give up early since we only have 15 seconds
+				c.logger.Warn("GraphQL secondary rate limit detected, giving up due to 15-second timeout",
+					"attempt", attempt+1,
+					"last_error", lastErr)
+				return nil, fmt.Errorf("GitHub secondary rate limit (retry would exceed timeout): %w", lastErr)
+			} else {
+				// Exponential backoff starting at 100ms: 100ms, 200ms, 400ms, 800ms, 1.6s, 3.2s, 6.4s
+				backoff = 100 * time.Millisecond * (1 << (attempt - 1))
+				remainingTime := time.Until(deadline)
+				if backoff > remainingTime {
+					backoff = remainingTime
+				}
+				c.logger.Info("retrying GraphQL query",
+					"attempt", attempt+1,
+					"backoff", backoff,
+					"remaining_time", remainingTime,
+					"last_error", lastErr)
+			}
 
 			select {
 			case <-time.After(backoff):
@@ -433,8 +461,15 @@ func (c *GraphQLClient) executeQuery(ctx context.Context, query string, variable
 
 		resp, err := c.executeQueryOnce(ctx, query, variables)
 		if err != nil {
-			// Check if this is a transient error that should be retried
-			if strings.Contains(err.Error(), "GraphQL server error (transient)") {
+			// Check if this is a retryable error
+			errStr := err.Error()
+			if strings.Contains(errStr, "GraphQL server error (transient)") ||
+				strings.Contains(errStr, "rate limit") ||
+				strings.Contains(errStr, "HTTP 403") ||
+				strings.Contains(errStr, "HTTP 429") ||
+				strings.Contains(errStr, "HTTP 502") ||
+				strings.Contains(errStr, "HTTP 503") ||
+				strings.Contains(errStr, "HTTP 504") {
 				lastErr = err
 				continue // Retry
 			}
@@ -481,6 +516,41 @@ func (c *GraphQLClient) executeQueryOnce(ctx context.Context, query string, vari
 		}
 	}()
 
+	// Check HTTP status code first
+	if resp.StatusCode == http.StatusForbidden {
+		// Check for secondary rate limit
+		if strings.Contains(resp.Header.Get("X-Ratelimit-Remaining"), "0") ||
+			strings.Contains(resp.Header.Get("Retry-After"), "") {
+			c.logger.Warn("GitHub secondary rate limit detected on GraphQL endpoint",
+				"status", resp.StatusCode,
+				"retry_after", resp.Header.Get("Retry-After"))
+			return nil, errors.New("HTTP 403: secondary rate limit")
+		}
+		return nil, errors.New("HTTP 403: forbidden")
+	}
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		c.logger.Warn("GitHub rate limit exceeded on GraphQL endpoint",
+			"status", resp.StatusCode,
+			"rate_limit_remaining", resp.Header.Get("X-Ratelimit-Remaining"),
+			"rate_limit_reset", resp.Header.Get("X-Ratelimit-Reset"))
+		return nil, errors.New("HTTP 429: rate limit exceeded")
+	}
+
+	if resp.StatusCode == http.StatusBadGateway ||
+		resp.StatusCode == http.StatusServiceUnavailable ||
+		resp.StatusCode == http.StatusGatewayTimeout {
+		c.logger.Warn("GitHub server error on GraphQL endpoint",
+			"status", resp.StatusCode)
+		return nil, fmt.Errorf("HTTP %d: server error", resp.StatusCode)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		c.logger.Warn("unexpected HTTP status on GraphQL endpoint",
+			"status", resp.StatusCode)
+		return nil, fmt.Errorf("HTTP %d: unexpected status", resp.StatusCode)
+	}
+
 	var graphqlResp GraphQLResponse
 	if err := json.NewDecoder(resp.Body).Decode(&graphqlResp); err != nil {
 		return nil, fmt.Errorf("decoding response: %w", err)
@@ -501,6 +571,13 @@ func (c *GraphQLClient) executeQueryOnce(ctx context.Context, query string, vari
 			// Return an error that indicates this could be retried
 			// The HTTP layer doesn't see this as an error (200 OK), so we need to handle it here
 			return nil, fmt.Errorf("GraphQL server error (transient): %s", errMsg)
+		}
+		// Check for rate limit errors in GraphQL response
+		if strings.Contains(errMsg, "rate limit") || strings.Contains(errMsg, "API rate limit exceeded") {
+			c.logger.Warn("GraphQL rate limit error",
+				"error", errMsg,
+				"type", graphqlResp.Errors[0].Type)
+			return nil, fmt.Errorf("GraphQL rate limit: %s", errMsg)
 		}
 		return nil, fmt.Errorf("GraphQL error: %s", errMsg)
 	}

@@ -71,5 +71,5 @@ for USER in $UNIQUE_USERS; do
         -H 'TE: trailers' \
         --data-raw "{\"username\":\"$USER\"}"
     echo
-    sleep 1
+    sleep 10
 done

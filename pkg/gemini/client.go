@@ -224,11 +224,30 @@ func (*Client) createResponseSchema() *genai.Schema {
 func (c *Client) makeAPICallWithRetry(ctx context.Context, client *genai.Client, modelName string,
 	contents []*genai.Content, config *genai.GenerateContentConfig, logger Logger,
 ) (*genai.GenerateContentResponse, error) {
-	maxRetries := 3
+	// Give up after 15 seconds total
+	deadline := time.Now().Add(15 * time.Second)
+	maxRetries := 10 // More attempts with shorter delays
 	baseDelay := 100 * time.Millisecond
 	jitter := 50 * time.Millisecond
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// Check if we've exceeded the 15-second deadline
+		if time.Now().After(deadline) {
+			logger.Warn("Gemini API call timeout after 15 seconds",
+				"attempts", attempt,
+				"model", modelName)
+			return nil, errors.New("gemini API call timeout after 15 seconds")
+		}
+
+		// Log each attempt
+		if attempt > 0 {
+			remainingTime := time.Until(deadline)
+			logger.Info("retrying Gemini API call",
+				"attempt", attempt+1,
+				"remaining_time", remainingTime,
+				"model", modelName)
+		}
+
 		resp, err := client.Models.GenerateContent(ctx, modelName, contents, config)
 
 		if err == nil {
@@ -244,7 +263,13 @@ func (c *Client) makeAPICallWithRetry(ctx context.Context, client *genai.Client,
 			return nil, fmt.Errorf("non-transient gemini API error: %w", err)
 		}
 
+		// Calculate delay with exponential backoff, capped at 3 seconds
 		delay := baseDelay * time.Duration(1<<uint(attempt))
+		if delay > 3*time.Second {
+			delay = 3 * time.Second
+		}
+
+		// Add jitter
 		jitterBig, randErr := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(jitter)))
 		if randErr != nil {
 			jitterBig = big.NewInt(0) // Fall back to no jitter on error
@@ -252,7 +277,17 @@ func (c *Client) makeAPICallWithRetry(ctx context.Context, client *genai.Client,
 		jitterDelay := time.Duration(jitterBig.Int64())
 		totalDelay := delay + jitterDelay
 
-		logger.Debug("Retrying Gemini API call", "attempt", attempt+1, "delay_ms", totalDelay.Milliseconds(), "error", err.Error())
+		// Don't sleep beyond the deadline
+		remainingTime := time.Until(deadline)
+		if totalDelay > remainingTime {
+			totalDelay = remainingTime
+		}
+
+		logger.Info("Retrying Gemini API call",
+			"attempt", attempt+1,
+			"delay", totalDelay,
+			"remaining_time", remainingTime,
+			"error", err.Error())
 		time.Sleep(totalDelay)
 	}
 
