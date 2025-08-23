@@ -389,7 +389,9 @@
                 background: #fafafa;
                 border: 1px solid #e0e0e0;
                 border-radius: 8px;
-                height: 350px; /* Fixed height for Chart.js */
+                min-height: 400px; /* Increased height to accommodate legend */
+                display: flex;
+                flex-direction: column;
             }
 
             #activityChart {

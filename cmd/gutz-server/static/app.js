@@ -747,6 +747,15 @@ function drawHistogram(data) {
         return;
     }
     
+    // Ensure canvas wrapper for proper sizing
+    if (!canvas.parentElement || canvas.parentElement.id !== 'chartWrapper') {
+        const wrapper = document.createElement('div');
+        wrapper.id = 'chartWrapper';
+        wrapper.style.cssText = 'position: relative; flex: 1; min-height: 280px;';
+        canvas.parentElement.insertBefore(wrapper, canvas);
+        wrapper.appendChild(canvas);
+    }
+    
     // Destroy existing chart if it exists
     if (activityChart) {
         activityChart.destroy();
@@ -983,21 +992,7 @@ function drawHistogram(data) {
     }
     
     // Peak productivity annotation removed - the peak is visually obvious from the bars themselves
-    
-    // Add work hours annotation (subtle background)
-    if (data.active_hours_local && data.active_hours_local.start) {
-        const workStartIndex = Math.floor(data.active_hours_local.start / increment);
-        const workEndIndex = Math.floor(data.active_hours_local.end / increment);
-        annotations.workHours = {
-            type: 'box',
-            xMin: workStartIndex - 0.5,
-            xMax: workEndIndex - 0.5,
-            backgroundColor: 'rgba(156, 163, 175, 0.03)', // Very subtle grey
-            borderColor: 'transparent',
-            borderWidth: 0,
-            drawTime: 'beforeDatasetsDraw' // Draw behind the data
-        };
-    }
+    // Work hours annotation removed - not useful for visualization
     
     // Create Chart.js bar chart
     const ctx = canvas.getContext('2d');
@@ -1175,21 +1170,7 @@ function createActivityLegend(data) {
         });
     }
     
-    // Add work hours
-    if (data.active_hours_local && data.active_hours_local.start) {
-        const workStart = data.active_hours_local.start;
-        const workEnd = data.active_hours_local.end;
-        const startHour = Math.floor(workStart);
-        const startMin = Math.round((workStart - startHour) * 60);
-        const endHour = Math.floor(workEnd);
-        const endMin = Math.round((workEnd - endHour) * 60);
-        legendItems.push({
-            icon: '💼',
-            label: 'Work',
-            value: `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}-${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`,
-            color: 'rgba(107, 114, 128, 0.7)'
-        });
-    }
+    // Work hours removed from legend - already shown in the main results table
     
     if (legendItems.length === 0) return;
     
@@ -1199,13 +1180,13 @@ function createActivityLegend(data) {
     legendDiv.style.cssText = `
         display: flex;
         flex-wrap: wrap;
-        gap: 15px;
-        margin-top: 15px;
-        padding: 12px;
+        gap: 12px;
+        margin-top: 10px;
+        padding: 10px;
         background: #f9fafb;
-        border-radius: 8px;
+        border-radius: 6px;
         border: 1px solid #e5e7eb;
-        font-size: 13px;
+        font-size: 12px;
         align-items: center;
         justify-content: center;
     `;
@@ -1215,17 +1196,17 @@ function createActivityLegend(data) {
         itemDiv.style.cssText = `
             display: flex;
             align-items: center;
-            gap: 6px;
-            padding: 4px 10px;
+            gap: 4px;
+            padding: 3px 8px;
             background: white;
-            border-radius: 6px;
+            border-radius: 4px;
             border: 1px solid #e5e7eb;
         `;
         
         itemDiv.innerHTML = `
-            <span style="font-size: 16px;">${item.icon}</span>
-            <span style="color: ${item.color}; font-weight: 600;">${item.label}:</span>
-            <span style="color: #4b5563;">${item.value}</span>
+            <span style="font-size: 14px;">${item.icon}</span>
+            <span style="color: ${item.color}; font-weight: 600; font-size: 11px;">${item.label}:</span>
+            <span style="color: #4b5563; font-size: 11px;">${item.value}</span>
         `;
         
         legendDiv.appendChild(itemDiv);
