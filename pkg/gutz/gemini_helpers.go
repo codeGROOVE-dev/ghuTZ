@@ -307,11 +307,22 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 			// Calculate local times for this candidate
 			offset := int(candidate.Offset)
 
-			// Work hours
-			if workHours, ok := contextData["work_hours_utc"].([]int); ok && len(workHours) == 2 {
-				localStart := (workHours[0] + offset + 24) % 24
-				localEnd := (workHours[1] + offset + 24) % 24
-				fmt.Fprintf(&sb, "   Work hours: %02d:00-%02d:00 local", localStart, localEnd)
+			// Work hours - convert UTC to this candidate's local time
+			if workHours, ok := contextData["work_hours_utc"].([]float64); ok && len(workHours) == 2 {
+				localStart := math.Mod(workHours[0]+float64(offset)+24, 24)
+				localEnd := math.Mod(workHours[1]+float64(offset)+24, 24)
+
+				// Format with minutes if there are any
+				startHour := int(localStart)
+				startMin := int((localStart - float64(startHour)) * 60)
+				endHour := int(localEnd)
+				endMin := int((localEnd - float64(endHour)) * 60)
+
+				if startMin == 0 && endMin == 0 {
+					fmt.Fprintf(&sb, "   Work hours: %02d:00-%02d:00 local", startHour, endHour)
+				} else {
+					fmt.Fprintf(&sb, "   Work hours: %02d:%02d-%02d:%02d local", startHour, startMin, endHour, endMin)
+				}
 				if localStart < 6 {
 					sb.WriteString(" ⚠️ very early")
 				}
@@ -475,8 +486,17 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	}
 
 	// Time patterns help validate timezone candidates.
-	if workHours, ok := contextData["work_hours_utc"].([]int); ok && len(workHours) == 2 {
-		fmt.Fprintf(&sb, "Active hours UTC: %02d:00-%02d:00\n", workHours[0], workHours[1])
+	if workHours, ok := contextData["work_hours_utc"].([]float64); ok && len(workHours) == 2 {
+		startHour := int(workHours[0])
+		startMin := int((workHours[0] - float64(startHour)) * 60)
+		endHour := int(workHours[1])
+		endMin := int((workHours[1] - float64(endHour)) * 60)
+
+		if startMin == 0 && endMin == 0 {
+			fmt.Fprintf(&sb, "Active hours UTC: %02d:00-%02d:00\n", startHour, endHour)
+		} else {
+			fmt.Fprintf(&sb, "Active hours UTC: %02d:%02d-%02d:%02d\n", startHour, startMin, endHour, endMin)
+		}
 	}
 	if quietHours, ok := contextData["quiet_hours"].([]int); ok && len(quietHours) > 0 {
 		fmt.Fprintf(&sb, "Quiet hours UTC: %v\n", quietHours)

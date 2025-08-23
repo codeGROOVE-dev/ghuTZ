@@ -200,10 +200,10 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 				if offset, err := strconv.Atoi(offsetStr); err == nil {
 					contextData["utc_offset"] = offset
 
-					if activityResult.ActiveHoursLocal.Start > 0 || activityResult.ActiveHoursLocal.End > 0 {
-						startUTC := int(activityResult.ActiveHoursLocal.Start)
-						endUTC := int(activityResult.ActiveHoursLocal.End)
-						contextData["work_hours_utc"] = []int{startUTC, endUTC}
+					if activityResult.ActiveHoursUTC.Start > 0 || activityResult.ActiveHoursUTC.End > 0 {
+						startUTC := activityResult.ActiveHoursUTC.Start
+						endUTC := activityResult.ActiveHoursUTC.End
+						contextData["work_hours_utc"] = []float64{startUTC, endUTC}
 					}
 
 					if activityResult.LunchHoursUTC.Confidence > 0 {
