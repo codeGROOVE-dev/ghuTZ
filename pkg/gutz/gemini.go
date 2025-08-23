@@ -131,6 +131,13 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 			"issue", "GitHub user profile fetch failed - likely token scope issues or user not found")
 	}
 
+	// Log warning if activity result is unexpectedly nil
+	if activityResult == nil {
+		d.logger.Warn("Activity analysis returned nil - Gemini will have limited data",
+			"username", userCtx.Username,
+			"has_events", len(userCtx.Events) > 0)
+	}
+
 	// Prepare comprehensive context for Gemini
 	contextData := make(map[string]any)
 	var dataSources []string

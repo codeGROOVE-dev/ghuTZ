@@ -224,12 +224,17 @@ func (s *server) wrap(handler http.Handler) http.Handler {
 				buf := make([]byte, size)
 				buf = buf[:runtime.Stack(buf, false)]
 
-				s.logger.Error("Panic recovered",
+				// Extract client IP for debugging
+				clientIP := strings.Split(r.RemoteAddr, ":")[0]
+
+				s.logger.Error("PANIC: Request handler crashed",
 					"error", err,
 					"path", r.URL.Path,
 					"method", r.Method,
 					"request_id", requestID,
+					"client_ip", clientIP,
 					"user_agent", r.Header.Get("User-Agent"),
+					"username", r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:],
 					"stack", string(buf))
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
 			}

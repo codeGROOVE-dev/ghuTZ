@@ -856,6 +856,12 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 	// Always perform activity analysis for fun and comparison
 	d.logger.Debug("performing activity pattern analysis", "username", username)
 	activityResult := d.tryActivityPatternsWithContext(ctx, userCtx)
+	if activityResult == nil {
+		d.logger.Error("activity pattern analysis returned nil unexpectedly",
+			"username", username,
+			"has_events", len(userCtx.Events) > 0,
+			"has_user", userCtx.User != nil)
+	}
 
 	// Try quick detection methods first
 	d.logger.Debug("trying profile HTML scraping", "username", username)
@@ -884,8 +890,12 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 			d.logger.Info("Gemini returned result", "timezone", geminiResult.Timezone)
 			// Create verification using centralized function
 			// Note: locationResult.Timezone is the timezone from geocoding the location field
+			var activityTz string
+			if activityResult != nil {
+				activityTz = activityResult.Timezone
+			}
 			verification := d.createVerification(ctx, userCtx, geminiResult.Timezone,
-				locationResult.Timezone, activityResult.Timezone, geminiResult.Location)
+				locationResult.Timezone, activityTz, geminiResult.Location)
 
 			// Use Gemini's detected values as the actual result
 			locationResult.Timezone = geminiResult.Timezone
