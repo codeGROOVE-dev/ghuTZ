@@ -110,8 +110,6 @@ func (d *Detector) collectActivityTimestamps(ctx context.Context, username strin
 func (d *Detector) collectSupplementalTimestamps(ctx context.Context, username string,
 	allTimestamps []timestampEntry, targetDataPoints int,
 ) []timestampEntry {
-	const minDaysSpan = 30 // Need at least 4 weeks for good pattern detection
-
 	// Deduplicate timestamps first to get accurate count
 	uniqueTimestamps := make(map[time.Time]bool)
 	var uniqueEntries []timestampEntry

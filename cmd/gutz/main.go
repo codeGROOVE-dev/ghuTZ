@@ -294,75 +294,6 @@ func printResult(result *gutz.Result) {
 	printDetectionInfo(result)
 }
 
-// extractMainLocation extracts the main city/state from a location string
-// Examples:
-//
-//	"Raleigh, NC, United States" -> "Raleigh, NC"
-//	"Raleigh, NC" -> "Raleigh, NC"
-//	"London, United Kingdom" -> "London"
-func extractMainLocation(location string) string {
-	if location == "" {
-		return ""
-	}
-
-	parts := strings.Split(location, ",")
-	if len(parts) == 0 {
-		return location
-	}
-
-	// Trim spaces from all parts
-	for i := range parts {
-		parts[i] = strings.TrimSpace(parts[i])
-	}
-
-	// If last part is a country name, remove it
-	if len(parts) > 1 {
-		lastPart := parts[len(parts)-1]
-		// Common country names to strip
-		countries := []string{
-			"United States", "USA", "US", "United Kingdom", "UK",
-			"Canada", "Australia", "Germany", "France", "India",
-			"China", "Japan", "Brazil", "Mexico", "Spain", "Italy",
-		}
-		for _, country := range countries {
-			if strings.EqualFold(lastPart, country) {
-				parts = parts[:len(parts)-1]
-				break
-			}
-		}
-	}
-
-	// For US locations, keep city and state (first 2 parts)
-	// For others, keep just the city (first part)
-	if len(parts) >= 2 {
-		// Check if second part looks like a US state code
-		if len(parts[1]) == 2 && isUSStateCode(parts[1]) {
-			return parts[0] + ", " + parts[1]
-		}
-	}
-
-	return parts[0]
-}
-
-// isUSStateCode checks if a string is a valid US state code.
-func isUSStateCode(code string) bool {
-	states := []string{
-		"AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
-		"HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
-		"MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
-		"NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
-		"SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
-		"DC",
-	}
-	upperCode := strings.ToUpper(code)
-	for _, state := range states {
-		if upperCode == state {
-			return true
-		}
-	}
-	return false
-}
-
 func printLocation(result *gutz.Result) {
 	var locationStr string
 	switch {
@@ -714,10 +645,6 @@ func convertUTCToLocal(utcHour float64, timezone string) float64 {
 	// Fallback for UTC+/- format
 	offset := calculateTimezoneOffset(timezone)
 	return math.Mod(utcHour+float64(offset)+24, 24)
-}
-
-type sleepRange struct {
-	start, end int
 }
 
 func printRestHours(result *gutz.Result) {

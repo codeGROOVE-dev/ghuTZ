@@ -16,8 +16,8 @@ import (
 
 // GraphQLClient handles GitHub GraphQL API requests.
 type GraphQLClient struct {
-	token        string
 	cachedHTTPDo func(context.Context, *http.Request) (*http.Response, error)
+	token        string
 	logger       *slog.Logger
 }
 

@@ -131,13 +131,12 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 	// Sleep shouldn't end with active buckets
 	for len(finalBuckets) > 0 {
 		lastBucket := finalBuckets[len(finalBuckets)-1]
-		if halfHourCounts[lastBucket] >= 3 {
-			// Remove this bucket from sleep period
-			finalBuckets = finalBuckets[:len(finalBuckets)-1]
-		} else {
+		if halfHourCounts[lastBucket] < 3 {
 			// Stop trimming once we hit a quiet bucket
 			break
 		}
+		// Remove this bucket from sleep period
+		finalBuckets = finalBuckets[:len(finalBuckets)-1]
 	}
 
 	// Sort the final buckets for consistent output

@@ -287,21 +287,6 @@ func validateSleepRanges(candidateRanges []SleepRange) []SleepRange {
 	return validRanges
 }
 
-func createRangeIfValid(start, end float64) *SleepRange {
-	duration := end - start
-	if duration <= 0 {
-		duration = (24 - start) + end
-	}
-	if duration >= 4 && duration <= 12 {
-		return &SleepRange{
-			Start:    start,
-			End:      end,
-			Duration: duration,
-		}
-	}
-	return nil
-}
-
 // CalculateSleepRanges converts UTC sleep hours to local time and groups them into ranges.
 func CalculateSleepRanges(sleepHoursUTC []int, tz string) []SleepRange {
 	if len(sleepHoursUTC) == 0 {

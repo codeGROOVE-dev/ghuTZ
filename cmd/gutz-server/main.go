@@ -213,9 +213,9 @@ type server struct {
 }
 
 func (s *server) wrap(handler http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(writer http.ResponseWriter, r *http.Request) {
 		requestID := fmt.Sprintf("%d-%d", time.Now().Unix(), time.Now().Nanosecond())
-		w.Header().Set("X-Request-ID", requestID)
+		writer.Header().Set("X-Request-ID", requestID)
 
 		defer func() {
 			if err := recover(); err != nil {
@@ -236,18 +236,18 @@ func (s *server) wrap(handler http.Handler) http.Handler {
 					"user_agent", r.Header.Get("User-Agent"),
 					"username", r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:],
 					"stack", string(buf))
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				http.Error(writer, "Internal server error", http.StatusInternalServerError)
 			}
 		}()
 
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-XSS-Protection", "1; mode=block")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=(), payment=(), usb=(), bluetooth=()")
+		writer.Header().Set("X-Frame-Options", "DENY")
+		writer.Header().Set("X-Content-Type-Options", "nosniff")
+		writer.Header().Set("X-XSS-Protection", "1; mode=block")
+		writer.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		writer.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		writer.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=(), payment=(), usb=(), bluetooth=()")
 
-		w.Header().Set("Content-Security-Policy",
+		writer.Header().Set("Content-Security-Policy",
 			"default-src 'self'; "+
 				"script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; "+
 				"style-src 'self' 'unsafe-inline' https://unpkg.com; "+
@@ -255,14 +255,14 @@ func (s *server) wrap(handler http.Handler) http.Handler {
 				"connect-src 'self'")
 
 		if strings.HasPrefix(r.URL.Path, "/api/") {
-			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, private")
-			w.Header().Set("Pragma", "no-cache")
-			w.Header().Set("Expires", "0")
+			writer.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, private")
+			writer.Header().Set("Pragma", "no-cache")
+			writer.Header().Set("Expires", "0")
 		} else if strings.HasPrefix(r.URL.Path, "/static/") {
-			w.Header().Set("Cache-Control", "public, max-age=3600, immutable")
+			writer.Header().Set("Cache-Control", "public, max-age=3600, immutable")
 		}
 
-		handler.ServeHTTP(w, r)
+		handler.ServeHTTP(writer, r)
 	})
 }
 

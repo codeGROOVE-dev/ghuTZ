@@ -207,7 +207,7 @@ linters:
       os-temp-dir: true
 
     varnamelen:
-      max-distance: 40
+      max-distance: 60
       min-name-length: 2
 
   exclusions:

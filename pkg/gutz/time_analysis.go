@@ -25,9 +25,9 @@ func normalizeHour(hour float64) float64 {
 // Rule: Active hours are any block of sustained activity with 3+ contributions per bucket,
 // with up to 90-minute (3 half-hour) gaps allowed within the block.
 //
-//nolint:gocognit,revive,maintidx // Complex business logic requires nested conditions
-func calculateTypicalActiveHoursUTC(halfHourlyActivityUTC map[float64]int, quietHoursUTC []int) (startUTC, endUTC float64) {
-	// Note: quietHoursUTC parameter kept for backward compatibility but not used
+//nolint:maintidx // Complex business logic requires nested conditions
+func calculateTypicalActiveHoursUTC(halfHourlyActivityUTC map[float64]int, _ []int) (startUTC, endUTC float64) {
+	// Note: second parameter kept for backward compatibility but not used
 	// Active hours are determined purely by activity patterns, not by quiet hours
 
 	if len(halfHourlyActivityUTC) == 0 {

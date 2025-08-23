@@ -1384,9 +1384,9 @@ func (d *Detector) parseUserFromHTML(html string, username string) *github.User 
 	for _, match := range socialMatches {
 		if len(match) > 1 {
 			socialURL := strings.TrimSpace(match[1])
-			provider := ""
 
 			// Determine provider from URL
+			var provider string
 			switch {
 			case strings.Contains(socialURL, "twitter.com"):
 				provider = "twitter"

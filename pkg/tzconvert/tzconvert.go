@@ -101,6 +101,8 @@ func ParseTimezoneOffset(timezone string) int {
 			offsetStr = offsetStr[1:]
 		case '+':
 			offsetStr = offsetStr[1:]
+		default:
+			// No sign means positive offset
 		}
 
 		// Parse the number

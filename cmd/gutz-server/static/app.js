@@ -941,36 +941,7 @@ function drawHistogram(data) {
         };
     }
     
-    // Add peak productivity annotation with activity count
-    if (data.peak_productivity_local && data.peak_productivity_local.start) {
-        console.log('Peak local times:', data.peak_productivity_local);
-        console.log('UTC offset:', utcOffset);
-        const peakStartIndex = Math.floor(data.peak_productivity_local.start / increment);
-        const peakEndIndex = Math.floor(data.peak_productivity_local.end / increment);
-        console.log('Peak indices:', peakStartIndex, peakEndIndex, 'for bars at', peakStartIndex * increment, '-', peakEndIndex * increment);
-        const peakCount = data.peak_productivity_local.count || 0;
-        
-        annotations.peak = {
-            type: 'box',
-            xMin: peakStartIndex - 0.5,
-            xMax: peakEndIndex - 0.5,
-            backgroundColor: 'rgba(251, 191, 36, 0.08)', // Warm yellow/orange
-            borderColor: 'rgba(251, 191, 36, 0.5)',
-            borderWidth: 1,
-            borderDash: [4, 2],
-            label: {
-                content: `⚡ Peak${peakCount > 0 ? ' (' + peakCount + ' events)' : ''}`,
-                enabled: true,
-                position: 'end',
-                font: {
-                    size: 11,
-                    weight: 'bold'
-                },
-                color: 'rgba(251, 146, 60, 0.9)',
-                yAdjust: -8
-            }
-        };
-    }
+    // Peak productivity annotation removed - the peak is visually obvious from the bars themselves
     
     // Add work hours annotation (subtle background)
     if (data.active_hours_local && data.active_hours_local.start) {
@@ -1040,12 +1011,6 @@ function drawHistogram(data) {
                                 }
                             }
                             
-                            // Check if this is peak productivity
-                            if (data.peak_productivity_local && data.peak_productivity_local.start) {
-                                if (localTime >= data.peak_productivity_local.start && localTime < data.peak_productivity_local.end) {
-                                    labels.push('⚡ Peak productivity');
-                                }
-                            }
                             
                             return labels;
                         }
