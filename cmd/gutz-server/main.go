@@ -239,6 +239,7 @@ func (s *server) wrap(handler http.Handler) http.Handler {
 
 func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
+		s.logger.Error("Method not allowed", "method", r.Method, "path", r.URL.Path)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -257,6 +258,7 @@ func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
 	// Render template
 	tmpl, err := template.New("home").Parse(homeTemplate)
 	if err != nil {
+		s.logger.Error("Template parsing failed", "error", err)
 		http.Error(w, "Template error", http.StatusInternalServerError)
 		return
 	}
@@ -272,6 +274,7 @@ func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request)
 	if request.Header.Get("User-Agent") != "Precache" {
 		ip := strings.Split(request.RemoteAddr, ":")[0]
 		if !s.limiter.allow(ip) {
+			s.logger.Error("Rate limit exceeded", "client_ip", ip)
 			http.Error(writer, "Rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
@@ -282,12 +285,14 @@ func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request)
 		Username string `json:"username"`
 	}
 	if err := json.NewDecoder(request.Body).Decode(&req); err != nil {
+		s.logger.Error("Invalid request body", "error", err, "client_ip", strings.Split(request.RemoteAddr, ":")[0])
 		http.Error(writer, "Invalid request", http.StatusBadRequest)
 		return
 	}
 
 	req.Username = strings.TrimSpace(req.Username)
 	if !gutz.IsValidGitHubUsername(req.Username) {
+		s.logger.Error("Invalid username", "username", req.Username, "client_ip", strings.Split(request.RemoteAddr, ":")[0])
 		http.Error(writer, "Invalid username", http.StatusBadRequest)
 		return
 	}
@@ -332,9 +337,46 @@ func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request)
 		result.GeminiPrompt = ""
 	}
 
-	// Encode response
+	// Convert HalfHourlyActivityUTC map[float64]int to map[string]int for JSON encoding
+	// JSON doesn't support float64 as map keys
+	if result.HalfHourlyActivityUTC != nil {
+		stringKeyMap := make(map[string]int)
+		for k, v := range result.HalfHourlyActivityUTC {
+			// Format as "0.0", "0.5", "1.0", etc.
+			key := fmt.Sprintf("%.1f", k)
+			stringKeyMap[key] = v
+		}
+		// Create a temporary result with string keys for JSON encoding
+		type JSONResult struct {
+			*gutz.Result
+			HalfHourlyActivityUTC map[string]int `json:"half_hourly_activity_utc,omitempty"`
+		}
+		jsonResult := JSONResult{
+			Result:                result,
+			HalfHourlyActivityUTC: stringKeyMap,
+		}
+		data, err := json.Marshal(jsonResult)
+		if err != nil {
+			s.logger.Error("JSON encoding failed", "error", err, "username", req.Username)
+			http.Error(writer, "Encoding failed", http.StatusInternalServerError)
+			return
+		}
+		// Cache result
+		s.cache.Set(cacheKey, data)
+		if s.diskCache != nil {
+			go s.diskCache.save(req.Username, data)
+		}
+
+		// Send response
+		writer.Header().Set("Content-Type", "application/json")
+		writer.Write(data)
+		return
+	}
+
+	// Encode response (for cases without HalfHourlyActivityUTC)
 	data, err := json.Marshal(result)
 	if err != nil {
+		s.logger.Error("JSON encoding failed", "error", err, "username", req.Username)
 		http.Error(writer, "Encoding failed", http.StatusInternalServerError)
 		return
 	}

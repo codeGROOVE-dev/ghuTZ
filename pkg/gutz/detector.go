@@ -976,6 +976,69 @@ func (d *Detector) Detect(ctx context.Context, username string) (*Result, error)
 			locationResult.Verification = verification
 		} else {
 			d.logger.Info("Gemini returned nil result")
+			
+			// When Gemini isn't available, prefer: profile timezone > profile location timezone > activity timezone
+			// Check if we should use profile timezone or activity timezone instead of location
+			if userCtx.GitHubTimezone != "" {
+				// Profile timezone takes highest priority
+				d.logger.Info("using profile timezone when Gemini unavailable",
+					"profile_tz", userCtx.GitHubTimezone,
+					"location_tz", locationResult.Timezone)
+				
+				// Parse the profile timezone to a standard format if needed
+				profileTz := userCtx.GitHubTimezone
+				locationResult.Timezone = profileTz
+				
+				// Recalculate all local times with the profile timezone
+				newOffset := offsetFromNamedTimezone(profileTz)
+				
+				// Recalculate ActiveHoursLocal
+				if locationResult.ActiveHoursUTC.Start != 0 || locationResult.ActiveHoursUTC.End != 0 {
+					locationResult.ActiveHoursLocal = struct {
+						Start float64 `json:"start"`
+						End   float64 `json:"end"`
+					}{
+						Start: tzconvert.UTCToLocal(locationResult.ActiveHoursUTC.Start, newOffset),
+						End:   tzconvert.UTCToLocal(locationResult.ActiveHoursUTC.End, newOffset),
+					}
+				}
+				
+				// Recalculate PeakProductivityLocal
+				if locationResult.PeakProductivityUTC.Start != 0 || locationResult.PeakProductivityUTC.End != 0 {
+					locationResult.PeakProductivityLocal = struct {
+						Start float64 `json:"start"`
+						End   float64 `json:"end"`
+						Count int     `json:"count"`
+					}{
+						Start: tzconvert.UTCToLocal(locationResult.PeakProductivityUTC.Start, newOffset),
+						End:   tzconvert.UTCToLocal(locationResult.PeakProductivityUTC.End, newOffset),
+						Count: locationResult.PeakProductivityUTC.Count,
+					}
+				}
+				
+				// Recalculate LunchHoursLocal
+				if locationResult.LunchHoursUTC.Start != 0 || locationResult.LunchHoursUTC.End != 0 {
+					locationResult.LunchHoursLocal = struct {
+						Start      float64 `json:"start"`
+						End        float64 `json:"end"`
+						Confidence float64 `json:"confidence"`
+					}{
+						Start:      tzconvert.UTCToLocal(locationResult.LunchHoursUTC.Start, newOffset),
+						End:        tzconvert.UTCToLocal(locationResult.LunchHoursUTC.End, newOffset),
+						Confidence: locationResult.LunchHoursUTC.Confidence,
+					}
+				}
+				
+				// Recalculate SleepRangesLocal
+				if len(locationResult.SleepBucketsUTC) > 0 {
+					d.logger.Debug("recalculating SleepRangesLocal with profile timezone",
+						"timezone", profileTz,
+						"sleepBucketsUTC", locationResult.SleepBucketsUTC)
+					locationResult.SleepRangesLocal = CalculateSleepRangesFromBuckets(locationResult.SleepBucketsUTC, profileTz)
+				}
+			}
+			// Profile location timezone (from geocoding) is already set as locationResult.Timezone
+			// Activity timezone is third priority and is already in activityResult if we need to fall back to it
 		}
 
 		if geminiResult != nil {

@@ -420,7 +420,7 @@ type Result struct {
 	CreatedAt                  *time.Time             `json:"created_at,omitempty"`
 	HourlyOrganizationActivity map[int]map[string]int `json:"hourly_organization_activity,omitempty"`
 	HourlyActivityUTC          map[int]int            `json:"hourly_activity_utc"`
-	HalfHourlyActivityUTC      map[float64]int        `json:"-"`
+	HalfHourlyActivityUTC      map[float64]int        `json:"half_hourly_activity_utc,omitempty"`
 	Location                   *Location              `json:"location,omitempty"`
 	Verification               *VerificationResult    `json:"verification,omitempty"`
 	GeminiReasoning            string                 `json:"gemini_reasoning,omitempty"`

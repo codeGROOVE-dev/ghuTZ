@@ -679,6 +679,15 @@ function drawHistogram(data) {
         activityChart.destroy();
     }
     
+    // Use half-hourly data (30-minute resolution)
+    // Convert string keys back to numbers if needed
+    const halfHourlyDataRaw = data.half_hourly_activity_utc || {};
+    const halfHourlyData = {};
+    for (const key in halfHourlyDataRaw) {
+        const numKey = parseFloat(key);
+        halfHourlyData[numKey] = halfHourlyDataRaw[key];
+    }
+    
     const hourlyData = data.hourly_activity_utc || {};
     const hourlyOrgData = data.hourly_organization_activity || {};
     const utcOffset = getUTCOffsetFromTimezone(data.timezone, data.activity_timezone);
@@ -692,18 +701,28 @@ function drawHistogram(data) {
     ];
     const otherColor = '#999999'; // Grey for all others
     
-    // Create datasets for stacked bar chart
+    // Create datasets for stacked bar chart - 48 bars for 30-minute resolution
     const datasets = [];
+    const numBars = 48;
+    const increment = 0.5;
     
     // Create a dataset for each top organization (colors for top 3, grey for rest)
     for (let i = 0; i < topOrgs.length; i++) {
         const orgName = topOrgs[i].name;
         const orgData = [];
         
-        for (let localHour = 0; localHour < 24; localHour++) {
-            const utcHour = (localHour - utcOffset + 24) % 24;
+        for (let barIndex = 0; barIndex < numBars; barIndex++) {
+            const localTime = barIndex * increment;
+            const utcTime = (localTime - utcOffset + 24) % 24;
+            
+            // For half-hourly, we don't have org breakdown, so distribute proportionally
+            const halfHourCount = halfHourlyData[utcTime] || 0;
+            const utcHour = Math.floor(utcTime);
             const hourOrgs = hourlyOrgData[utcHour] || {};
-            orgData.push(hourOrgs[orgName] || 0);
+            const hourTotal = hourlyData[utcHour] || 1;
+            const orgHourCount = hourOrgs[orgName] || 0;
+            // Distribute the org's hourly count proportionally to half-hour slots
+            orgData.push(Math.round((halfHourCount * orgHourCount) / hourTotal));
         }
         
         datasets.push({
@@ -721,17 +740,19 @@ function drawHistogram(data) {
         const otherData = [];
         const topOrgNames = topOrgs.map(org => org.name);
         
-        for (let localHour = 0; localHour < 24; localHour++) {
-            const utcHour = (localHour - utcOffset + 24) % 24;
+        for (let barIndex = 0; barIndex < numBars; barIndex++) {
+            const localTime = barIndex * increment;
+            const utcTime = (localTime - utcOffset + 24) % 24;
+            
+            const halfHourCount = halfHourlyData[utcTime] || 0;
+            const utcHour = Math.floor(utcTime);
             const hourOrgs = hourlyOrgData[utcHour] || {};
-            let otherCount = 0;
-            
-            // Only count unattributed activity (not already in any org)
-            const totalHourCount = hourlyData[utcHour] || 0;
+            const hourTotal = hourlyData[utcHour] || 0;
             const attributedCount = Object.values(hourOrgs).reduce((sum, count) => sum + count, 0);
-            const unattributedCount = Math.max(0, totalHourCount - attributedCount);
-            
-            otherData.push(unattributedCount);
+            // Scale the unattributed count proportionally for half-hour slots
+            const unattributedHourly = Math.max(0, hourTotal - attributedCount);
+            const unattributedHalfHour = hourTotal > 0 ? Math.round((halfHourCount * unattributedHourly) / hourTotal) : halfHourCount;
+            otherData.push(unattributedHalfHour);
         }
         
         // Only add "Unattributed" dataset if there's data
@@ -749,9 +770,10 @@ function drawHistogram(data) {
     // If no organization data, fall back to simple display
     if (datasets.length === 0) {
         const chartData = [];
-        for (let localHour = 0; localHour < 24; localHour++) {
-            const utcHour = (localHour - utcOffset + 24) % 24;
-            chartData.push(hourlyData[utcHour] || 0);
+        for (let barIndex = 0; barIndex < numBars; barIndex++) {
+            const localTime = barIndex * increment;
+            const utcTime = (localTime - utcOffset + 24) % 24;
+            chartData.push(halfHourlyData[utcTime] || 0);
         }
         
         datasets.push({
@@ -765,9 +787,74 @@ function drawHistogram(data) {
     
     // Create chart labels
     const chartLabels = [];
-    for (let localHour = 0; localHour < 24; localHour++) {
-        const hourLabel = String(localHour).padStart(2, '0') + ':00';
-        chartLabels.push(hourLabel);
+    for (let barIndex = 0; barIndex < numBars; barIndex++) {
+        const localTime = barIndex * increment;
+        const hour = Math.floor(localTime);
+        const minutes = Math.round((localTime - hour) * 60);
+        const label = String(hour).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+        chartLabels.push(label);
+    }
+    
+    // Add annotations for sleep, lunch, and peak times if available
+    const annotations = {};
+    
+    // Add sleep annotation
+    if (data.sleep_ranges_local && data.sleep_ranges_local.length > 0) {
+        data.sleep_ranges_local.forEach((range, i) => {
+            const startIndex = Math.floor(range.start / increment);
+            const endIndex = Math.floor(range.end / increment);
+            annotations[`sleep${i}`] = {
+                type: 'box',
+                xMin: startIndex - 0.5,
+                xMax: endIndex - 0.5,
+                backgroundColor: 'rgba(66, 133, 244, 0.1)', // Light blue for sleep
+                borderColor: 'rgba(66, 133, 244, 0.3)',
+                borderWidth: 1,
+                label: {
+                    content: '💤 Sleep',
+                    enabled: true,
+                    position: 'start'
+                }
+            };
+        });
+    }
+    
+    // Add lunch annotation
+    if (data.lunch_hours_local && data.lunch_hours_local.start) {
+        const lunchStartIndex = Math.floor(data.lunch_hours_local.start / increment);
+        const lunchEndIndex = Math.floor(data.lunch_hours_local.end / increment);
+        annotations.lunch = {
+            type: 'box',
+            xMin: lunchStartIndex - 0.5,
+            xMax: lunchEndIndex - 0.5,
+            backgroundColor: 'rgba(52, 168, 83, 0.1)', // Light green for lunch
+            borderColor: 'rgba(52, 168, 83, 0.3)',
+            borderWidth: 1,
+            label: {
+                content: '🍽️ Lunch',
+                enabled: true,
+                position: 'center'
+            }
+        };
+    }
+    
+    // Add peak productivity annotation
+    if (data.peak_productivity_local && data.peak_productivity_local.start) {
+        const peakStartIndex = Math.floor(data.peak_productivity_local.start / increment);
+        const peakEndIndex = Math.floor(data.peak_productivity_local.end / increment);
+        annotations.peak = {
+            type: 'box',
+            xMin: peakStartIndex - 0.5,
+            xMax: peakEndIndex - 0.5,
+            backgroundColor: 'rgba(251, 188, 4, 0.1)', // Light yellow for peak
+            borderColor: 'rgba(251, 188, 4, 0.3)',
+            borderWidth: 1,
+            label: {
+                content: '⚡ Peak',
+                enabled: true,
+                position: 'end'
+            }
+        };
     }
     
     // Create Chart.js bar chart
@@ -787,10 +874,13 @@ function drawHistogram(data) {
                 },
                 title: {
                     display: true,
-                    text: `Daily Activity Pattern (${data.timezone})`,
+                    text: `Daily Activity Pattern (${data.timezone}) - 30-minute Resolution`,
                     font: {
                         size: 14
                     }
+                },
+                annotation: {
+                    annotations: annotations
                 }
             },
             scales: {
@@ -809,12 +899,23 @@ function drawHistogram(data) {
                     stacked: true,
                     title: {
                         display: true,
-                        text: 'Hour (Local Time)'
+                        text: 'Time (Local)'
                     },
                     ticks: {
                         maxRotation: 45,
-                        minRotation: 0
-                    }
+                        minRotation: 0,
+                        autoSkip: true,
+                        maxTicksLimit: 24, // Show only hour labels for readability
+                        callback: function(value, index) {
+                            // Only show labels for whole hours (every other bar)
+                            if (index % 2 !== 0) {
+                                return '';
+                            }
+                            return this.getLabelForValue(value);
+                        }
+                    },
+                    barPercentage: 0.95, // Thin bars for 48 bars
+                    categoryPercentage: 1.0
                 }
             },
             animation: {
