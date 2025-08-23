@@ -107,7 +107,6 @@ func (d *Detector) buildContextData(userCtx *UserContext, activityResult *Result
 	if activityResult != nil {
 		contextData["activity_result"] = activityResult
 
-
 		if len(activityResult.TimezoneCandidates) > 0 {
 			contextData["timezone_candidates"] = activityResult.TimezoneCandidates
 		}

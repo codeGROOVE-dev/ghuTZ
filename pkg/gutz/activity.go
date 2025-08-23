@@ -18,7 +18,7 @@ import (
 	"github.com/codeGROOVE-dev/guTZ/pkg/tzconvert"
 )
 
-// GlobalLunchPattern represents the best lunch pattern found globally in UTC
+// GlobalLunchPattern represents the best lunch pattern found globally in UTC.
 
 // refineHourlySleepFromBuckets uses half-hour resolution data to create accurate sleep hours.
 // Since we always have half-hour data, we should use it for precise sleep detection.
@@ -280,11 +280,6 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 				d.logger.Debug("using default sleep hours due to limited data", "username", username)
 			}
 		}
-	}
-
-	hourlyActivity := make([]int, 24)
-	for hour := range 24 {
-		hourlyActivity[hour] = hourCounts[hour]
 	}
 
 	// Find the middle of sleep hours
@@ -998,9 +993,9 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		TopOrganizations:           topOrgs,
 		Confidence:                 confidence,
 		Method:                     "activity_patterns",
-		HalfHourlyActivityUTC:      halfHourCounts,    // Store 30-minute resolution data
-		HourlyOrganizationActivity: hourOrgActivity,   // Store org-specific activity
-		TimezoneCandidates:         candidates,        // Top 3 timezone candidates with analysis
+		HalfHourlyActivityUTC:      halfHourCounts,  // Store 30-minute resolution data
+		HourlyOrganizationActivity: hourOrgActivity, // Store org-specific activity
+		TimezoneCandidates:         candidates,      // Top 3 timezone candidates with analysis
 	}
 
 	// Add activity date range information

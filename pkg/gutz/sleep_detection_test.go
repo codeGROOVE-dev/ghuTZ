@@ -37,19 +37,17 @@ func TestJamonationSleepDetection(t *testing.T) {
 		23.0: 0, 23.5: 1, // Mostly quiet with one blip at 23:30
 	}
 
-
 	// New sleep detection (half-hourly)
 	sleepBuckets := sleep.DetectSleepPeriodsWithHalfHours(halfHourCounts)
 
-	// Refine using our new function
-	refinedSleepHours := refineHourlySleepFromBuckets(quietHours, sleepBuckets, halfHourCounts)
+	// Refine using our new function (passing nil for quietHours since we removed hourly tracking)
+	refinedSleepHours := refineHourlySleepFromBuckets(nil, sleepBuckets, halfHourCounts)
 
 	// The algorithm detects the longest continuous quiet period
 	// In this case, it's the morning hours 0-9 (20 consecutive quiet half-hour buckets)
 	// This is a valid sleep period for someone in Toronto (UTC-4):
 	// UTC 0-9 = 20:00-05:00 local time (8pm-5am)
 
-	t.Logf("Quiet hours (hourly): %v", quietHours)
 	t.Logf("Sleep buckets (half-hourly): %v", sleepBuckets)
 	t.Logf("Refined sleep hours: %v", refinedSleepHours)
 

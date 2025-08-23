@@ -29,7 +29,6 @@ type geminiQueryResult struct {
 	Prompt    string
 }
 
-
 // queryUnifiedGeminiForTimezone queries Gemini AI for timezone detection.
 func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]any) (*geminiQueryResult, error) {
 	// Check if we have activity data for confidence scoring later
@@ -148,7 +147,6 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		if activityResult.SleepHoursUTC != nil {
 			contextData["sleep_hours"] = activityResult.SleepHoursUTC
 		}
-
 
 		if len(activityResult.TimezoneCandidates) > 0 {
 			contextData["timezone_candidates"] = activityResult.TimezoneCandidates
@@ -285,14 +283,14 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 	}
 
 	// Collect commit message samples for Gemini to analyze
-	commitSamples := collectCommitMessageSamples(userCtx.Events, 15)
+	commitSamples := collectCommitMessageSamples(userCtx.Events, 30)
 	if len(commitSamples) > 0 {
 		contextData["commit_message_samples"] = commitSamples
 		dataSources = append(dataSources, "Commits")
 	}
 
 	// Collect text samples from PRs/issues for Gemini to analyze
-	textSamples := collectTextSamples(userCtx.PullRequests, userCtx.Issues, userCtx.Comments, 10)
+	textSamples := collectTextSamples(userCtx.PullRequests, userCtx.Issues, userCtx.Comments, 25)
 	if len(textSamples) > 0 {
 		contextData["text_samples"] = textSamples
 	}

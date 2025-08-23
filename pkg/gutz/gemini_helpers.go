@@ -18,8 +18,8 @@ const (
 	maxExternalContribs   = 15
 	maxRecentPRs          = 10
 	maxRecentIssues       = 10
-	maxRecentCommits      = 10
-	maxTextSamples        = 8
+	maxRecentCommits      = 20
+	maxTextSamples        = 20
 	maxLocationIndicators = 5
 	maxTopCandidates      = 4
 	maxDetailedCandidates = 3
@@ -689,19 +689,23 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 			if len(msg) > commitMessageMaxLen {
 				msg = msg[:commitMessageMaxLen] + "..."
 			}
-			fmt.Fprintf(&sb, "- %s\n", msg)
+			repoInfo := ""
+			if sample.Repository != "" {
+				repoInfo = " - " + sample.Repository
+			}
+			fmt.Fprintf(&sb, "* \"%s\"%s\n", msg, repoInfo)
 		}
 		sb.WriteString("\n")
 	}
 
 	// Text samples provide language and cultural indicators.
 	if textSamples, ok := contextData["text_samples"].([]string); ok && len(textSamples) > 0 {
-		sb.WriteString("Text samples from PRs/issues/comments:\n")
+		sb.WriteString("Text samples from PRs/issues/comments (with source repository):\n")
 		for i, sample := range textSamples {
 			if i >= maxTextSamples {
 				break
 			}
-			fmt.Fprintf(&sb, "- %s\n", sample)
+			fmt.Fprintf(&sb, "%s\n", sample)
 		}
 		sb.WriteString("\n")
 	}
