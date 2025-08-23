@@ -89,11 +89,12 @@ func (d *Detector) tryActivityPatternsWithContext(ctx context.Context, userCtx *
 					now := time.Now()
 					_, offset := now.In(loc).Zone()
 					offsetHours := offset / 3600
-					if offsetHours == 0 {
+					switch {
+					case offsetHours == 0:
 						userCtx.ProfileLocationTimezone = "UTC"
-					} else if offsetHours > 0 {
+					case offsetHours > 0:
 						userCtx.ProfileLocationTimezone = fmt.Sprintf("UTC+%d", offsetHours)
-					} else {
+					default:
 						userCtx.ProfileLocationTimezone = fmt.Sprintf("UTC%d", offsetHours)
 					}
 					d.logger.Debug("derived profile location timezone from location",
@@ -333,9 +334,9 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 			}
 
 			// Reorder the array to be continuous
-			reordered := append(quietHours[startIdx:], quietHours[:startIdx]...)
-			startHour := reordered[0]
-			endHour := reordered[len(reordered)-1]
+			quietHours = append(quietHours[startIdx:], quietHours[:startIdx]...)
+			startHour := quietHours[0]
+			endHour := quietHours[len(quietHours)-1]
 
 			// Calculate midpoint
 			if endHour < startHour {
@@ -604,7 +605,8 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// Ensure the claimed timezone is in the candidates list
 	// Check if any candidate is already marked as claimed
 	claimedFound := false
-	for _, c := range candidates {
+	for i := range candidates {
+		c := &candidates[i]
 		if c.IsProfile {
 			claimedFound = true
 			break

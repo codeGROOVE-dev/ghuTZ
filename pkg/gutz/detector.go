@@ -589,10 +589,10 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) (*User
 			if errors.Is(err, github.ErrNoGitHubToken) {
 				d.logger.Debug("no GitHub token available, will parse from HTML instead", "username", username)
 				// Try to extract basic user info from HTML as fallback
-				user := d.parseUserFromHTML(html, username)
-				if user != nil {
+				parsedUser := d.parseUserFromHTML(html, username)
+				if parsedUser != nil {
 					mu.Lock()
-					userCtx.User = user
+					userCtx.User = parsedUser
 					mu.Unlock()
 				}
 				return
@@ -1365,22 +1365,22 @@ func (d *Detector) parseUserFromHTML(html string, username string) *github.User 
 	var socialAccounts []github.SocialAccount
 	for _, match := range socialMatches {
 		if len(match) > 1 {
-			url := strings.TrimSpace(match[1])
+			socialURL := strings.TrimSpace(match[1])
 			provider := ""
 
 			// Determine provider from URL
 			switch {
-			case strings.Contains(url, "twitter.com"):
+			case strings.Contains(socialURL, "twitter.com"):
 				provider = "twitter"
-			case strings.Contains(url, "mastodon"):
+			case strings.Contains(socialURL, "mastodon"):
 				provider = "mastodon"
-			case strings.Contains(url, "linkedin.com"):
+			case strings.Contains(socialURL, "linkedin.com"):
 				provider = "linkedin"
-			case strings.Contains(url, "facebook.com"):
+			case strings.Contains(socialURL, "facebook.com"):
 				provider = "facebook"
-			case strings.Contains(url, "instagram.com"):
+			case strings.Contains(socialURL, "instagram.com"):
 				provider = "instagram"
-			case strings.Contains(url, "youtube.com"):
+			case strings.Contains(socialURL, "youtube.com"):
 				provider = "youtube"
 			default:
 				provider = "generic"
@@ -1388,7 +1388,7 @@ func (d *Detector) parseUserFromHTML(html string, username string) *github.User 
 
 			socialAccounts = append(socialAccounts, github.SocialAccount{
 				Provider: provider,
-				URL:      url,
+				URL:      socialURL,
 			})
 		}
 	}
@@ -1444,9 +1444,10 @@ func (d *Detector) extractGitHubTimezoneFromHTML(userCtx *UserContext) {
 				// GitHub uses negative for west of UTC (e.g., -12.0 for UTC-12)
 				// Handle fractional hours (e.g., India is UTC+5.5, Nepal is UTC+5.75, Newfoundland is UTC-2.5)
 				var tz string
-				if hours == 0 {
+				switch {
+				case hours == 0:
 					tz = "UTC"
-				} else if hours < 0 {
+				case hours < 0:
 					// Check if it's a fractional hour
 					if hours != float64(int(hours)) {
 						// Format with decimal for fractional hours
@@ -1454,7 +1455,7 @@ func (d *Detector) extractGitHubTimezoneFromHTML(userCtx *UserContext) {
 					} else {
 						tz = fmt.Sprintf("UTC%d", int(hours))
 					}
-				} else {
+				default:
 					// Positive offset
 					if hours != float64(int(hours)) {
 						// Format with decimal for fractional hours
@@ -1494,16 +1495,17 @@ func (d *Detector) extractGitHubTimezoneFromHTML(userCtx *UserContext) {
 
 					// Format the timezone string
 					var tz string
-					if decimalHours == 0 {
+					switch {
+					case decimalHours == 0:
 						tz = "UTC"
-					} else if decimalHours == float64(int(decimalHours)) {
+					case decimalHours == float64(int(decimalHours)):
 						// Whole number of hours
 						if decimalHours > 0 {
 							tz = fmt.Sprintf("UTC+%d", int(decimalHours))
 						} else {
 							tz = fmt.Sprintf("UTC%d", int(decimalHours))
 						}
-					} else {
+					default:
 						// Fractional hours
 						if decimalHours > 0 {
 							tz = fmt.Sprintf("UTC+%.1f", decimalHours)

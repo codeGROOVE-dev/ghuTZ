@@ -89,7 +89,7 @@ func ParseTimezoneOffset(timezone string) int {
 
 		// Parse the offset
 		offsetStr := timezone[3:]
-		if len(offsetStr) == 0 {
+		if offsetStr == "" {
 			return 0
 		}
 
