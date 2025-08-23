@@ -14,7 +14,8 @@ If activity_timezone candidates are provided (e.g., "Top 4 candidates: UTC+12, U
 - Activity patterns represent ACTUAL behavior and cannot be ignored
 - Name etymology, company location, and other signals can only influence WHICH candidate to pick, not override them entirely
 - Example: If candidates are UTC+10/+11/+12, you CANNOT pick Europe/Moscow (UTC+3) even for a Russian name
-- Example: If top candidate is UTC-4 with 42%% confidence, prefer Eastern US/Canada over Pacific
+- Example: If top candidate is UTC-4 with 82%% confidence, check for .ca domains/emails → if present, use Toronto/Montreal/Ottawa, NOT New York
+- 🇨🇦 CRITICAL: .ca domains or emails ALWAYS mean Canada within the UTC-4/UTC-5 timezone constraint
 
 DETECTION PRIORITIES (subject to above constraint):
 
@@ -103,7 +104,7 @@ DETECTION PRIORITIES (subject to above constraint):
 	- Remember: We are analyzing TECH WORKERS (software engineers, DevOps, security engineers, etc.)
 	- 🚨 MATCH CITIES TO THE DETECTED UTC OFFSET AND SEASON:
 	  • UTC-5 in summer → Central cities: Chicago, Austin, Kansas City, Minneapolis, Madison
-	  • UTC-4 in summer → Eastern cities: New York, Raleigh-Durham, Atlanta, Boston, Pittsburgh, Toronto
+	  • UTC-4 in summer → Eastern cities: Toronto, Montreal, Ottawa (if .ca domain/email), otherwise New York, Raleigh-Durham, Atlanta, Boston, Pittsburgh
 	  • UTC-6 in summer → Mountain cities: Denver, Boulder, Phoenix, Salt Lake City
 	  • UTC-7 in summer → Pacific cities: SF Bay Area, Seattle, Portland, San Diego
 	- Tech workers often choose quality-of-life cities: Boulder, Lawrence (KS), Madison, Burlington (VT), Ann Arbor
@@ -118,7 +119,9 @@ DETECTION PRIORITIES (subject to above constraint):
 	  • German surname + UTC-3 = Often Southern Brazil (Florianópolis, Porto Alegre, Curitiba)
 	  • If no evidence for Brazil or Argentina exists, assume UTC-3 users are actually in the United States
 	- 🚨 UTC-4 clues: look for subtle Canada indicators
-	  • E-mails, websites, or repository names with "ca" or Canadian references should strongly bias toward Canada
+	  • .ca domains or emails = ALWAYS choose Canada (Toronto/Montreal/Ottawa) over US cities
+	  • Repository names with "ca" or Canadian references should strongly bias toward Canada
+	  • PyCon Canada, pycon.ca, or other Canadian conference repos = STRONG Canada signal
 	- 🚨 UTC-6 clues: look for subtle Mexico indicators:
 	  • Any Spanish content, Mexican cultural references, or .mx domain = Mexico
 
