@@ -479,6 +479,19 @@
             .result-value {
                 position: relative;
             }
+            
+            /* Tooltip styling for informational hovers */
+            .result-value span[title] {
+                cursor: help;
+                border-bottom: 1px dotted #999;
+                display: inline-block;
+                position: relative;
+            }
+            
+            /* Simple native tooltip enhancement */
+            .result-value span[title]:hover {
+                border-bottom-color: #666;
+            }
 
             /* Style the applications box on hover */
             .applications-box:hover {

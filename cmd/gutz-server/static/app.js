@@ -159,14 +159,14 @@ function displayResults(data) {
     // Show timezone with current local time and UTC offset
     const currentTime = getCurrentTimeInTimezone(data.timezone);
     const utcOffsetStr = getUTCOffsetString(data.timezone);
-    let timezoneHTML = `${data.timezone} (${currentTime}, ${utcOffsetStr})`;
+    let timezoneHTML = `<span title="Our best guess based on all available signals">${data.timezone} (${currentTime}, ${utcOffsetStr})</span>`;
     
     // Show additional timezone information as sub-items
     let subItems = [];
     
     // Show GitHub profile timezone if it exists
     if (data.verification && data.verification.profile_timezone) {
-        let profileTzHTML = `GitHub Profile: ${data.verification.profile_timezone}`;
+        let profileTzHTML = `<span title="Timezone set in the user's GitHub profile settings">GitHub Profile: ${data.verification.profile_timezone}</span>`;
         
         // Only show discrepancy warning if 4+ hours off
         if (data.verification.timezone_offset_diff >= 4) {
@@ -183,7 +183,7 @@ function displayResults(data) {
     // Show GitHub location-derived timezone if different from profile timezone
     if (data.verification && data.verification.profile_location_timezone && 
         data.verification.profile_location_timezone !== data.verification.profile_timezone) {
-        let locTzHTML = `GitHub Location: ${data.verification.profile_location_timezone}`;
+        let locTzHTML = `<span title="Timezone derived from the location in the user's GitHub profile">GitHub Location: ${data.verification.profile_location_timezone}</span>`;
         
         // Calculate offset from detected timezone
         const detectedOffset = extractUTCOffset(data.timezone) || extractUTCOffset(utcOffsetStr);
@@ -207,7 +207,7 @@ function displayResults(data) {
     
     // Show activity-based timezone if it exists and is different
     if (data.activity_timezone && data.activity_timezone !== data.timezone) {
-        let activityTzHTML = `GitHub Activity: ${data.activity_timezone}`;
+        let activityTzHTML = `<span title="Timezone detected from comprehensive GitHub activity patterns including commits, PRs, issues, releases, and other events">GitHub Activity: ${data.activity_timezone}</span>`;
         
         // Calculate offset difference for activity timezone
         const detectedOffset = extractUTCOffset(data.timezone) || extractUTCOffset(utcOffsetStr);
@@ -295,15 +295,25 @@ function displayResults(data) {
         ];
         const greyColor = '#999999'; // Grey for all others
         
-        // Show all organizations with color-coded counts
+        // Show all organizations with color-coded counts and links
         data.top_organizations.forEach((org, i) => {
             if (i > 0) {
                 const separator = document.createTextNode(', ');
                 orgsContainer.appendChild(separator);
             }
             
+            // Create a link to the GitHub organization
+            const orgLink = document.createElement('a');
+            orgLink.href = `https://github.com/${org.name}`;
+            orgLink.target = '_blank';
+            orgLink.style.color = 'inherit';
+            orgLink.style.textDecoration = 'none';
+            orgLink.textContent = org.name;
+            
+            // Create wrapper span to hold link and count
             const orgSpan = document.createElement('span');
-            orgSpan.textContent = org.name + ' ';
+            orgSpan.appendChild(orgLink);
+            orgSpan.appendChild(document.createTextNode(' '));
             
             // Create colored count in parentheses
             const countSpan = document.createElement('span');
@@ -385,16 +395,22 @@ function displayResults(data) {
     }
 
     let locationText = '';
+    let locationTooltip = '';
     if (data.gemini_suggested_location) {
         locationText = data.gemini_suggested_location;
+        locationTooltip = 'Location detected using AI analysis of activity patterns and profile data';
     } else if (data.location_name) {
         locationText = data.location_name;
+        locationTooltip = 'Location detected from activity patterns and timezone analysis';
     } else if (data.location) {
         locationText = data.location.latitude.toFixed(2) + ', ' + data.location.longitude.toFixed(2);
+        locationTooltip = 'Approximate coordinates based on timezone detection';
     }
     
     if (locationText) {
-        let locationHTML = locationText;
+        let locationHTML = locationTooltip ? 
+            `<span title="${locationTooltip}">${locationText}</span>` : 
+            locationText;
         let locationSubItems = [];
         
         // Check for profile location discrepancy
@@ -402,7 +418,7 @@ function displayResults(data) {
             const distanceKm = Math.round(data.verification.location_distance_km);
             
             // Always show profile location if it exists
-            let profileLocHTML = `GitHub Profile: ${data.verification.profile_location}`;
+            let profileLocHTML = `<span title="Location listed in the user's GitHub profile">GitHub Profile: ${data.verification.profile_location}</span>`;
             
             // Only show distance warning if significant (800+ km)
             if (distanceKm > 0 && distanceKm >= 800) {
