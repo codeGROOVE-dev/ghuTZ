@@ -203,7 +203,7 @@ func generateHistogramLine(data *histogramData, bucket float64, count, utcHour i
 }
 
 // determineHourType identifies what type of time period this bucket represents.
-func determineHourType(result *Result, _, localTime float64, _ int, timezone string) (string, *color.Color) {
+func determineHourType(result *Result, _, localTime float64, _ int, _ string) (string, *color.Color) {
 	// Check for sleep time using SleepRangesLocal (unified approach)
 	if len(result.SleepRangesLocal) > 0 {
 		for _, sleepRange := range result.SleepRangesLocal {

@@ -33,7 +33,9 @@ type geminiQueryResult struct {
 func (d *Detector) queryUnifiedGeminiForTimezone(ctx context.Context, contextData map[string]any) (*geminiQueryResult, error) {
 	// Check if we have activity data for confidence scoring later
 	hasActivityData := false
-	if activityResult, ok := contextData["activity_result"].(*Result); ok && activityResult != nil && activityResult.HalfHourlyActivityUTC != nil && len(activityResult.HalfHourlyActivityUTC) > 0 {
+	if activityResult, ok := contextData["activity_result"].(*Result); ok &&
+		activityResult != nil && activityResult.HalfHourlyActivityUTC != nil &&
+		len(activityResult.HalfHourlyActivityUTC) > 0 {
 		hasActivityData = true
 	}
 
@@ -679,19 +681,19 @@ func collectTextSamplesFromTimeline(timeline []timestampEntry, maxSamples int) [
 		var sample string
 		switch entry.source {
 		case "pr":
-			sample = fmt.Sprintf("PR: \"%s\" (%s)", entry.title, entry.repository)
+			sample = fmt.Sprintf("PR: %q (%s)", entry.title, entry.repository)
 		case "issue":
-			sample = fmt.Sprintf("Issue: \"%s\" (%s)", entry.title, entry.repository)
+			sample = fmt.Sprintf("Issue: %q (%s)", entry.title, entry.repository)
 		case "comment":
 			// Comments are already truncated in timeline collection
-			sample = fmt.Sprintf("Comment: \"%s\" (%s)", entry.title, entry.repository)
+			sample = fmt.Sprintf("Comment: %q (%s)", entry.title, entry.repository)
 		case "gist":
-			sample = fmt.Sprintf("Gist: \"%s\"", entry.title)
+			sample = fmt.Sprintf("Gist: %q", entry.title)
 		case "repo_created":
 			continue // Skip repo descriptions, they're listed elsewhere
 		case "commit":
 			// Commits now have actual commit messages extracted from PushEvents
-			sample = fmt.Sprintf("Commit: \"%s\" (%s)", entry.title, entry.repository)
+			sample = fmt.Sprintf("Commit: %q (%s)", entry.title, entry.repository)
 		case "event":
 			// Skip generic events - we've already extracted meaningful content as commits/comments
 			continue

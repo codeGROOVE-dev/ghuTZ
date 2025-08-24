@@ -1136,26 +1136,26 @@ func (c *Client) FetchUserCommitActivitiesGraphQL(ctx context.Context, username 
 		}
 
 		// Process response and close body immediately to avoid resource leak
-		var searchResult struct {
-			Items []struct {
+		var searchResult struct { //nolint:govet // field alignment for anonymous struct
+			TotalCount int `json:"total_count"`
+			Items      []struct {
+				Commit struct {
+					Author struct {
+						Date  time.Time `json:"date"`
+						Name  string    `json:"name"`
+						Email string    `json:"email"`
+					} `json:"author"`
+					Committer struct {
+						Date  time.Time `json:"date"`
+						Name  string    `json:"name"`
+						Email string    `json:"email"`
+					} `json:"committer"`
+				} `json:"commit"`
 				Repository struct {
 					FullName string `json:"full_name"`
 					ID       int    `json:"id"`
 				} `json:"repository"`
-				Commit struct {
-					Author struct {
-						Name  string    `json:"name"`
-						Email string    `json:"email"`
-						Date  time.Time `json:"date"`
-					} `json:"author"`
-					Committer struct {
-						Name  string    `json:"name"`
-						Email string    `json:"email"`
-						Date  time.Time `json:"date"`
-					} `json:"committer"`
-				} `json:"commit"`
 			} `json:"items"`
-			TotalCount int `json:"total_count"`
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -1278,26 +1278,26 @@ func (c *Client) fetchCommitActivitiesPage(ctx context.Context, username string,
 	}
 
 	// Enhanced response structure that includes repository information and email data
-	var searchResult struct {
-		Items []struct {
+	var searchResult struct { //nolint:govet // field alignment for anonymous struct
+		TotalCount int `json:"total_count"`
+		Items      []struct {
+			Commit struct {
+				Author struct {
+					Date  time.Time `json:"date"`
+					Name  string    `json:"name"`
+					Email string    `json:"email"`
+				} `json:"author"`
+				Committer struct {
+					Date  time.Time `json:"date"`
+					Name  string    `json:"name"`
+					Email string    `json:"email"`
+				} `json:"committer"`
+			} `json:"commit"`
 			Repository struct {
 				FullName string `json:"full_name"`
 				ID       int    `json:"id"`
 			} `json:"repository"`
-			Commit struct {
-				Author struct {
-					Name  string    `json:"name"`
-					Email string    `json:"email"`
-					Date  time.Time `json:"date"`
-				} `json:"author"`
-				Committer struct {
-					Name  string    `json:"name"`
-					Email string    `json:"email"`
-					Date  time.Time `json:"date"`
-				} `json:"committer"`
-			} `json:"commit"`
 		} `json:"items"`
-		TotalCount int `json:"total_count"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&searchResult); err != nil {

@@ -206,16 +206,26 @@ func (*Client) createResponseSchema() *genai.Schema {
 				Description: "Explanation of the key evidence and reasoning that led to this timezone conclusion",
 			},
 			"suspicious_mismatch": {
-				Type:        genai.TypeBoolean,
-				Description: "True if the user's claimed location is implausible or incompatible with activity patterns (e.g., claims Antarctica but shows US Eastern timezone activity)",
+				Type: genai.TypeBoolean,
+				Description: "True if the user's claimed location is implausible or incompatible with activity patterns " +
+					"(e.g., claims Antarctica but shows US Eastern timezone activity)",
 			},
 			"mismatch_reason": {
-				Type:        genai.TypeString,
-				Description: "If suspicious_mismatch is true, explain the discrepancy (e.g., 'User claims Antarctica, but activity suggests US Eastern timezone'). Empty string if no mismatch.",
+				Type: genai.TypeString,
+				Description: "If suspicious_mismatch is true, explain the discrepancy " +
+					"(e.g., 'User claims Antarctica, but activity suggests US Eastern timezone'). Empty string if no mismatch.",
 			},
 		},
-		PropertyOrdering: []string{"detected_timezone", "confidence_level", "detected_location", "latitude", "longitude", "detection_reasoning", "suspicious_mismatch", "mismatch_reason"},
-		Required:         []string{"detected_timezone", "confidence_level", "detected_location", "latitude", "longitude", "detection_reasoning", "suspicious_mismatch", "mismatch_reason"},
+		PropertyOrdering: []string{
+			"detected_timezone", "confidence_level", "detected_location",
+			"latitude", "longitude", "detection_reasoning",
+			"suspicious_mismatch", "mismatch_reason",
+		},
+		Required: []string{
+			"detected_timezone", "confidence_level", "detected_location",
+			"latitude", "longitude", "detection_reasoning",
+			"suspicious_mismatch", "mismatch_reason",
+		},
 	}
 }
 

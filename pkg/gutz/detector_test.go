@@ -241,7 +241,7 @@ func TestEveningActivityDetection(t *testing.T) {
 // TestWorkScheduleCorrection tests the timezone correction based on work schedule patterns
 //
 //nolint:gocognit // Complex test scenarios require detailed validation
-func TestWorkScheduleCorrection(t *testing.T) {
+func TestWorkScheduleCorrection(t *testing.T) { //nolint:maintidx // Large test case structure
 	t.Skip("Skipping work schedule correction test - needs updating for new UTC data handling")
 	tests := []struct {
 		name             string
@@ -335,7 +335,24 @@ func TestWorkScheduleCorrection(t *testing.T) {
 			}
 
 			// Find quiet hours using the actual sleep detection algorithm
-			quietHours := sleep.FindSleepHours(hourCounts)
+			// Convert hourCounts to halfHourCounts for the sleep detection
+			halfHourCounts := make(map[float64]int)
+			for hour, count := range hourCounts {
+				halfHourCounts[float64(hour)] = count
+				halfHourCounts[float64(hour)+0.5] = count // Assume same activity level for half-hour
+			}
+
+			sleepBucketsHalf := sleep.DetectSleepPeriodsWithHalfHours(halfHourCounts)
+			quietHoursMap := make(map[int]bool)
+			for _, bucket := range sleepBucketsHalf {
+				hour := int(bucket)
+				quietHoursMap[hour] = true
+			}
+
+			var quietHours []int
+			for hour := range quietHoursMap {
+				quietHours = append(quietHours, hour)
+			}
 
 			// Calculate initial offset (mimicking detector logic)
 			var sum float64

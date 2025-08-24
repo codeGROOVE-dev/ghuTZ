@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/codeGROOVE-dev/guTZ/pkg/github"
 )
 
 // VerificationResult contains the results of verifying profile vs detected location/timezone.
@@ -22,114 +20,6 @@ type VerificationResult struct {
 	LocationDistanceKm      float64 `json:"location_distance_km,omitempty"`
 	TimezoneOffsetDiff      int     `json:"timezone_offset_diff,omitempty"`
 	ActivityMismatch        bool    `json:"activity_mismatch,omitempty"`
-}
-
-// verifyLocationAndTimezone checks for discrepancies between profile and detected location/timezone.
-func (d *Detector) verifyLocationAndTimezone(ctx context.Context, profile *github.User, detectedLocation *Location, detectedTimezone string, profileTimezone string, profileLocationTimezone string, activityTimezone string) *VerificationResult {
-	result := &VerificationResult{
-		ProfileTimezone:         profileTimezone,
-		ProfileLocationTimezone: profileLocationTimezone,
-	}
-
-	// Calculate difference between profile timezone and profile location timezone if both exist
-	if profileTimezone != "" && profileLocationTimezone != "" {
-		profileLocationDiff := d.calculateTimezoneOffsetDiff(profileTimezone, profileLocationTimezone)
-		if profileLocationDiff != 0 {
-			if profileLocationDiff < 0 {
-				result.ProfileLocationDiff = -profileLocationDiff
-			} else {
-				result.ProfileLocationDiff = profileLocationDiff
-			}
-			d.logger.Debug("profile timezone vs profile location timezone difference",
-				"username", profile.Login,
-				"profile_timezone", profileTimezone,
-				"profile_location_timezone", profileLocationTimezone,
-				"diff_hours", profileLocationDiff)
-		}
-	}
-
-	// Check location discrepancy
-	if profile.Location != "" {
-		result.ProfileLocation = profile.Location
-		if detectedLocation != nil {
-			distance := d.calculateLocationDistanceFromCoords(ctx, profile.Location, detectedLocation.Latitude, detectedLocation.Longitude)
-			result.LocationDistanceKm = distance
-			// Only set mismatch if we could calculate a valid distance
-			if distance > 0 {
-				if distance > 1000 {
-					result.LocationMismatch = "major"
-				} else if distance > 400 {
-					result.LocationMismatch = "minor"
-				}
-			}
-			// If distance is -1, it means geocoding failed but we still want to show the claimed location
-		} else {
-			// No detected location, so we can't calculate distance
-			// Set to -1 to indicate the claimed location should be shown
-			result.LocationDistanceKm = -1
-		}
-	}
-
-	// Check timezone discrepancy
-	// Prefer profile timezone from GitHub profile, fallback to profile location timezone
-	timezoneToCheck := profileTimezone
-	if timezoneToCheck == "" {
-		timezoneToCheck = profileLocationTimezone
-	}
-
-	if timezoneToCheck != "" && detectedTimezone != "" {
-		offsetDiff := d.calculateTimezoneOffsetDiff(timezoneToCheck, detectedTimezone)
-		if offsetDiff != 0 {
-			absOffsetDiff := offsetDiff
-			if absOffsetDiff < 0 {
-				absOffsetDiff = -absOffsetDiff
-			}
-			result.TimezoneOffsetDiff = absOffsetDiff
-			if absOffsetDiff > 3 {
-				result.TimezoneMismatch = "major"
-			} else if absOffsetDiff > 1 {
-				result.TimezoneMismatch = "minor"
-			}
-
-			d.logger.Debug("timezone mismatch detected",
-				"username", profile.Login,
-				"profile_tz", profileTimezone,
-				"profile_location_tz", profileLocationTimezone,
-				"detected_tz", detectedTimezone,
-				"diff_hours", offsetDiff)
-		}
-	}
-
-	// Check activity timezone discrepancy (pure activity-based offset)
-	if activityTimezone != "" {
-		// Compare activity timezone to profile timezone or profile location timezone (whichever exists)
-		compareToTimezone := profileTimezone
-		if compareToTimezone == "" {
-			compareToTimezone = profileLocationTimezone
-		}
-
-		if compareToTimezone != "" {
-			activityDiff := d.calculateTimezoneOffsetDiff(activityTimezone, compareToTimezone)
-			absActivityDiff := activityDiff
-			if absActivityDiff < 0 {
-				absActivityDiff = -absActivityDiff
-			}
-			result.ActivityOffsetDiff = absActivityDiff
-
-			// Flag as activity mismatch if difference is >4 hours
-			if absActivityDiff > 4 {
-				result.ActivityMismatch = true
-				d.logger.Warn("large activity timezone discrepancy detected",
-					"username", profile.Login,
-					"activity_tz", activityTimezone,
-					"profile_tz", profileTimezone,
-					"profile_location_tz", profileLocationTimezone,
-					"diff_hours", activityDiff)
-			}
-		}
-	}
-
-	return result
 }
 
 // calculateLocationDistanceFromCoords calculates the distance in miles between a location string and known coordinates.

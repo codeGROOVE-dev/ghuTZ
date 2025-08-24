@@ -31,7 +31,7 @@ var (
 	forceOffset  = flag.Int("force-offset", 99, "Force a specific UTC offset for visualization (-12 to +14)")
 )
 
-func main() {
+func main() { //nolint:gocognit,revive,maintidx // Main function orchestrates complex CLI logic
 	flag.Parse()
 
 	if *version {
@@ -264,7 +264,7 @@ func main() {
 			fmt.Printf("   Lunch: %s\n", formatCandidateLunch(*candidate))
 			fmt.Printf("   Work start: %.1f:00\n", candidate.WorkStartLocal)
 			if len(candidate.ScoringDetails) > 0 {
-				fmt.Printf("   Scoring details:\n")
+				fmt.Println("   Scoring details:")
 				for _, detail := range candidate.ScoringDetails {
 					fmt.Printf("     • %s\n", detail)
 				}
@@ -307,7 +307,7 @@ func printLocation(result *gutz.Result) {
 		// No detected location, but check if there's a profile location
 		if result.Verification != nil && result.Verification.ProfileLocation != "" {
 			// Show profile location when we have no detected location
-			fmt.Printf("📍 Location:      Unknown\n")
+			fmt.Println("📍 Location:      Unknown")
 			fmt.Printf("                  └─ Profile Location: %s\n", result.Verification.ProfileLocation)
 			return
 		}
@@ -315,7 +315,7 @@ func printLocation(result *gutz.Result) {
 		return
 	}
 
-	if locationStr != "" {
+	if locationStr != "" { //nolint:nestif // Complex location display logic
 		fmt.Printf("📍 Location:      %s\n", locationStr)
 
 		// Display profile location if it differs significantly
@@ -563,16 +563,16 @@ func formatHour(decimalHour float64) string {
 }
 
 // calculateTimezoneOffset calculates the UTC offset in hours for a given timezone.
-func calculateTimezoneOffset(timezone string) int {
-	if strings.HasPrefix(timezone, "UTC") {
-		offsetStr := strings.TrimPrefix(timezone, "UTC")
+func calculateTimezoneOffset(tz string) int {
+	if strings.HasPrefix(tz, "UTC") {
+		offsetStr := strings.TrimPrefix(tz, "UTC")
 		if offsetStr == "" {
 			return 0
 		}
 		if offset, err := strconv.Atoi(offsetStr); err == nil {
 			return offset
 		}
-	} else if loc, err := time.LoadLocation(timezone); err == nil {
+	} else if loc, err := time.LoadLocation(tz); err == nil {
 		now := time.Now().In(loc)
 		_, offset := now.Zone()
 		return offset / 3600
@@ -631,8 +631,8 @@ func printGeminiInfo(result *gutz.Result) {
 }
 
 // convertUTCToLocal converts a UTC hour (float) to local time using Go's timezone database.
-func convertUTCToLocal(utcHour float64, timezone string) float64 {
-	if loc, err := time.LoadLocation(timezone); err == nil {
+func convertUTCToLocal(utcHour float64, tz string) float64 {
+	if loc, err := time.LoadLocation(tz); err == nil {
 		// Use Go's native timezone conversion
 		// We use a reference date in the middle of the year to get consistent DST behavior
 		refDate := time.Date(2024, 8, 15, 0, 0, 0, 0, time.UTC)
@@ -643,7 +643,7 @@ func convertUTCToLocal(utcHour float64, timezone string) float64 {
 		return float64(localTime.Hour()) + float64(localTime.Minute())/60.0
 	}
 	// Fallback for UTC+/- format
-	offset := calculateTimezoneOffset(timezone)
+	offset := calculateTimezoneOffset(tz)
 	return math.Mod(utcHour+float64(offset)+24, 24)
 }
 

@@ -14,7 +14,9 @@ var (
 
 // FetchUserEnhancedGraphQL fetches comprehensive user data using our enhanced GraphQL implementation
 // This replaces multiple REST API calls with a single GraphQL query.
-func (c *Client) FetchUserEnhancedGraphQL(ctx context.Context, username string) (*User, []Repository, []PullRequest, []Issue, error) {
+func (c *Client) FetchUserEnhancedGraphQL( //nolint:revive // Multiple return values for batch data fetch
+	ctx context.Context, username string,
+) (*User, []Repository, []PullRequest, []Issue, error) {
 	if c.githubToken == "" {
 		// Can't use GraphQL without a token
 		c.logger.Debug("No GitHub token available for GraphQL", "username", username)
@@ -67,7 +69,8 @@ func (c *Client) FetchUserEnhancedGraphQL(ctx context.Context, username string) 
 
 	// Convert repositories from GraphQL response
 	var repositories []Repository
-	for _, repo := range profile.User.Repositories.Nodes {
+	for i := range profile.User.Repositories.Nodes {
+		repo := &profile.User.Repositories.Nodes[i]
 		language := ""
 		if repo.PrimaryLanguage.Name != "" {
 			language = repo.PrimaryLanguage.Name
@@ -91,7 +94,8 @@ func (c *Client) FetchUserEnhancedGraphQL(ctx context.Context, username string) 
 
 	// Convert pull requests from GraphQL response
 	var pullRequests []PullRequest
-	for _, pr := range profile.User.PullRequests.Nodes {
+	for i := range profile.User.PullRequests.Nodes {
+		pr := &profile.User.PullRequests.Nodes[i]
 		pullRequests = append(pullRequests, PullRequest{
 			Title:     pr.Title,
 			Body:      pr.Body,
@@ -105,7 +109,8 @@ func (c *Client) FetchUserEnhancedGraphQL(ctx context.Context, username string) 
 
 	// Convert issues from GraphQL response
 	var issues []Issue
-	for _, issue := range profile.User.Issues.Nodes {
+	for i := range profile.User.Issues.Nodes {
+		issue := &profile.User.Issues.Nodes[i]
 		issues = append(issues, Issue{
 			Title:     issue.Title,
 			Body:      issue.Body,

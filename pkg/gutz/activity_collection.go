@@ -22,15 +22,10 @@ type timestampEntry struct {
 	url        string // URL to the item (for reference)
 }
 
-// collectActivityTimestamps gathers all activity timestamps from various sources.
-func (d *Detector) collectActivityTimestamps(ctx context.Context, username string,
-	events []github.PublicEvent,
-) (timestamps []timestampEntry, orgCounts map[string]int) {
-	return d.collectActivityTimestampsWithSSHKeys(ctx, username, events, nil)
-}
-
 // collectActivityTimestampsWithContext gathers all activity timestamps from UserContext.
-func (d *Detector) collectActivityTimestampsWithContext(ctx context.Context, userCtx *UserContext) (timestamps []timestampEntry, orgCounts map[string]int) {
+func (d *Detector) collectActivityTimestampsWithContext(
+	ctx context.Context, userCtx *UserContext,
+) (timestamps []timestampEntry, orgCounts map[string]int) {
 	d.logger.Info("📊 Building unified timeline from UserContext",
 		"username", userCtx.Username,
 		"ssh_keys", len(userCtx.SSHKeys),
@@ -70,7 +65,8 @@ func (d *Detector) collectActivityTimestampsWithContext(ctx context.Context, use
 	// Add repository creation events to timeline
 	repoCount := 0
 	d.logger.Debug("Processing repositories for timeline", "username", userCtx.Username, "total_repos", len(userCtx.Repositories))
-	for i, repo := range userCtx.Repositories {
+	for i := range userCtx.Repositories {
+		repo := &userCtx.Repositories[i]
 		if i < 3 {
 			d.logger.Debug("sample repo", "index", i, "name", repo.Name, "created_at", repo.CreatedAt, "fork", repo.Fork)
 		}
@@ -113,7 +109,8 @@ func (d *Detector) collectActivityTimestampsWithContext(ctx context.Context, use
 	// Add PRs from GraphQL (these supplement the event data which only covers ~30 days)
 	prCount := 0
 	d.logger.Debug("Processing PRs for timeline", "username", userCtx.Username, "total_prs", len(userCtx.PullRequests))
-	for _, pr := range userCtx.PullRequests {
+	for i := range userCtx.PullRequests {
+		pr := &userCtx.PullRequests[i]
 		if pr.CreatedAt.IsZero() || pr.CreatedAt.Year() < 2000 {
 			d.logger.Debug("skipping PR with invalid date", "title", pr.Title, "created_at", pr.CreatedAt)
 			continue
@@ -141,7 +138,8 @@ func (d *Detector) collectActivityTimestampsWithContext(ctx context.Context, use
 	// Add Issues from GraphQL (these supplement the event data which only covers ~30 days)
 	issueCount := 0
 	d.logger.Debug("Processing issues for timeline", "username", userCtx.Username, "total_issues", len(userCtx.Issues))
-	for _, issue := range userCtx.Issues {
+	for i := range userCtx.Issues {
+		issue := &userCtx.Issues[i]
 		if issue.CreatedAt.IsZero() || issue.CreatedAt.Year() < 2000 {
 			d.logger.Debug("skipping issue with invalid date", "title", issue.Title, "created_at", issue.CreatedAt)
 			continue
@@ -178,7 +176,9 @@ func (d *Detector) collectActivityTimestampsWithContext(ctx context.Context, use
 }
 
 // collectActivityTimestampsWithSSHKeys gathers all activity timestamps including SSH keys.
-func (d *Detector) collectActivityTimestampsWithSSHKeys(ctx context.Context, username string,
+//
+//nolint:gocognit,revive,maintidx // Complex event processing logic
+func (d *Detector) collectActivityTimestampsWithSSHKeys(_ context.Context, username string,
 	events []github.PublicEvent, sshKeys []github.SSHKey,
 ) (timestamps []timestampEntry, orgCounts map[string]int) {
 	allTimestamps := []timestampEntry{}
@@ -209,15 +209,15 @@ func (d *Detector) collectActivityTimestampsWithSSHKeys(ctx context.Context, use
 		// For comment events, try to extract the comment body
 		switch event.Type {
 		case "IssueCommentEvent", "PullRequestReviewCommentEvent", "PullRequestReviewEvent":
-			var payload map[string]interface{}
+			var payload map[string]any
 			if err := json.Unmarshal(event.Payload, &payload); err == nil {
 				// Try to extract comment body
 				var commentBody string
-				if comment, ok := payload["comment"].(map[string]interface{}); ok {
+				if comment, ok := payload["comment"].(map[string]any); ok {
 					if body, ok := comment["body"].(string); ok {
 						commentBody = body
 					}
-				} else if review, ok := payload["review"].(map[string]interface{}); ok {
+				} else if review, ok := payload["review"].(map[string]any); ok {
 					// For PR reviews
 					if body, ok := review["body"].(string); ok {
 						commentBody = body
@@ -236,14 +236,14 @@ func (d *Detector) collectActivityTimestampsWithSSHKeys(ctx context.Context, use
 			}
 		case "PushEvent":
 			// For PushEvents, extract the most recent commit message
-			var payload map[string]interface{}
+			var payload map[string]any
 			if err := json.Unmarshal(event.Payload, &payload); err == nil {
-				if commits, ok := payload["commits"].([]interface{}); ok && len(commits) > 0 {
+				if commits, ok := payload["commits"].([]any); ok && len(commits) > 0 {
 					// Get the most recent commit (last in the array)
-					if lastCommit, ok := commits[len(commits)-1].(map[string]interface{}); ok {
+					if lastCommit, ok := commits[len(commits)-1].(map[string]any); ok {
 						if message, ok := lastCommit["message"].(string); ok && message != "" {
 							// Truncate commit message if too long
-							if len(message) > 150 {
+							if len(message) > 150 { //nolint:revive // Simple truncation logic
 								eventTitle = message[:150] + "..."
 							} else {
 								eventTitle = message
@@ -255,9 +255,9 @@ func (d *Detector) collectActivityTimestampsWithSSHKeys(ctx context.Context, use
 			}
 		case "PullRequestEvent":
 			// For PullRequestEvents, extract the PR title
-			var payload map[string]interface{}
+			var payload map[string]any
 			if err := json.Unmarshal(event.Payload, &payload); err == nil {
-				if pr, ok := payload["pull_request"].(map[string]interface{}); ok {
+				if pr, ok := payload["pull_request"].(map[string]any); ok {
 					if title, ok := pr["title"].(string); ok && title != "" {
 						// Truncate PR title if too long
 						if len(title) > 150 {
@@ -271,9 +271,9 @@ func (d *Detector) collectActivityTimestampsWithSSHKeys(ctx context.Context, use
 			}
 		case "IssuesEvent":
 			// For IssuesEvents, extract the issue title
-			var payload map[string]interface{}
+			var payload map[string]any
 			if err := json.Unmarshal(event.Payload, &payload); err == nil {
-				if issue, ok := payload["issue"].(map[string]interface{}); ok {
+				if issue, ok := payload["issue"].(map[string]any); ok {
 					if title, ok := issue["title"].(string); ok && title != "" {
 						// Truncate issue title if too long
 						if len(title) > 150 {
@@ -293,6 +293,8 @@ func (d *Detector) collectActivityTimestampsWithSSHKeys(ctx context.Context, use
 			} else {
 				d.logger.Debug("IssuesEvent failed to unmarshal", "username", username, "error", err)
 			}
+		default:
+			// Keep the default event type for other events
 		}
 
 		allTimestamps = append(allTimestamps, timestampEntry{
@@ -380,123 +382,6 @@ func (d *Detector) collectActivityTimestampsWithSSHKeys(ctx context.Context, use
 	return allTimestamps, orgCounts
 }
 
-// collectSupplementalTimestamps fetches additional activity data when needed.
-func (d *Detector) collectSupplementalTimestamps(ctx context.Context, username string,
-	allTimestamps []timestampEntry, targetDataPoints int,
-) []timestampEntry {
-	// Deduplicate timestamps first to get accurate count
-	uniqueTimestamps := make(map[time.Time]bool)
-	var uniqueEntries []timestampEntry
-	for _, entry := range allTimestamps {
-		if !uniqueTimestamps[entry.time] {
-			uniqueTimestamps[entry.time] = true
-			uniqueEntries = append(uniqueEntries, entry)
-		}
-	}
-	allTimestamps = uniqueEntries
-
-	// First, count how many events we have in the last 3 months from first-page data
-	threeMonthsAgo := time.Now().AddDate(0, -3, 0)
-	recentEvents := 0
-	for _, ts := range allTimestamps {
-		if ts.time.After(threeMonthsAgo) {
-			recentEvents++
-		}
-	}
-
-	d.logger.Debug("recent activity check", "username", username,
-		"events_last_3_months", recentEvents,
-		"target", targetDataPoints,
-		"need_second_page", recentEvents < targetDataPoints)
-
-	d.logger.Info("📊 Fetching supplemental data", "username", username,
-		"current_count", len(allTimestamps),
-		"target_count", targetDataPoints,
-		"recent_events_3mo", recentEvents)
-
-	// Always fetch first page of supplemental data for proper time span analysis
-	// Only fetch additional pages if we need more recent data
-	maxPages := 1
-	if recentEvents < targetDataPoints {
-		maxPages = 2 // Fetch deeper if we need more recent activity
-		d.logger.Debug("insufficient recent activity, fetching additional pages",
-			"username", username, "recent_events", recentEvents, "max_pages", maxPages)
-	} else {
-		d.logger.Debug("sufficient recent activity, limiting to first page",
-			"username", username, "recent_events", recentEvents, "max_pages", maxPages)
-	}
-
-	// Fetch supplemental data with appropriate depth
-	additionalData := d.fetchSupplementalActivityWithDepth(ctx, username, maxPages)
-
-	// Add all timestamps from supplemental data
-	allTimestamps = d.addSupplementalData(allTimestamps, additionalData, username)
-
-	// Check if we still need more data after initial fetch
-	if len(allTimestamps) < targetDataPoints {
-		allTimestamps = d.fetchAdditionalPages(ctx, username, allTimestamps, targetDataPoints, additionalData)
-	}
-
-	return allTimestamps
-}
-
-// fetchAdditionalPages fetches additional pages of data when needed.
-func (d *Detector) fetchAdditionalPages(ctx context.Context, username string,
-	allTimestamps []timestampEntry, targetDataPoints int, additionalData *ActivityData,
-) []timestampEntry {
-	remaining := targetDataPoints - len(allTimestamps)
-	d.logger.Info("📊 Still need more data, fetching additional pages", "username", username,
-		"current_count", len(allTimestamps),
-		"need", remaining,
-		"fetching", "PRs page 2+, Issues page 2+, Commits page 2")
-
-	// Fetch second page of PRs, issues, and commits in parallel
-	extraData := d.fetchSupplementalActivityWithDepth(ctx, username, 2)
-
-	// Only add the NEW data from pages 2+ (first 100 already included)
-	prCount := len(additionalData.PullRequests)
-	issueCount := len(additionalData.Issues)
-
-	// Add new PRs (beyond first 100)
-	if len(extraData.PullRequests) > prCount {
-		newPRs := extraData.PullRequests[prCount:]
-		for i := range newPRs {
-			org := extractOrganization(newPRs[i].RepoName)
-			allTimestamps = append(allTimestamps, timestampEntry{
-				time:       newPRs[i].CreatedAt,
-				source:     "pr",
-				org:        org,
-				title:      newPRs[i].Title,
-				repository: newPRs[i].RepoName,
-				url:        newPRs[i].HTMLURL,
-			})
-		}
-		d.logger.Debug("added additional PRs", "username", username, "count", len(newPRs))
-	}
-
-	// Add new issues (beyond first 100)
-	if len(extraData.Issues) > issueCount {
-		newIssues := extraData.Issues[issueCount:]
-		for i := range newIssues {
-			org := extractOrganization(newIssues[i].RepoName)
-			allTimestamps = append(allTimestamps, timestampEntry{
-				time:       newIssues[i].CreatedAt,
-				source:     "issue",
-				org:        org,
-				title:      newIssues[i].Title,
-				repository: newIssues[i].RepoName,
-				url:        newIssues[i].HTMLURL,
-			})
-		}
-		d.logger.Debug("added additional issues", "username", username, "count", len(newIssues))
-	}
-
-	d.logger.Debug("final timestamp count after extra fetch", "username", username,
-		"total", len(allTimestamps))
-
-	return allTimestamps
-}
-
 // extractOrganization extracts the organization from a repository path.
 func extractOrganization(repository string) string {
 	if repository == "" {
@@ -506,199 +391,6 @@ func extractOrganization(repository string) string {
 		return repository[:idx]
 	}
 	return ""
-}
-
-// addSupplementalData adds supplemental activity data to timestamps.
-func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additionalData *ActivityData, username string) []timestampEntry {
-	prOldest := time.Now()
-	prNewest := time.Time{}
-	prZeroCount := 0
-	for i := range additionalData.PullRequests {
-		pr := &additionalData.PullRequests[i]
-		// Filter out zero timestamps
-		if pr.CreatedAt.IsZero() || pr.CreatedAt.Year() < 2000 {
-			prZeroCount++
-			d.logger.Warn("skipping PR with invalid timestamp",
-				"username", username,
-				"timestamp", pr.CreatedAt,
-				"repo", pr.RepoName,
-				"title", pr.Title)
-			continue
-		}
-		org := extractOrganization(pr.RepoName)
-		allTimestamps = append(allTimestamps, timestampEntry{
-			time:       pr.CreatedAt,
-			source:     "pr",
-			org:        org,
-			title:      pr.Title,
-			repository: pr.RepoName,
-			url:        pr.HTMLURL,
-		})
-		if pr.CreatedAt.Before(prOldest) {
-			prOldest = pr.CreatedAt
-		}
-		if pr.CreatedAt.After(prNewest) {
-			prNewest = pr.CreatedAt
-		}
-	}
-
-	if prZeroCount > 0 {
-		d.logger.Warn("filtered out PRs with zero/invalid timestamps",
-			"username", username,
-			"count", prZeroCount,
-			"total_prs", len(additionalData.PullRequests))
-	}
-
-	if len(additionalData.PullRequests) > 0 {
-		d.logger.Debug("Pull Requests data", "username", username,
-			"count", len(additionalData.PullRequests),
-			"oldest", prOldest.Format("2006-01-02"),
-			"newest", prNewest.Format("2006-01-02"),
-			"days_covered", int(prNewest.Sub(prOldest).Hours()/24))
-	}
-
-	issueOldest := time.Now()
-	issueNewest := time.Time{}
-	issueZeroCount := 0
-	for i := range additionalData.Issues {
-		issue := &additionalData.Issues[i]
-		// Filter out zero timestamps
-		if issue.CreatedAt.IsZero() || issue.CreatedAt.Year() < 2000 {
-			issueZeroCount++
-			d.logger.Warn("skipping issue with invalid timestamp",
-				"username", username,
-				"timestamp", issue.CreatedAt,
-				"repo", issue.RepoName,
-				"title", issue.Title)
-			continue
-		}
-		org := extractOrganization(issue.RepoName)
-		allTimestamps = append(allTimestamps, timestampEntry{
-			time:       issue.CreatedAt,
-			source:     "issue",
-			org:        org,
-			title:      issue.Title,
-			repository: issue.RepoName,
-			url:        issue.HTMLURL,
-		})
-		if issue.CreatedAt.Before(issueOldest) {
-			issueOldest = issue.CreatedAt
-		}
-		if issue.CreatedAt.After(issueNewest) {
-			issueNewest = issue.CreatedAt
-		}
-	}
-
-	if issueZeroCount > 0 {
-		d.logger.Warn("filtered out issues with zero/invalid timestamps",
-			"username", username,
-			"count", issueZeroCount,
-			"total_issues", len(additionalData.Issues))
-	}
-
-	if len(additionalData.Issues) > 0 {
-		d.logger.Debug("Issues data", "username", username,
-			"count", len(additionalData.Issues),
-			"oldest", issueOldest.Format("2006-01-02"),
-			"newest", issueNewest.Format("2006-01-02"),
-			"days_covered", int(issueNewest.Sub(issueOldest).Hours()/24))
-	}
-
-	commentOldest := time.Now()
-	commentNewest := time.Time{}
-	commentZeroCount := 0
-	for _, comment := range additionalData.Comments {
-		// Filter out zero timestamps
-		if comment.CreatedAt.IsZero() || comment.CreatedAt.Year() < 2000 {
-			commentZeroCount++
-			d.logger.Warn("skipping comment with invalid timestamp",
-				"username", username,
-				"timestamp", comment.CreatedAt)
-			continue
-		}
-		org := extractOrganization(comment.Repository)
-		// Truncate comment body for title field
-		commentPreview := comment.Body
-		if len(commentPreview) > 150 {
-			commentPreview = commentPreview[:150] + "..."
-		}
-		allTimestamps = append(allTimestamps, timestampEntry{
-			time:       comment.CreatedAt,
-			source:     "comment",
-			org:        org,
-			title:      commentPreview,
-			repository: comment.Repository,
-			url:        comment.HTMLURL,
-		})
-		if comment.CreatedAt.Before(commentOldest) {
-			commentOldest = comment.CreatedAt
-		}
-		if comment.CreatedAt.After(commentNewest) {
-			commentNewest = comment.CreatedAt
-		}
-	}
-
-	if len(additionalData.Comments) > 0 {
-		d.logger.Debug("Comments data", "username", username,
-			"count", len(additionalData.Comments),
-			"oldest", commentOldest.Format("2006-01-02"),
-			"newest", commentNewest.Format("2006-01-02"),
-			"days_covered", int(commentNewest.Sub(commentOldest).Hours()/24))
-	}
-
-	// Add commit activities to timeline
-	for i := range additionalData.CommitActivities {
-		commit := &additionalData.CommitActivities[i]
-		if commit.AuthorDate.IsZero() || commit.AuthorDate.Year() < 2000 {
-			continue
-		}
-		org := extractOrganization(commit.Repository)
-		allTimestamps = append(allTimestamps, timestampEntry{
-			time:       commit.AuthorDate,
-			source:     "commit",
-			org:        org,
-			title:      "commit", // We don't have the message in CommitActivity struct
-			repository: commit.Repository,
-			url:        "",
-		})
-	}
-
-	// Add starred repositories to timeline
-	for i, starTime := range additionalData.StarTimestamps {
-		if starTime.IsZero() || starTime.Year() < 2000 {
-			continue
-		}
-
-		// Get repository name if available
-		var repoName string
-		if i < len(additionalData.StarredRepos) {
-			repoName = additionalData.StarredRepos[i].FullName
-		}
-
-		org := extractOrganization(repoName)
-		allTimestamps = append(allTimestamps, timestampEntry{
-			time:       starTime,
-			source:     "star",
-			org:        org,
-			title:      "starred " + repoName,
-			repository: repoName,
-			url:        "",
-		})
-	}
-
-	// Note: SSH keys are added separately in collectActivityTimestampsWithContext
-	// since they come from UserContext, not from supplemental fetching
-
-	d.logger.Debug("collected all timestamps", "username", username,
-		"total_before_dedup", len(allTimestamps),
-		"prs", len(additionalData.PullRequests),
-		"issues", len(additionalData.Issues),
-		"comments", len(additionalData.Comments),
-		"commits", len(additionalData.CommitActivities),
-		"stars", len(additionalData.StarTimestamps),
-		"starred_repos", len(additionalData.StarredRepos))
-
-	return allTimestamps
 }
 
 // filterAndSortTimestamps filters timestamps by age and sorts them.

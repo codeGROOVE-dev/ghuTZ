@@ -17,8 +17,8 @@ import (
 // GraphQLClient handles GitHub GraphQL API requests.
 type GraphQLClient struct {
 	cachedHTTPDo func(context.Context, *http.Request) (*http.Response, error)
-	token        string
 	logger       *slog.Logger
+	token        string
 }
 
 // NewGraphQLClient creates a new GraphQL client.
@@ -47,57 +47,20 @@ type GraphQLError struct {
 
 // UserProfileResponse for non-paginated user data.
 type UserProfileResponse struct {
-	User struct {
-		Name            string    `json:"name"`
-		Login           string    `json:"login"`
-		Email           string    `json:"email"`
-		Location        string    `json:"location"`
-		Bio             string    `json:"bio"`
-		Company         string    `json:"company"`
-		Blog            string    `json:"websiteUrl"`
-		TwitterUsername string    `json:"twitterUsername"`
-		CreatedAt       time.Time `json:"createdAt"`
-		UpdatedAt       time.Time `json:"updatedAt"`
-
-		// Social accounts
-		SocialAccounts struct {
-			Nodes []struct {
-				Provider    string `json:"provider"`
-				URL         string `json:"url"`
-				DisplayName string `json:"displayName"`
-			} `json:"nodes"`
-		} `json:"socialAccounts"`
-
-		// Organizations
-		Organizations struct {
-			Nodes []struct {
-				Name        string `json:"name"`
-				Login       string `json:"login"`
-				Location    string `json:"location"`
-				Description string `json:"description"`
-			} `json:"nodes"`
-		} `json:"organizations"`
-
-		// Statistics
-		Followers struct {
-			TotalCount int `json:"totalCount"`
-		} `json:"followers"`
-		Following struct {
-			TotalCount int `json:"totalCount"`
-		} `json:"following"`
+	User struct { //nolint:govet // complex nested struct with many fields
 		Repositories struct {
 			Nodes []struct {
-				Name            string    `json:"name"`
-				NameWithOwner   string    `json:"nameWithOwner"`
-				Description     string    `json:"description"`
 				CreatedAt       time.Time `json:"createdAt"`
 				UpdatedAt       time.Time `json:"updatedAt"`
 				PushedAt        time.Time `json:"pushedAt"`
 				PrimaryLanguage struct {
 					Name string `json:"name"`
 				} `json:"primaryLanguage"`
-				StargazerCount int    `json:"stargazerCount"`
+				Name           string `json:"name"`
+				NameWithOwner  string `json:"nameWithOwner"`
+				Description    string `json:"description"`
 				URL            string `json:"url"`
+				StargazerCount int    `json:"stargazerCount"`
 				IsFork         bool   `json:"isFork"`
 			} `json:"nodes"`
 			TotalCount int `json:"totalCount"`
@@ -143,14 +106,14 @@ type UserProfileResponse struct {
 		// Starred repositories
 		StarredRepositories struct {
 			Nodes []struct {
-				Name            string `json:"name"`
-				NameWithOwner   string `json:"nameWithOwner"`
-				Description     string `json:"description"`
 				PrimaryLanguage struct {
 					Name string `json:"name"`
 				} `json:"primaryLanguage"`
-				StargazerCount int    `json:"stargazerCount"`
+				Name           string `json:"name"`
+				NameWithOwner  string `json:"nameWithOwner"`
+				Description    string `json:"description"`
 				URL            string `json:"url"`
+				StargazerCount int    `json:"stargazerCount"`
 			} `json:"nodes"`
 			TotalCount int `json:"totalCount"`
 		} `json:"starredRepositories"`
@@ -166,6 +129,44 @@ type UserProfileResponse struct {
 			} `json:"nodes"`
 			TotalCount int `json:"totalCount"`
 		} `json:"gists"`
+
+		// Social accounts
+		SocialAccounts struct {
+			Nodes []struct {
+				Provider    string `json:"provider"`
+				URL         string `json:"url"`
+				DisplayName string `json:"displayName"`
+			} `json:"nodes"`
+		} `json:"socialAccounts"`
+
+		// Organizations
+		Organizations struct {
+			Nodes []struct {
+				Name        string `json:"name"`
+				Login       string `json:"login"`
+				Location    string `json:"location"`
+				Description string `json:"description"`
+			} `json:"nodes"`
+		} `json:"organizations"`
+
+		// Statistics
+		Followers struct {
+			TotalCount int `json:"totalCount"`
+		} `json:"followers"`
+		Following struct {
+			TotalCount int `json:"totalCount"`
+		} `json:"following"`
+
+		CreatedAt       time.Time `json:"createdAt"`
+		UpdatedAt       time.Time `json:"updatedAt"`
+		Name            string    `json:"name"`
+		Login           string    `json:"login"`
+		Email           string    `json:"email"`
+		Location        string    `json:"location"`
+		Bio             string    `json:"bio"`
+		Company         string    `json:"company"`
+		Blog            string    `json:"websiteUrl"`
+		TwitterUsername string    `json:"twitterUsername"`
 	} `json:"user"`
 }
 
@@ -174,44 +175,44 @@ type ActivityDataResponse struct {
 	User struct {
 		PullRequests struct {
 			Nodes []struct {
-				Title      string    `json:"title"`
-				Number     int       `json:"number"`
 				CreatedAt  time.Time `json:"createdAt"`
 				UpdatedAt  time.Time `json:"updatedAt"`
-				URL        string    `json:"url"`
-				State      string    `json:"state"`
 				Repository struct {
 					Name  string `json:"name"`
 					Owner struct {
 						Login string `json:"login"`
 					} `json:"owner"`
 				} `json:"repository"`
+				Title  string `json:"title"`
+				URL    string `json:"url"`
+				State  string `json:"state"`
+				Number int    `json:"number"`
 			} `json:"nodes"`
 			PageInfo struct {
-				HasNextPage bool   `json:"hasNextPage"`
 				EndCursor   string `json:"endCursor"`
+				HasNextPage bool   `json:"hasNextPage"`
 			} `json:"pageInfo"`
 			TotalCount int `json:"totalCount"`
 		} `json:"pullRequests"`
 
 		Issues struct {
 			Nodes []struct {
-				Title      string    `json:"title"`
-				Number     int       `json:"number"`
 				CreatedAt  time.Time `json:"createdAt"`
 				UpdatedAt  time.Time `json:"updatedAt"`
-				URL        string    `json:"url"`
-				State      string    `json:"state"`
 				Repository struct {
 					Name  string `json:"name"`
 					Owner struct {
 						Login string `json:"login"`
 					} `json:"owner"`
 				} `json:"repository"`
+				Title  string `json:"title"`
+				URL    string `json:"url"`
+				State  string `json:"state"`
+				Number int    `json:"number"`
 			} `json:"nodes"`
 			PageInfo struct {
-				HasNextPage bool   `json:"hasNextPage"`
 				EndCursor   string `json:"endCursor"`
+				HasNextPage bool   `json:"hasNextPage"`
 			} `json:"pageInfo"`
 			TotalCount int `json:"totalCount"`
 		} `json:"issues"`
@@ -224,27 +225,27 @@ type CommentDataResponse struct {
 		// Issue comments (includes comments on both issues and PRs)
 		IssueComments struct {
 			Nodes []struct {
-				Body      string    `json:"body"`
 				CreatedAt time.Time `json:"createdAt"`
+				Body      string    `json:"body"`
 				URL       string    `json:"url"`
 			} `json:"nodes"`
 			PageInfo struct {
-				HasNextPage bool   `json:"hasNextPage"`
 				EndCursor   string `json:"endCursor"`
+				HasNextPage bool   `json:"hasNextPage"`
 			} `json:"pageInfo"`
 		} `json:"issueComments"`
 		// Commit comments
 		CommitComments struct {
 			Nodes []struct {
-				Body      string    `json:"body"`
 				CreatedAt time.Time `json:"createdAt"`
 				Commit    struct {
 					URL string `json:"url"`
 				} `json:"commit"`
+				Body string `json:"body"`
 			} `json:"nodes"`
 			PageInfo struct {
-				HasNextPage bool   `json:"hasNextPage"`
 				EndCursor   string `json:"endCursor"`
+				HasNextPage bool   `json:"hasNextPage"`
 			} `json:"pageInfo"`
 		} `json:"commitComments"`
 	} `json:"user"`

@@ -104,7 +104,8 @@ DETECTION PRIORITIES (subject to above constraint):
 	- Remember: We are analyzing TECH WORKERS (software engineers, DevOps, security engineers, etc.)
 	- 🚨 MATCH CITIES TO THE DETECTED UTC OFFSET AND SEASON:
 	  • UTC-5 in summer → Central cities: Chicago, Austin, Kansas City, Minneapolis, Madison
-	  • UTC-4 in summer → Eastern cities: Toronto, Montreal, Ottawa (if .ca domain/email), otherwise New York, Raleigh-Durham, Atlanta, Boston, Pittsburgh
+	  • UTC-4 in summer → Eastern cities: Toronto, Montreal, Ottawa (if .ca domain/email),
+	    otherwise New York, Raleigh-Durham, Atlanta, Boston, Pittsburgh
 	  • UTC-6 in summer → Mountain cities: Denver, Boulder, Phoenix, Salt Lake City
 	  • UTC-7 in summer → Pacific cities: SF Bay Area, Seattle, Portland, San Diego
 	- Tech workers often choose quality-of-life cities: Boulder, Lawrence (KS), Madison, Burlington (VT), Ann Arbor
@@ -128,7 +129,8 @@ DETECTION PRIORITIES (subject to above constraint):
 Seriously though, if they have a .ca e-mail address or .ca website, they almost certainly live in Canada. Do not assign them to New York.
 
 8. PROFILE LOCATION TRUST:
-	- 🚨 CRITICAL: If the user's GitHub profile location is specific (city, state) and matches the detected timezone from activity patterns, USE THAT EXACT LOCATION
+	- 🚨 CRITICAL: If the user's GitHub profile location is specific (city, state) and matches the detected timezone
+	  from activity patterns, USE THAT EXACT LOCATION
 	- Trust specific detected cities over generic regions listed in the region
 	- Only override the profile location if:
 	  • It's vague ("Earth", "Internet", "Remote")
@@ -141,7 +143,8 @@ Seriously though, if they have a .ca e-mail address or .ca website, they almost 
 9. SUSPICIOUS MISMATCH DETECTION:
 	- 🚨 CRITICAL: This tool has a responsibility to detect users being deceptive about their GitHub location.
     - Set "suspicious_mismatch": true if the location in their GitHub profile is implausible and not within the provided list of candidate timezones.
-    - For example, if you've detected based on activity that they are more likely to be in UTC-0 than UTC-5, but UTC-5 was listed as a candidate, it shouldn't be considered suspicious. They may just work weird hours.
+    - For example, if you've detected based on activity that they are more likely to be in UTC-0 than UTC-5,
+      but UTC-5 was listed as a candidate, it shouldn't be considered suspicious. They may just work weird hours.
     - However, if you've detected based on activity that they live in a timezone we did not suggest, for example, Korea, consider it suspicious.
     - Set "mismatch_reason" to explain the suspicious pattern
 

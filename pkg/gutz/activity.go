@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/codeGROOVE-dev/guTZ/pkg/github"
@@ -124,34 +123,7 @@ func (d *Detector) tryActivityPatternsWithContext(ctx context.Context, userCtx *
 	return d.analyzeActivityTimestampsWithoutSupplemental(ctx, userCtx.Username, allTimestamps, orgCounts, timezoneForCandidates)
 }
 
-//nolint:gocognit,revive,maintidx // Complex timezone detection logic requires detailed analysis
-func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username string, events []github.PublicEvent, claimedTimezone string) *Result {
-	// Collect all timestamps from various sources
-	allTimestamps, orgCounts := d.collectActivityTimestamps(ctx, username, events)
-	return d.analyzeActivityTimestamps(ctx, username, allTimestamps, orgCounts, claimedTimezone)
-}
-
-//nolint:gocognit,revive,maintidx // Complex timezone detection logic requires detailed analysis
-func (d *Detector) analyzeActivityTimestamps(ctx context.Context, username string, allTimestamps []timestampEntry, orgCounts map[string]int, claimedTimezone string) *Result {
-	// Track the oldest event to check data coverage
-	var oldestEventTime time.Time
-	if len(allTimestamps) > 0 {
-		oldestEventTime = allTimestamps[0].time
-		for _, ts := range allTimestamps {
-			if ts.time.Before(oldestEventTime) {
-				oldestEventTime = ts.time
-			}
-		}
-	}
-
-	// Implement adaptive data collection strategy
-	const targetDataPoints = 160
-	allTimestamps = d.collectSupplementalTimestamps(ctx, username, allTimestamps, targetDataPoints)
-
-	return d.analyzeTimestampsCore(ctx, username, allTimestamps, orgCounts, claimedTimezone, oldestEventTime)
-}
-
-//nolint:gocognit,revive,maintidx // Complex timezone detection logic requires detailed analysis
+//nolint:revive // Complex timezone detection logic requires detailed analysis
 func (d *Detector) analyzeActivityTimestampsWithoutSupplemental(ctx context.Context, username string, allTimestamps []timestampEntry, orgCounts map[string]int, claimedTimezone string) *Result {
 	// Track the oldest event to check data coverage
 	var oldestEventTime time.Time
@@ -171,7 +143,7 @@ func (d *Detector) analyzeActivityTimestampsWithoutSupplemental(ctx context.Cont
 }
 
 //nolint:gocognit,revive,maintidx // Complex timezone detection logic requires detailed analysis
-func (d *Detector) analyzeTimestampsCore(ctx context.Context, username string, allTimestamps []timestampEntry, orgCounts map[string]int, claimedTimezone string, oldestEventTime time.Time) *Result {
+func (d *Detector) analyzeTimestampsCore(ctx context.Context, username string, allTimestamps []timestampEntry, orgCounts map[string]int, claimedTimezone string, _ time.Time) *Result {
 	// Filter and sort timestamps, then apply progressive time window
 	const targetDataPoints = 160
 	allTimestamps = filterAndSortTimestamps(allTimestamps, 5)
@@ -304,7 +276,22 @@ func (d *Detector) analyzeTimestampsCore(ctx context.Context, username string, a
 		}
 	}
 
-	quietHours := sleep.FindSleepHours(hourCounts)
+	// Convert half-hour sleep buckets to hour-based quiet hours
+	// DetectSleepPeriodsWithHalfHours returns half-hour buckets (0.0, 0.5, 1.0, etc.)
+	// We need to convert these to integer hours for the existing logic
+	sleepBucketsHalf := sleep.DetectSleepPeriodsWithHalfHours(halfHourCounts)
+	quietHoursMap := make(map[int]bool)
+	for _, bucket := range sleepBucketsHalf {
+		hour := int(bucket) // Convert to hour (0.5 becomes 0, 1.0 becomes 1, etc.)
+		quietHoursMap[hour] = true
+	}
+
+	// Convert map to sorted slice
+	var quietHours []int
+	for hour := range quietHoursMap {
+		quietHours = append(quietHours, hour)
+	}
+	sort.Ints(quietHours)
 	// Create a string representation to see the actual order
 	var sleepHoursStr []string
 	for _, h := range quietHours {
@@ -338,7 +325,7 @@ func (d *Detector) analyzeTimestampsCore(ctx context.Context, username string, a
 	// e.g., [13, 2, 3, 4, 5, 6, 7, 8, 9] means sleep from 2:00 to 9:00 with 13 as an outlier
 	var midQuiet float64
 
-	if len(quietHours) == 0 {
+	if len(quietHours) == 0 { //nolint:nestif // Complex sleep midpoint calculation
 		// No quiet hours found - shouldn't happen but handle gracefully
 		midQuiet = 2.5 // Default to 2:30 AM UTC
 	} else {
@@ -1107,108 +1094,4 @@ func (d *Detector) analyzeTimestampsCore(ctx context.Context, username string, a
 		"lunch_start", lunchStart, "lunch_end", lunchEnd, "confidence", lunchConfidence)
 
 	return result
-}
-
-// fetchSupplementalActivity fetches additional activity data when events are insufficient.
-
-// fetchSupplementalActivityWithDepth fetches additional activity data with control over depth.
-// maxPages controls how many pages of PRs/issues to fetch (1 = first 100, 2 = up to 200).
-func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, username string, maxPages int) *ActivityData {
-	type result struct {
-		prs              []github.PullRequest
-		issues           []github.Issue
-		comments         []github.Comment
-		stars            []time.Time
-		starredRepos     []github.Repository
-		commitActivities []github.CommitActivity
-	}
-
-	ch := make(chan result, 1)
-
-	go func() {
-		var res result
-
-		// Fetch in parallel using goroutines
-		var wg sync.WaitGroup
-		// For initial fetch (maxPages==1), fetch first page of everything
-		// For deep fetch (maxPages>1), skip comments/stars to save API calls
-		// With GraphQL, PRs and Issues are fetched together, so we need fewer goroutines
-		numGoroutines := 4 // PRs+Issues (1), commits (1), comments (1), stars (1)
-		if maxPages > 1 {
-			numGoroutines = 2 // Only PRs+Issues (1), commits (1) for deep fetch
-		}
-		wg.Add(numGoroutines)
-
-		// Fetch PRs and Issues together using GraphQL (much more efficient!)
-		go func() {
-			defer wg.Done()
-			prs, issues, err := d.githubClient.FetchActivityWithGraphQL(ctx, username)
-			if err != nil {
-				d.logger.Warn("🚩 GraphQL Activity Fetch Failed, using REST fallback", "username", username, "error", err)
-				// Fallback to REST if GraphQL fails
-				if prList, err := d.githubClient.FetchPullRequestsWithLimit(ctx, username, maxPages); err == nil {
-					res.prs = prList
-				}
-				if issueList, err := d.githubClient.FetchIssuesWithLimit(ctx, username, maxPages); err == nil {
-					res.issues = issueList
-				}
-			} else {
-				res.prs = prs
-				res.issues = issues
-				d.logger.Debug("fetched activity via GraphQL", "username", username, "prs", len(prs), "issues", len(issues))
-			}
-		}()
-
-		// Only fetch comments and stars on initial fetch to save API calls
-		if maxPages == 1 {
-			// Fetch Comments via GraphQL
-			go func() {
-				defer wg.Done()
-				if comments, err := d.githubClient.FetchUserComments(ctx, username); err == nil {
-					res.comments = comments
-				} else {
-					d.logger.Debug("failed to fetch comments", "username", username, "error", err)
-				}
-			}()
-
-			// Fetch starred repositories for additional timestamps
-			go func() {
-				defer wg.Done()
-				if stars, starredRepos, err := d.githubClient.FetchStarredRepositories(ctx, username); err == nil {
-					res.stars = stars
-					res.starredRepos = starredRepos
-				} else {
-					d.logger.Debug("failed to fetch starred repos", "username", username, "error", err)
-				}
-			}()
-		}
-
-		// Fetch commit activities with appropriate page limit
-		go func() {
-			defer wg.Done()
-			if commitActivities, err := d.githubClient.FetchUserCommitActivitiesWithLimit(ctx, username, maxPages); err == nil {
-				res.commitActivities = commitActivities
-			} else {
-				d.logger.Debug("failed to fetch commit activities", "username", username, "error", err)
-			}
-		}()
-
-		wg.Wait()
-		ch <- res
-	}()
-
-	select {
-	case res := <-ch:
-		// Return all activity types separately
-		return &ActivityData{
-			PullRequests:     res.prs,
-			Issues:           res.issues,
-			Comments:         res.comments,
-			StarredRepos:     res.starredRepos,
-			CommitActivities: res.commitActivities,
-			StarTimestamps:   res.stars,
-		}
-	case <-ctx.Done():
-		return &ActivityData{}
-	}
 }

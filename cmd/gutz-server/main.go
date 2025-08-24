@@ -311,7 +311,7 @@ func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request) {
+func (s *server) handleDetect(writer http.ResponseWriter, request *http.Request) { //nolint:revive,maintidx // Long function but organized
 	start := time.Now()
 	clientIP := strings.Split(request.RemoteAddr, ":")[0]
 	userAgent := request.Header.Get("User-Agent")
