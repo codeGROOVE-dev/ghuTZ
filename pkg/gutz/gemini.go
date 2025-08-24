@@ -153,18 +153,14 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		}
 
 		if activityResult.ActivityDateRange.TotalDays > 0 {
-			totalEvents := 0
-			if activityResult.HalfHourlyActivityUTC != nil {
-				for _, count := range activityResult.HalfHourlyActivityUTC {
-					totalEvents += count
-				}
-			}
+			// Count ALL data points in the timeline, not just unique timestamps
+			totalDataPoints := len(activityResult.Timeline)
 
 			contextData["activity_date_range"] = map[string]any{
 				"oldest":                activityResult.ActivityDateRange.OldestActivity,
 				"newest":                activityResult.ActivityDateRange.NewestActivity,
 				"total_days":            activityResult.ActivityDateRange.TotalDays,
-				"total_events":          totalEvents,
+				"total_events":          totalDataPoints, // Using timeline length for accurate count
 				"spans_dst_transitions": activityResult.ActivityDateRange.SpansDSTTransitions,
 			}
 		}
@@ -282,17 +278,13 @@ func (d *Detector) tryUnifiedGeminiAnalysisWithContext(ctx context.Context, user
 		dataSources = append(dataSources, "Comments")
 	}
 
-	// Collect commit message samples for Gemini to analyze
-	commitSamples := collectCommitMessageSamples(userCtx.Events, 30)
-	if len(commitSamples) > 0 {
-		contextData["commit_message_samples"] = commitSamples
-		dataSources = append(dataSources, "Commits")
-	}
-
-	// Collect text samples from PRs/issues for Gemini to analyze
-	textSamples := collectTextSamples(userCtx.PullRequests, userCtx.Issues, userCtx.Comments, 25)
-	if len(textSamples) > 0 {
-		contextData["text_samples"] = textSamples
+	// Collect text samples from the unified timeline (PRs, issues, comments, commits, gists)
+	if activityResult != nil && len(activityResult.Timeline) > 0 {
+		textSamples := collectTextSamplesFromTimeline(activityResult.Timeline, 25)
+		if len(textSamples) > 0 {
+			contextData["text_samples"] = textSamples
+			d.logger.Debug("collected text samples from timeline", "count", len(textSamples))
+		}
 	}
 
 	// Check for location field and try to geocode
@@ -658,6 +650,64 @@ func utcOffsetFromTimezone(tzString string) float64 {
 }
 
 // extractRepositoryContributions aggregates repository contributions from all sources.
+// collectTextSamplesFromTimeline extracts text samples from timeline entries for Gemini analysis.
+// It prioritizes diverse, recent samples that can reveal language, cultural context, and location hints.
+func collectTextSamplesFromTimeline(timeline []timestampEntry, maxSamples int) []string {
+	// Sort timeline by recency (newest first)
+	sortedTimeline := make([]timestampEntry, len(timeline))
+	copy(sortedTimeline, timeline)
+	sort.Slice(sortedTimeline, func(i, j int) bool {
+		return sortedTimeline[i].time.After(sortedTimeline[j].time)
+	})
+
+	var samples []string
+	seen := make(map[string]bool)
+
+	for _, entry := range sortedTimeline {
+		// Skip entries without meaningful text
+		if entry.title == "" || entry.title == entry.source {
+			continue
+		}
+
+		// Skip duplicates
+		if seen[entry.title] {
+			continue
+		}
+		seen[entry.title] = true
+
+		// Format the sample with source and repository info for context
+		var sample string
+		switch entry.source {
+		case "pr":
+			sample = fmt.Sprintf("PR: \"%s\" (%s)", entry.title, entry.repository)
+		case "issue":
+			sample = fmt.Sprintf("Issue: \"%s\" (%s)", entry.title, entry.repository)
+		case "comment":
+			// Comments are already truncated in timeline collection
+			sample = fmt.Sprintf("Comment: \"%s\" (%s)", entry.title, entry.repository)
+		case "gist":
+			sample = fmt.Sprintf("Gist: \"%s\"", entry.title)
+		case "repo_created":
+			continue // Skip repo descriptions, they're listed elsewhere
+		case "commit":
+			// Commits now have actual commit messages extracted from PushEvents
+			sample = fmt.Sprintf("Commit: \"%s\" (%s)", entry.title, entry.repository)
+		case "event":
+			// Skip generic events - we've already extracted meaningful content as commits/comments
+			continue
+		default:
+			continue // Skip unknown sources
+		}
+
+		samples = append(samples, sample)
+		if len(samples) >= maxSamples {
+			break
+		}
+	}
+
+	return samples
+}
+
 func extractRepositoryContributions(userCtx *UserContext) []repoContribution {
 	contributedRepos := make(map[string]int)
 

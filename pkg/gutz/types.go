@@ -49,20 +49,6 @@ func WithGCPProject(projectID string) Option {
 	}
 }
 
-// WithHTTPClient sets the HTTP client (kept for compatibility, not implemented).
-func WithHTTPClient(_ any) Option {
-	return func(_ *OptionHolder) {
-		// Not implemented, keeping for compatibility
-	}
-}
-
-// WithLogger sets the logger (kept for compatibility, handled differently).
-func WithLogger(_ any) Option {
-	return func(_ *OptionHolder) {
-		// Logger is handled differently
-	}
-}
-
 // WithActivityAnalysis enables or disables activity analysis.
 func WithActivityAnalysis(enabled bool) Option {
 	return func(o *OptionHolder) {
@@ -405,6 +391,7 @@ type Result struct {
 	CreatedAt                  *time.Time             `json:"created_at,omitempty"`
 	HourlyOrganizationActivity map[int]map[string]int `json:"hourly_organization_activity,omitempty"`
 	HalfHourlyActivityUTC      map[float64]int        `json:"half_hourly_activity_utc,omitempty"`
+	Timeline                   []timestampEntry       `json:"-"` // Don't serialize, internal use only
 	Location                   *Location              `json:"location,omitempty"`
 	Verification               *VerificationResult    `json:"verification,omitempty"`
 	GeminiReasoning            string                 `json:"gemini_reasoning,omitempty"`
@@ -449,8 +436,10 @@ type Location struct {
 
 // ActivityData holds all activity data for timezone detection.
 type ActivityData struct {
-	PullRequests []github.PullRequest
-	Issues       []github.Issue
-	Comments     []github.Comment
-	StarredRepos []github.Repository
+	PullRequests     []github.PullRequest
+	Issues           []github.Issue
+	Comments         []github.Comment
+	StarredRepos     []github.Repository
+	CommitActivities []github.CommitActivity
+	StarTimestamps   []time.Time
 }

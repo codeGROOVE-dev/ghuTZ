@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"strings"
 )
 
 // Common errors.
@@ -13,11 +14,11 @@ var (
 
 // FetchUserEnhancedGraphQL fetches comprehensive user data using our enhanced GraphQL implementation
 // This replaces multiple REST API calls with a single GraphQL query.
-func (c *Client) FetchUserEnhancedGraphQL(ctx context.Context, username string) (*User, error) {
+func (c *Client) FetchUserEnhancedGraphQL(ctx context.Context, username string) (*User, []Repository, []PullRequest, []Issue, error) {
 	if c.githubToken == "" {
 		// Can't use GraphQL without a token
 		c.logger.Debug("No GitHub token available for GraphQL", "username", username)
-		return nil, ErrNoGitHubToken
+		return nil, nil, nil, nil, ErrNoGitHubToken
 	}
 
 	graphql := NewGraphQLClient(c.githubToken, c.cachedHTTPDo, c.logger)
@@ -25,11 +26,11 @@ func (c *Client) FetchUserEnhancedGraphQL(ctx context.Context, username string) 
 	profile, err := graphql.FetchUserProfile(ctx, username)
 	if err != nil {
 		c.logger.Warn("🚩 GraphQL User Profile API Error", "username", username, "error", err)
-		return nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	if profile.User.Login == "" {
-		return nil, ErrUserNotFound
+		return nil, nil, nil, nil, ErrUserNotFound
 	}
 
 	// Convert GraphQL response to User struct
@@ -64,7 +65,62 @@ func (c *Client) FetchUserEnhancedGraphQL(ctx context.Context, username string) 
 		})
 	}
 
-	return user, nil
+	// Convert repositories from GraphQL response
+	var repositories []Repository
+	for _, repo := range profile.User.Repositories.Nodes {
+		language := ""
+		if repo.PrimaryLanguage.Name != "" {
+			language = repo.PrimaryLanguage.Name
+		}
+
+		repositories = append(repositories, Repository{
+			Name:        repo.Name,
+			FullName:    repo.NameWithOwner,
+			Description: repo.Description,
+			Language:    language,
+			HTMLURL:     repo.URL,
+			StarCount:   repo.StargazerCount,
+			Fork:        repo.IsFork,
+			CreatedAt:   repo.CreatedAt,
+			UpdatedAt:   repo.UpdatedAt,
+			PushedAt:    repo.PushedAt,
+		})
+	}
+
+	c.logger.Debug("extracted repositories from GraphQL", "username", username, "count", len(repositories))
+
+	// Convert pull requests from GraphQL response
+	var pullRequests []PullRequest
+	for _, pr := range profile.User.PullRequests.Nodes {
+		pullRequests = append(pullRequests, PullRequest{
+			Title:     pr.Title,
+			Body:      pr.Body,
+			CreatedAt: pr.CreatedAt,
+			UpdatedAt: pr.UpdatedAt,
+			HTMLURL:   pr.URL,
+			State:     pr.State,
+			RepoName:  pr.Repository.NameWithOwner,
+		})
+	}
+
+	// Convert issues from GraphQL response
+	var issues []Issue
+	for _, issue := range profile.User.Issues.Nodes {
+		issues = append(issues, Issue{
+			Title:     issue.Title,
+			Body:      issue.Body,
+			CreatedAt: issue.CreatedAt,
+			UpdatedAt: issue.UpdatedAt,
+			HTMLURL:   issue.URL,
+			State:     issue.State,
+			RepoName:  issue.Repository.NameWithOwner,
+		})
+	}
+
+	c.logger.Debug("extracted PRs and issues from GraphQL", "username", username,
+		"pr_count", len(pullRequests), "issue_count", len(issues))
+
+	return user, repositories, pullRequests, issues, nil
 }
 
 // FetchActivityWithGraphQL fetches PRs and Issues using GraphQL
@@ -201,7 +257,31 @@ func (c *Client) FetchActivityWithGraphQL(ctx context.Context, username string) 
 	return prs, issues, nil
 }
 
-// FetchCommentsWithGraphQL fetches comments using GraphQL.
+// extractRepoFromURL extracts the repository name from a GitHub URL.
+// Example: https://github.com/owner/repo/issues/123#issuecomment-456 -> "owner/repo".
+func extractRepoFromURL(url string) string {
+	if url == "" {
+		return ""
+	}
+
+	// Remove the GitHub prefix
+	const prefix = "https://github.com/"
+	if !strings.HasPrefix(url, prefix) {
+		return ""
+	}
+
+	path := strings.TrimPrefix(url, prefix)
+
+	// Split by "/" and take the first two parts (owner/repo)
+	parts := strings.Split(path, "/")
+	if len(parts) >= 2 {
+		return parts[0] + "/" + parts[1]
+	}
+
+	return ""
+}
+
+// FetchCommentsWithGraphQL fetches both issue comments (includes PR comments) and commit comments using GraphQL.
 func (c *Client) FetchCommentsWithGraphQL(ctx context.Context, username string) ([]Comment, error) {
 	if c.githubToken == "" {
 		return nil, nil // Can't fetch comments without auth
@@ -209,33 +289,90 @@ func (c *Client) FetchCommentsWithGraphQL(ctx context.Context, username string) 
 
 	graphql := NewGraphQLClient(c.githubToken, c.cachedHTTPDo, c.logger)
 
-	commentData, err := graphql.FetchComments(ctx, username, "")
+	commentData, err := graphql.FetchComments(ctx, username, "", "")
 	if err != nil {
 		return nil, err
 	}
 
 	var comments []Comment
+
+	// Process issue comments (includes PR comments)
 	for _, comment := range commentData.User.IssueComments.Nodes {
+		repo := extractRepoFromURL(comment.URL)
 		comments = append(comments, Comment{
-			Body:      comment.Body,
-			CreatedAt: comment.CreatedAt,
-			HTMLURL:   comment.URL,
+			Body:       comment.Body,
+			CreatedAt:  comment.CreatedAt,
+			UpdatedAt:  comment.CreatedAt, // Use CreatedAt as UpdatedAt for histogram data
+			HTMLURL:    comment.URL,
+			Repository: repo,
+		})
+	}
+
+	// Process commit comments
+	for _, comment := range commentData.User.CommitComments.Nodes {
+		url := ""
+		if comment.Commit.URL != "" {
+			url = comment.Commit.URL
+		}
+		repo := extractRepoFromURL(url)
+		comments = append(comments, Comment{
+			Body:       comment.Body,
+			CreatedAt:  comment.CreatedAt,
+			UpdatedAt:  comment.CreatedAt, // Use CreatedAt as UpdatedAt for histogram data
+			HTMLURL:    url,
+			Repository: repo,
 		})
 	}
 
 	// Fetch one more page if available and we don't have enough data
-	if commentData.User.IssueComments.PageInfo.HasNextPage && len(comments) < 200 {
-		nextData, err := graphql.FetchComments(ctx, username, commentData.User.IssueComments.PageInfo.EndCursor)
+	issueCursor := ""
+	commitCursor := ""
+	hasMoreIssueComments := commentData.User.IssueComments.PageInfo.HasNextPage
+	hasMoreCommitComments := commentData.User.CommitComments.PageInfo.HasNextPage
+
+	if hasMoreIssueComments {
+		issueCursor = commentData.User.IssueComments.PageInfo.EndCursor
+	}
+	if hasMoreCommitComments {
+		commitCursor = commentData.User.CommitComments.PageInfo.EndCursor
+	}
+
+	if (hasMoreIssueComments || hasMoreCommitComments) && len(comments) < 200 {
+		nextData, err := graphql.FetchComments(ctx, username, issueCursor, commitCursor)
 		if err == nil {
+			// Process additional issue comments
 			for _, comment := range nextData.User.IssueComments.Nodes {
+				repo := extractRepoFromURL(comment.URL)
 				comments = append(comments, Comment{
-					Body:      comment.Body,
-					CreatedAt: comment.CreatedAt,
-					HTMLURL:   comment.URL,
+					Body:       comment.Body,
+					CreatedAt:  comment.CreatedAt,
+					UpdatedAt:  comment.CreatedAt, // Use CreatedAt as UpdatedAt for histogram data
+					HTMLURL:    comment.URL,
+					Repository: repo,
+				})
+			}
+
+			// Process additional commit comments
+			for _, comment := range nextData.User.CommitComments.Nodes {
+				url := ""
+				if comment.Commit.URL != "" {
+					url = comment.Commit.URL
+				}
+				repo := extractRepoFromURL(url)
+				comments = append(comments, Comment{
+					Body:       comment.Body,
+					CreatedAt:  comment.CreatedAt,
+					UpdatedAt:  comment.CreatedAt, // Use CreatedAt as UpdatedAt for histogram data
+					HTMLURL:    url,
+					Repository: repo,
 				})
 			}
 		}
 	}
+
+	c.logger.Info("GraphQL comment fetch complete",
+		"username", username,
+		"total_comments", len(comments))
 
 	return comments, nil
 }

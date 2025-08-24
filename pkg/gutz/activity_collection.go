@@ -2,6 +2,9 @@ package gutz
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -11,14 +14,172 @@ import (
 
 // timestampEntry represents a single activity timestamp with metadata.
 type timestampEntry struct {
-	time   time.Time
-	source string // for debugging
-	org    string // organization/owner name
+	time       time.Time
+	source     string // "event", "pr", "issue", "comment", "star", "commit"
+	org        string // organization/owner name
+	title      string // PR/issue title, or comment preview
+	repository string // full repository name (owner/repo)
+	url        string // URL to the item (for reference)
 }
 
 // collectActivityTimestamps gathers all activity timestamps from various sources.
 func (d *Detector) collectActivityTimestamps(ctx context.Context, username string,
 	events []github.PublicEvent,
+) (timestamps []timestampEntry, orgCounts map[string]int) {
+	return d.collectActivityTimestampsWithSSHKeys(ctx, username, events, nil)
+}
+
+// collectActivityTimestampsWithContext gathers all activity timestamps from UserContext.
+func (d *Detector) collectActivityTimestampsWithContext(ctx context.Context, userCtx *UserContext) (timestamps []timestampEntry, orgCounts map[string]int) {
+	d.logger.Info("📊 Building unified timeline from UserContext",
+		"username", userCtx.Username,
+		"ssh_keys", len(userCtx.SSHKeys),
+		"repos", len(userCtx.Repositories))
+
+	allTimestamps, orgCounts := d.collectActivityTimestampsWithSSHKeys(ctx, userCtx.Username, userCtx.Events, userCtx.SSHKeys)
+
+	// Add gist creation events to timeline
+	gistCount := 0
+	d.logger.Info("📝 Processing gists for timeline", "username", userCtx.Username, "total_gists", len(userCtx.Gists))
+	for _, gist := range userCtx.Gists {
+		if gist.CreatedAt.IsZero() || gist.CreatedAt.Year() < 2000 {
+			continue
+		}
+
+		title := "created gist"
+		if gist.Description != "" && len(gist.Description) <= 100 {
+			title = "created gist: " + gist.Description
+		}
+
+		allTimestamps = append(allTimestamps, timestampEntry{
+			time:       gist.CreatedAt,
+			source:     "gist",
+			org:        userCtx.Username, // Gists belong to the user
+			title:      title,
+			repository: "",
+			url:        gist.HTMLURL,
+		})
+		gistCount++
+		orgCounts[userCtx.Username]++
+	}
+
+	if gistCount > 0 {
+		d.logger.Info("📝 Added gist creations to timeline", "username", userCtx.Username, "count", gistCount)
+	}
+
+	// Add repository creation events to timeline
+	repoCount := 0
+	d.logger.Debug("Processing repositories for timeline", "username", userCtx.Username, "total_repos", len(userCtx.Repositories))
+	for i, repo := range userCtx.Repositories {
+		if i < 3 {
+			d.logger.Debug("sample repo", "index", i, "name", repo.Name, "created_at", repo.CreatedAt, "fork", repo.Fork)
+		}
+		if repo.CreatedAt.IsZero() {
+			d.logger.Debug("skipping repo with invalid date", "repo", repo.Name, "created_at", repo.CreatedAt)
+			continue
+		}
+
+		// Skip forks - they weren't really "created" by the user
+		if repo.Fork {
+			d.logger.Debug("skipping forked repo", "repo", repo.Name)
+			continue
+		}
+
+		// Use description as the main title if available, otherwise use a generic message
+		title := repo.Description
+		if title == "" {
+			title = "created repository: " + repo.Name
+		}
+
+		d.logger.Debug("Adding repo to timeline", "repo", repo.Name, "created_at", repo.CreatedAt)
+		allTimestamps = append(allTimestamps, timestampEntry{
+			time:       repo.CreatedAt,
+			source:     "repo_created",
+			org:        userCtx.Username, // User's own repositories
+			title:      title,
+			repository: repo.FullName,
+			url:        repo.HTMLURL,
+		})
+		repoCount++
+		orgCounts[userCtx.Username]++
+	}
+
+	if repoCount > 0 {
+		d.logger.Info("✅ Added repository creations to timeline", "username", userCtx.Username, "count", repoCount)
+	} else {
+		d.logger.Info("⚠️ No repository creations to add", "username", userCtx.Username, "total_repos", len(userCtx.Repositories))
+	}
+
+	// Add PRs from GraphQL (these supplement the event data which only covers ~30 days)
+	prCount := 0
+	d.logger.Debug("Processing PRs for timeline", "username", userCtx.Username, "total_prs", len(userCtx.PullRequests))
+	for _, pr := range userCtx.PullRequests {
+		if pr.CreatedAt.IsZero() || pr.CreatedAt.Year() < 2000 {
+			d.logger.Debug("skipping PR with invalid date", "title", pr.Title, "created_at", pr.CreatedAt)
+			continue
+		}
+
+		org := extractOrganization(pr.RepoName)
+		allTimestamps = append(allTimestamps, timestampEntry{
+			time:       pr.CreatedAt,
+			source:     "pr",
+			org:        org,
+			title:      pr.Title,
+			repository: pr.RepoName,
+			url:        pr.HTMLURL,
+		})
+		prCount++
+		if org != "" {
+			orgCounts[org]++
+		}
+	}
+
+	if prCount > 0 {
+		d.logger.Info("🔀 Added pull requests to timeline", "username", userCtx.Username, "count", prCount)
+	}
+
+	// Add Issues from GraphQL (these supplement the event data which only covers ~30 days)
+	issueCount := 0
+	d.logger.Debug("Processing issues for timeline", "username", userCtx.Username, "total_issues", len(userCtx.Issues))
+	for _, issue := range userCtx.Issues {
+		if issue.CreatedAt.IsZero() || issue.CreatedAt.Year() < 2000 {
+			d.logger.Debug("skipping issue with invalid date", "title", issue.Title, "created_at", issue.CreatedAt)
+			continue
+		}
+
+		org := extractOrganization(issue.RepoName)
+		allTimestamps = append(allTimestamps, timestampEntry{
+			time:       issue.CreatedAt,
+			source:     "issue",
+			org:        org,
+			title:      issue.Title,
+			repository: issue.RepoName,
+			url:        issue.HTMLURL,
+		})
+		issueCount++
+		if org != "" {
+			orgCounts[org]++
+		}
+	}
+
+	if issueCount > 0 {
+		d.logger.Info("🐛 Added issues to timeline", "username", userCtx.Username, "count", issueCount)
+	}
+
+	// Don't call collectSupplementalTimestamps here - we already have all the data
+	// from UserContext. The supplemental data fetching happens separately in
+	// analyzeActivityTimestampsWithoutSupplemental
+
+	d.logger.Info("📊 Unified timeline built",
+		"username", userCtx.Username,
+		"total_events", len(allTimestamps))
+
+	return allTimestamps, orgCounts
+}
+
+// collectActivityTimestampsWithSSHKeys gathers all activity timestamps including SSH keys.
+func (d *Detector) collectActivityTimestampsWithSSHKeys(ctx context.Context, username string,
+	events []github.PublicEvent, sshKeys []github.SSHKey,
 ) (timestamps []timestampEntry, orgCounts map[string]int) {
 	allTimestamps := []timestampEntry{}
 	orgCounts = make(map[string]int)
@@ -40,10 +201,107 @@ func (d *Detector) collectActivityTimestamps(ctx context.Context, username strin
 		}
 
 		org := extractOrganization(event.Repo.Name)
+
+		// Extract comment body from events if available
+		eventTitle := event.Type
+		eventSource := "event"
+
+		// For comment events, try to extract the comment body
+		switch event.Type {
+		case "IssueCommentEvent", "PullRequestReviewCommentEvent", "PullRequestReviewEvent":
+			var payload map[string]interface{}
+			if err := json.Unmarshal(event.Payload, &payload); err == nil {
+				// Try to extract comment body
+				var commentBody string
+				if comment, ok := payload["comment"].(map[string]interface{}); ok {
+					if body, ok := comment["body"].(string); ok {
+						commentBody = body
+					}
+				} else if review, ok := payload["review"].(map[string]interface{}); ok {
+					// For PR reviews
+					if body, ok := review["body"].(string); ok {
+						commentBody = body
+					}
+				}
+
+				if commentBody != "" {
+					// Truncate for title field
+					if len(commentBody) > 150 {
+						eventTitle = commentBody[:150] + "..."
+					} else {
+						eventTitle = commentBody
+					}
+					eventSource = "comment" // Mark as comment for text sample collection
+				}
+			}
+		case "PushEvent":
+			// For PushEvents, extract the most recent commit message
+			var payload map[string]interface{}
+			if err := json.Unmarshal(event.Payload, &payload); err == nil {
+				if commits, ok := payload["commits"].([]interface{}); ok && len(commits) > 0 {
+					// Get the most recent commit (last in the array)
+					if lastCommit, ok := commits[len(commits)-1].(map[string]interface{}); ok {
+						if message, ok := lastCommit["message"].(string); ok && message != "" {
+							// Truncate commit message if too long
+							if len(message) > 150 {
+								eventTitle = message[:150] + "..."
+							} else {
+								eventTitle = message
+							}
+							eventSource = "commit" // Mark as commit for text sample collection
+						}
+					}
+				}
+			}
+		case "PullRequestEvent":
+			// For PullRequestEvents, extract the PR title
+			var payload map[string]interface{}
+			if err := json.Unmarshal(event.Payload, &payload); err == nil {
+				if pr, ok := payload["pull_request"].(map[string]interface{}); ok {
+					if title, ok := pr["title"].(string); ok && title != "" {
+						// Truncate PR title if too long
+						if len(title) > 150 {
+							eventTitle = title[:150] + "..."
+						} else {
+							eventTitle = title
+						}
+						eventSource = "pr" // Mark as PR for text sample collection
+					}
+				}
+			}
+		case "IssuesEvent":
+			// For IssuesEvents, extract the issue title
+			var payload map[string]interface{}
+			if err := json.Unmarshal(event.Payload, &payload); err == nil {
+				if issue, ok := payload["issue"].(map[string]interface{}); ok {
+					if title, ok := issue["title"].(string); ok && title != "" {
+						// Truncate issue title if too long
+						if len(title) > 150 {
+							eventTitle = title[:150] + "..."
+						} else {
+							eventTitle = title
+						}
+						eventSource = "issue" // Mark as issue for text sample collection
+					} else {
+						d.logger.Debug("IssuesEvent missing title", "username", username,
+							"has_issue", ok, "title_type", fmt.Sprintf("%T", issue["title"]))
+					}
+				} else {
+					d.logger.Debug("IssuesEvent missing issue object", "username", username,
+						"payload_keys", fmt.Sprintf("%v", reflect.ValueOf(payload).MapKeys()))
+				}
+			} else {
+				d.logger.Debug("IssuesEvent failed to unmarshal", "username", username, "error", err)
+			}
+		}
+
 		allTimestamps = append(allTimestamps, timestampEntry{
-			time:   event.CreatedAt,
-			source: "event",
-			org:    org,
+			time:       event.CreatedAt,
+			source:     eventSource,
+			org:        org,
+			title:      eventTitle,
+			repository: event.Repo.Name,
+			url:        event.Repo.URL,
 		})
 		if event.CreatedAt.Before(eventOldest) {
 			eventOldest = event.CreatedAt
@@ -68,25 +326,41 @@ func (d *Detector) collectActivityTimestamps(ctx context.Context, username strin
 			"days_covered", int(eventNewest.Sub(eventOldest).Hours()/24))
 	}
 
-	// Also fetch gist timestamps
-	if gistTimestamps, err := d.githubClient.FetchUserGists(ctx, username); err == nil && len(gistTimestamps) > 0 {
-		gistZeroCount := 0
-		for _, ts := range gistTimestamps {
-			// Filter out zero timestamps
-			if ts.IsZero() || ts.Year() < 2000 {
-				gistZeroCount++
-				d.logger.Warn("skipping gist with invalid timestamp",
-					"username", username,
-					"timestamp", ts)
+	// Note: Gists are added separately in collectActivityTimestampsWithContext
+	// from UserContext.Gists which contains full gist objects with descriptions
+
+	// Add SSH keys to timeline if provided
+	if sshKeys != nil {
+		sshKeyCount := 0
+		d.logger.Debug("processing SSH keys for timeline", "username", username, "total_keys", len(sshKeys))
+		for _, sshKey := range sshKeys {
+			if sshKey.CreatedAt.IsZero() || sshKey.CreatedAt.Year() < 2000 {
+				d.logger.Debug("skipping SSH key with invalid date", "username", username, "created_at", sshKey.CreatedAt)
 				continue
 			}
+
+			title := "added SSH key"
+			if sshKey.Title != "" {
+				title = "added SSH key: " + sshKey.Title
+			}
+
 			allTimestamps = append(allTimestamps, timestampEntry{
-				time:   ts,
-				source: "gist",
-				org:    username, // gists are owned by the user
+				time:       sshKey.CreatedAt,
+				source:     "ssh_key",
+				org:        username, // SSH keys belong to the user
+				title:      title,
+				repository: "",
+				url:        sshKey.URL,
 			})
+			sshKeyCount++
 		}
-		d.logger.Debug("added gist timestamps", "username", username, "count", len(gistTimestamps))
+		if sshKeyCount > 0 {
+			d.logger.Debug("added SSH keys to timeline", "username", username, "count", sshKeyCount)
+		} else {
+			d.logger.Debug("no valid SSH keys to add to timeline", "username", username)
+		}
+	} else {
+		d.logger.Debug("no SSH keys provided for timeline", "username", username)
 	}
 
 	// Log timestamps without org associations for debugging
@@ -189,9 +463,12 @@ func (d *Detector) fetchAdditionalPages(ctx context.Context, username string,
 		for i := range newPRs {
 			org := extractOrganization(newPRs[i].RepoName)
 			allTimestamps = append(allTimestamps, timestampEntry{
-				time:   newPRs[i].CreatedAt,
-				source: "pr",
-				org:    org,
+				time:       newPRs[i].CreatedAt,
+				source:     "pr",
+				org:        org,
+				title:      newPRs[i].Title,
+				repository: newPRs[i].RepoName,
+				url:        newPRs[i].HTMLURL,
 			})
 		}
 		d.logger.Debug("added additional PRs", "username", username, "count", len(newPRs))
@@ -203,9 +480,12 @@ func (d *Detector) fetchAdditionalPages(ctx context.Context, username string,
 		for i := range newIssues {
 			org := extractOrganization(newIssues[i].RepoName)
 			allTimestamps = append(allTimestamps, timestampEntry{
-				time:   newIssues[i].CreatedAt,
-				source: "issue",
-				org:    org,
+				time:       newIssues[i].CreatedAt,
+				source:     "issue",
+				org:        org,
+				title:      newIssues[i].Title,
+				repository: newIssues[i].RepoName,
+				url:        newIssues[i].HTMLURL,
 			})
 		}
 		d.logger.Debug("added additional issues", "username", username, "count", len(newIssues))
@@ -247,9 +527,12 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 		}
 		org := extractOrganization(pr.RepoName)
 		allTimestamps = append(allTimestamps, timestampEntry{
-			time:   pr.CreatedAt,
-			source: "pr",
-			org:    org,
+			time:       pr.CreatedAt,
+			source:     "pr",
+			org:        org,
+			title:      pr.Title,
+			repository: pr.RepoName,
+			url:        pr.HTMLURL,
 		})
 		if pr.CreatedAt.Before(prOldest) {
 			prOldest = pr.CreatedAt
@@ -291,9 +574,12 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 		}
 		org := extractOrganization(issue.RepoName)
 		allTimestamps = append(allTimestamps, timestampEntry{
-			time:   issue.CreatedAt,
-			source: "issue",
-			org:    org,
+			time:       issue.CreatedAt,
+			source:     "issue",
+			org:        org,
+			title:      issue.Title,
+			repository: issue.RepoName,
+			url:        issue.HTMLURL,
 		})
 		if issue.CreatedAt.Before(issueOldest) {
 			issueOldest = issue.CreatedAt
@@ -331,10 +617,18 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 			continue
 		}
 		org := extractOrganization(comment.Repository)
+		// Truncate comment body for title field
+		commentPreview := comment.Body
+		if len(commentPreview) > 150 {
+			commentPreview = commentPreview[:150] + "..."
+		}
 		allTimestamps = append(allTimestamps, timestampEntry{
-			time:   comment.CreatedAt,
-			source: "comment",
-			org:    org,
+			time:       comment.CreatedAt,
+			source:     "comment",
+			org:        org,
+			title:      commentPreview,
+			repository: comment.Repository,
+			url:        comment.HTMLURL,
 		})
 		if comment.CreatedAt.Before(commentOldest) {
 			commentOldest = comment.CreatedAt
@@ -352,17 +646,56 @@ func (d *Detector) addSupplementalData(allTimestamps []timestampEntry, additiona
 			"days_covered", int(commentNewest.Sub(commentOldest).Hours()/24))
 	}
 
-	// Note: Starred repositories from the API don't have timestamps directly,
-	// but they're fetched with timestamps in FetchStarredRepositories
-	// This is handled separately in the main activity collection
-	// Currently not processing organization timestamps for starred repos
-	// since they come from a different API call with timestamp data
+	// Add commit activities to timeline
+	for i := range additionalData.CommitActivities {
+		commit := &additionalData.CommitActivities[i]
+		if commit.AuthorDate.IsZero() || commit.AuthorDate.Year() < 2000 {
+			continue
+		}
+		org := extractOrganization(commit.Repository)
+		allTimestamps = append(allTimestamps, timestampEntry{
+			time:       commit.AuthorDate,
+			source:     "commit",
+			org:        org,
+			title:      "commit", // We don't have the message in CommitActivity struct
+			repository: commit.Repository,
+			url:        "",
+		})
+	}
+
+	// Add starred repositories to timeline
+	for i, starTime := range additionalData.StarTimestamps {
+		if starTime.IsZero() || starTime.Year() < 2000 {
+			continue
+		}
+
+		// Get repository name if available
+		var repoName string
+		if i < len(additionalData.StarredRepos) {
+			repoName = additionalData.StarredRepos[i].FullName
+		}
+
+		org := extractOrganization(repoName)
+		allTimestamps = append(allTimestamps, timestampEntry{
+			time:       starTime,
+			source:     "star",
+			org:        org,
+			title:      "starred " + repoName,
+			repository: repoName,
+			url:        "",
+		})
+	}
+
+	// Note: SSH keys are added separately in collectActivityTimestampsWithContext
+	// since they come from UserContext, not from supplemental fetching
 
 	d.logger.Debug("collected all timestamps", "username", username,
 		"total_before_dedup", len(allTimestamps),
 		"prs", len(additionalData.PullRequests),
 		"issues", len(additionalData.Issues),
 		"comments", len(additionalData.Comments),
+		"commits", len(additionalData.CommitActivities),
+		"stars", len(additionalData.StarTimestamps),
 		"starred_repos", len(additionalData.StarredRepos))
 
 	return allTimestamps

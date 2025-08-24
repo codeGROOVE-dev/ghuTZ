@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,22 +42,22 @@ var (
 // UserContext holds all fetched data for a user to avoid redundant API calls.
 type UserContext struct {
 	User                    *github.User
-	GitHubTimezone          string // Profile timezone from GitHub profile UTC offset (e.g., "UTC-7")
-	ProfileLocationTimezone string // Profile location timezone from geocoding location (e.g., "UTC-8" for Seattle in winter)
 	FromCache               map[string]bool
+	GitHubTimezone          string
+	ProfileLocationTimezone string
 	Username                string
 	ProfileHTML             string
-	PullRequests            []github.PullRequest
-	StarredRepos            []github.Repository
 	Repositories            []github.Repository
+	StarredRepos            []github.Repository
+	PullRequests            []github.PullRequest
 	Issues                  []github.Issue
 	Comments                []github.Comment
-	Gists                   []github.Gist // Full gist objects with descriptions
+	Gists                   []github.Gist
 	Commits                 []time.Time
-	CommitActivities        []github.CommitActivity // Enhanced commit data with repository info
+	CommitActivities        []github.CommitActivity
 	Organizations           []github.Organization
 	Events                  []github.PublicEvent
-	SSHKeys                 []github.SSHKey // SSH public keys with creation timestamps
+	SSHKeys                 []github.SSHKey
 }
 
 // Detector performs timezone detection for GitHub users.
@@ -582,7 +581,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) (*User
 	go func() {
 		defer wg.Done()
 		d.logger.Debug("checking user profile with GraphQL", "username", username)
-		user, err := d.githubClient.FetchUserEnhancedGraphQL(ctx, username)
+		user, repos, prs, issues, err := d.githubClient.FetchUserEnhancedGraphQL(ctx, username)
 		if err != nil {
 			// No token is acceptable, we can work without it
 			if errors.Is(err, github.ErrNoGitHubToken) {
@@ -605,6 +604,20 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) (*User
 		}
 		mu.Lock()
 		userCtx.User = user
+		// If we got repositories from GraphQL, use them
+		if len(repos) > 0 {
+			userCtx.Repositories = repos
+			d.logger.Info("Using repositories from GraphQL", "username", username, "count", len(repos))
+		}
+		// Store PRs and Issues from GraphQL to supplement event data (which only covers ~30 days)
+		if len(prs) > 0 {
+			userCtx.PullRequests = prs
+			d.logger.Info("Using pull requests from GraphQL", "username", username, "count", len(prs))
+		}
+		if len(issues) > 0 {
+			userCtx.Issues = issues
+			d.logger.Info("Using issues from GraphQL", "username", username, "count", len(issues))
+		}
 		mu.Unlock()
 	}()
 
@@ -640,58 +653,7 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) (*User
 	}()
 
 	// Fetch repositories (pinned and popular) - do these in parallel too
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		d.logger.Debug("checking repositories", "username", username)
-
-		var pinnedRepos, popularRepos []github.Repository
-		var repoWg sync.WaitGroup
-
-		repoWg.Add(2)
-		go func() {
-			defer repoWg.Done()
-			var err error
-			pinnedRepos, err = d.githubClient.FetchPinnedRepositories(ctx, username)
-			if err != nil {
-				d.logger.Debug("failed to fetch pinned repositories", "username", username, "error", err)
-			}
-		}()
-		go func() {
-			defer repoWg.Done()
-			var err error
-			popularRepos, err = d.githubClient.FetchPopularRepositories(ctx, username)
-			if err != nil {
-				d.logger.Debug("failed to fetch popular repositories", "username", username, "error", err)
-			}
-		}()
-		repoWg.Wait()
-
-		// Combine and deduplicate repos
-		repoMap := make(map[string]github.Repository)
-		for i := range pinnedRepos {
-			repoMap[pinnedRepos[i].FullName] = pinnedRepos[i]
-		}
-		for i := range popularRepos {
-			if _, exists := repoMap[popularRepos[i].FullName]; !exists {
-				repoMap[popularRepos[i].FullName] = popularRepos[i]
-			}
-		}
-		// Sort repo names for deterministic order
-		var repoNames []string
-		for name := range repoMap {
-			repoNames = append(repoNames, name)
-		}
-		sort.Strings(repoNames)
-		var repos []github.Repository
-		for _, name := range repoNames {
-			repos = append(repos, repoMap[name])
-		}
-
-		mu.Lock()
-		userCtx.Repositories = repos
-		mu.Unlock()
-	}()
+	// Repository fetching now handled by GraphQL in FetchUserEnhancedGraphQL above
 
 	// Fetch starred repositories
 	wg.Add(1)
@@ -707,46 +669,12 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) (*User
 		mu.Unlock()
 	}()
 
-	// Fetch pull requests and issues using GraphQL (combined in single query!)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		d.logger.Debug("fetching PRs and Issues via GraphQL", "username", username)
-
-		// Use the new GraphQL method that fetches both PRs and Issues together
-		prs, issues, err := d.githubClient.FetchActivityWithGraphQL(ctx, username)
-		if err != nil {
-			d.logger.Warn("🚩 GraphQL Activity Fetch Failed", "username", username, "error", err)
-			// No fallback - GraphQL is the primary method now
-			prs = []github.PullRequest{}
-			issues = []github.Issue{}
-		}
-
-		mu.Lock()
-		userCtx.PullRequests = prs
-		userCtx.Issues = issues
-		mu.Unlock()
-
-		d.logger.Info("activity data fetched",
-			"username", username,
-			"prs", len(prs),
-			"issues", len(issues),
-			"method", "GraphQL")
-	}()
-
-	// Fetch comments
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		d.logger.Debug("checking comments", "username", username)
-		comments, err := d.githubClient.FetchUserComments(ctx, username)
-		if err != nil {
-			d.logger.Debug("failed to fetch user comments", "username", username, "error", err)
-		}
-		mu.Lock()
-		userCtx.Comments = comments
-		mu.Unlock()
-	}()
+	// NOTE: PRs, Issues, and Comments are now fetched as part of the activity timeline
+	// to avoid duplicate API calls. The data will be available through the activity result.
+	// Keeping empty slices for now to avoid breaking existing code that expects these fields.
+	userCtx.PullRequests = []github.PullRequest{}
+	userCtx.Issues = []github.Issue{}
+	userCtx.Comments = []github.Comment{}
 
 	// Fetch gists
 	wg.Add(1)
@@ -800,15 +728,14 @@ func (d *Detector) fetchAllUserData(ctx context.Context, username string) (*User
 	}
 
 	// Log summary
+	// Note: PRs, Issues, and Comments are fetched separately through activity analysis
+	// and not stored in userCtx to avoid duplicate API calls
 	d.logger.Info("fetched all user data",
 		"username", username,
 		"events", len(userCtx.Events),
 		"orgs", len(userCtx.Organizations),
 		"repos", len(userCtx.Repositories),
 		"starred", len(userCtx.StarredRepos),
-		"prs", len(userCtx.PullRequests),
-		"issues", len(userCtx.Issues),
-		"comments", len(userCtx.Comments),
 		"gists", len(userCtx.Gists),
 		"commit_activities", len(userCtx.CommitActivities),
 		"ssh_keys", len(userCtx.SSHKeys))

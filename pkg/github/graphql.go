@@ -86,8 +86,52 @@ type UserProfileResponse struct {
 			TotalCount int `json:"totalCount"`
 		} `json:"following"`
 		Repositories struct {
+			Nodes []struct {
+				Name            string    `json:"name"`
+				NameWithOwner   string    `json:"nameWithOwner"`
+				Description     string    `json:"description"`
+				CreatedAt       time.Time `json:"createdAt"`
+				UpdatedAt       time.Time `json:"updatedAt"`
+				PushedAt        time.Time `json:"pushedAt"`
+				PrimaryLanguage struct {
+					Name string `json:"name"`
+				} `json:"primaryLanguage"`
+				StargazerCount int    `json:"stargazerCount"`
+				URL            string `json:"url"`
+				IsFork         bool   `json:"isFork"`
+			} `json:"nodes"`
 			TotalCount int `json:"totalCount"`
 		} `json:"repositories"`
+		// Pull requests
+		PullRequests struct {
+			Nodes []struct {
+				Title      string    `json:"title"`
+				Body       string    `json:"body"`
+				CreatedAt  time.Time `json:"createdAt"`
+				UpdatedAt  time.Time `json:"updatedAt"`
+				URL        string    `json:"url"`
+				State      string    `json:"state"`
+				Repository struct {
+					NameWithOwner string `json:"nameWithOwner"`
+				} `json:"repository"`
+			} `json:"nodes"`
+			TotalCount int `json:"totalCount"`
+		} `json:"pullRequests"`
+		// Issues
+		Issues struct {
+			Nodes []struct {
+				Title      string    `json:"title"`
+				Body       string    `json:"body"`
+				CreatedAt  time.Time `json:"createdAt"`
+				UpdatedAt  time.Time `json:"updatedAt"`
+				URL        string    `json:"url"`
+				State      string    `json:"state"`
+				Repository struct {
+					NameWithOwner string `json:"nameWithOwner"`
+				} `json:"repository"`
+			} `json:"nodes"`
+			TotalCount int `json:"totalCount"`
+		} `json:"issues"`
 		ContributionsCollection struct {
 			StartedAt                     time.Time `json:"startedAt"`
 			EndedAt                       time.Time `json:"endedAt"`
@@ -177,6 +221,7 @@ type ActivityDataResponse struct {
 // CommentDataResponse for paginated comments.
 type CommentDataResponse struct {
 	User struct {
+		// Issue comments (includes comments on both issues and PRs)
 		IssueComments struct {
 			Nodes []struct {
 				Body      string    `json:"body"`
@@ -188,6 +233,20 @@ type CommentDataResponse struct {
 				EndCursor   string `json:"endCursor"`
 			} `json:"pageInfo"`
 		} `json:"issueComments"`
+		// Commit comments
+		CommitComments struct {
+			Nodes []struct {
+				Body      string    `json:"body"`
+				CreatedAt time.Time `json:"createdAt"`
+				Commit    struct {
+					URL string `json:"url"`
+				} `json:"commit"`
+			} `json:"nodes"`
+			PageInfo struct {
+				HasNextPage bool   `json:"hasNextPage"`
+				EndCursor   string `json:"endCursor"`
+			} `json:"pageInfo"`
+		} `json:"commitComments"`
 	} `json:"user"`
 }
 
@@ -230,7 +289,51 @@ func (c *GraphQLClient) FetchUserProfile(ctx context.Context, username string) (
 			following {
 				totalCount
 			}
-			repositories {
+			repositories(first: 100, ownerAffiliations: OWNER, orderBy: {field: CREATED_AT, direction: DESC}) {
+				nodes {
+					name
+					nameWithOwner
+					description
+					createdAt
+					updatedAt
+					pushedAt
+					primaryLanguage {
+						name
+					}
+					stargazerCount
+					url
+					isFork
+				}
+				totalCount
+			}
+			
+			pullRequests(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) {
+				nodes {
+					title
+					body
+					createdAt
+					updatedAt
+					url
+					state
+					repository {
+						nameWithOwner
+					}
+				}
+				totalCount
+			}
+			
+			issues(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) {
+				nodes {
+					title
+					body
+					createdAt
+					updatedAt
+					url
+					state
+					repository {
+						nameWithOwner
+					}
+				}
 				totalCount
 			}
 			
@@ -365,16 +468,29 @@ func (c *GraphQLClient) FetchActivityData(ctx context.Context, username string, 
 	return &result, nil
 }
 
-// FetchComments fetches issue comments (can be expanded to include PR comments).
-func (c *GraphQLClient) FetchComments(ctx context.Context, username string, cursor string) (*CommentDataResponse, error) {
+// FetchComments fetches both issue comments (which include PR comments) and commit comments.
+func (c *GraphQLClient) FetchComments(ctx context.Context, username string, issueCursor, commitCursor string) (*CommentDataResponse, error) {
 	query := `
-	query($login: String!, $cursor: String) {
+	query($login: String!, $issueCursor: String, $commitCursor: String) {
 		user(login: $login) {
-			issueComments(first: 100, orderBy: {field: CREATED_AT, direction: DESC}, after: $cursor) {
+			issueComments(first: 100, orderBy: {field: CREATED_AT, direction: DESC}, after: $issueCursor) {
 				nodes {
 					body
 					createdAt
 					url
+				}
+				pageInfo {
+					hasNextPage
+					endCursor
+				}
+			}
+			commitComments(first: 100, orderBy: {field: CREATED_AT, direction: DESC}, after: $commitCursor) {
+				nodes {
+					body
+					createdAt
+					commit {
+						url
+					}
 				}
 				pageInfo {
 					hasNextPage
@@ -388,8 +504,11 @@ func (c *GraphQLClient) FetchComments(ctx context.Context, username string, curs
 		"login": username,
 	}
 
-	if cursor != "" {
-		variables["cursor"] = cursor
+	if issueCursor != "" {
+		variables["issueCursor"] = issueCursor
+	}
+	if commitCursor != "" {
+		variables["commitCursor"] = commitCursor
 	}
 
 	resp, err := c.executeQuery(ctx, query, variables)

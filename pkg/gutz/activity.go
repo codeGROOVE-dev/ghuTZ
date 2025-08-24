@@ -67,6 +67,11 @@ func refineHourlySleepFromBuckets(quietHours []int, sleepBuckets []float64, half
 
 // tryActivityPatternsWithContext performs activity pattern analysis using UserContext.
 func (d *Detector) tryActivityPatternsWithContext(ctx context.Context, userCtx *UserContext) *Result {
+	d.logger.Info("🔍 Starting activity pattern analysis with UserContext",
+		"username", userCtx.Username,
+		"has_ssh_keys", len(userCtx.SSHKeys) > 0,
+		"has_repos", len(userCtx.Repositories) > 0)
+
 	// Get implied timezone from location if not already set
 	if userCtx.ProfileLocationTimezone == "" && userCtx.User != nil && userCtx.User.Location != "" {
 		// Try to geocode and get timezone from the location
@@ -111,21 +116,30 @@ func (d *Detector) tryActivityPatternsWithContext(ctx context.Context, userCtx *
 		"username", userCtx.Username,
 		"timezone_for_candidates", timezoneForCandidates)
 
-	return d.tryActivityPatternsWithEvents(ctx, userCtx.Username, userCtx.Events, timezoneForCandidates)
+	// Collect all timestamps from various sources, including SSH keys and repositories from userCtx
+	allTimestamps, orgCounts := d.collectActivityTimestampsWithContext(ctx, userCtx)
+
+	// Since we have the full UserContext, we don't need to fetch supplemental data again
+	// Just continue with the analysis directly
+	return d.analyzeActivityTimestampsWithoutSupplemental(ctx, userCtx.Username, allTimestamps, orgCounts, timezoneForCandidates)
 }
 
 //nolint:gocognit,revive,maintidx // Complex timezone detection logic requires detailed analysis
 func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username string, events []github.PublicEvent, claimedTimezone string) *Result {
 	// Collect all timestamps from various sources
 	allTimestamps, orgCounts := d.collectActivityTimestamps(ctx, username, events)
+	return d.analyzeActivityTimestamps(ctx, username, allTimestamps, orgCounts, claimedTimezone)
+}
 
+//nolint:gocognit,revive,maintidx // Complex timezone detection logic requires detailed analysis
+func (d *Detector) analyzeActivityTimestamps(ctx context.Context, username string, allTimestamps []timestampEntry, orgCounts map[string]int, claimedTimezone string) *Result {
 	// Track the oldest event to check data coverage
 	var oldestEventTime time.Time
-	if len(events) > 0 {
-		oldestEventTime = events[len(events)-1].CreatedAt // Assuming sorted by recency
-		for _, event := range events {
-			if event.CreatedAt.Before(oldestEventTime) {
-				oldestEventTime = event.CreatedAt
+	if len(allTimestamps) > 0 {
+		oldestEventTime = allTimestamps[0].time
+		for _, ts := range allTimestamps {
+			if ts.time.Before(oldestEventTime) {
+				oldestEventTime = ts.time
 			}
 		}
 	}
@@ -134,9 +148,46 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	const targetDataPoints = 160
 	allTimestamps = d.collectSupplementalTimestamps(ctx, username, allTimestamps, targetDataPoints)
 
+	return d.analyzeTimestampsCore(ctx, username, allTimestamps, orgCounts, claimedTimezone, oldestEventTime)
+}
+
+//nolint:gocognit,revive,maintidx // Complex timezone detection logic requires detailed analysis
+func (d *Detector) analyzeActivityTimestampsWithoutSupplemental(ctx context.Context, username string, allTimestamps []timestampEntry, orgCounts map[string]int, claimedTimezone string) *Result {
+	// Track the oldest event to check data coverage
+	var oldestEventTime time.Time
+	if len(allTimestamps) > 0 {
+		oldestEventTime = allTimestamps[0].time
+		for _, ts := range allTimestamps {
+			if ts.time.Before(oldestEventTime) {
+				oldestEventTime = ts.time
+			}
+		}
+	}
+
+	// When we have UserContext, we already have all the data including supplemental activity
+	// So we can skip the supplemental collection step
+
+	return d.analyzeTimestampsCore(ctx, username, allTimestamps, orgCounts, claimedTimezone, oldestEventTime)
+}
+
+//nolint:gocognit,revive,maintidx // Complex timezone detection logic requires detailed analysis
+func (d *Detector) analyzeTimestampsCore(ctx context.Context, username string, allTimestamps []timestampEntry, orgCounts map[string]int, claimedTimezone string, oldestEventTime time.Time) *Result {
 	// Filter and sort timestamps, then apply progressive time window
+	const targetDataPoints = 160
 	allTimestamps = filterAndSortTimestamps(allTimestamps, 5)
 	allTimestamps = applyProgressiveTimeWindow(allTimestamps, targetDataPoints)
+
+	// Log each timeline item for debugging
+	d.logger.Debug("Final timeline assembled", "username", username, "total_items", len(allTimestamps))
+	for i, entry := range allTimestamps {
+		d.logger.Debug("timeline item",
+			"index", i,
+			"date", entry.time.Format("2006-01-02 15:04:05"),
+			"source", entry.source,
+			"repository", entry.repository,
+			"title", entry.title,
+			"org", entry.org)
+	}
 
 	// Deduplicate all unique timestamps (no cap with adaptive collection)
 	uniqueTimestamps := make(map[time.Time]bool)
@@ -193,15 +244,15 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		}
 	}
 
-	// If we have no valid timestamps, use the event dates as fallback
-	if oldestActivity.IsZero() && len(events) > 0 {
-		// Find oldest and newest from the raw events
-		for _, event := range events {
-			if oldestActivity.IsZero() || event.CreatedAt.Before(oldestActivity) {
-				oldestActivity = event.CreatedAt
+	// If we have no valid timestamps, use the timestamp dates as fallback
+	if oldestActivity.IsZero() && len(allTimestamps) > 0 {
+		// Find oldest and newest from the timestamps
+		for _, ts := range allTimestamps {
+			if oldestActivity.IsZero() || ts.time.Before(oldestActivity) {
+				oldestActivity = ts.time
 			}
-			if newestActivity.IsZero() || event.CreatedAt.After(newestActivity) {
-				newestActivity = event.CreatedAt
+			if newestActivity.IsZero() || ts.time.After(newestActivity) {
+				newestActivity = ts.time
 			}
 		}
 	}
@@ -876,7 +927,7 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 	// UNLESS we have strong evidence for Europe (e.g., Polish name)
 	if suspiciousWorkHours && alternativeTimezone == "UTC+8" && offsetInt <= 3 {
 		// Get user's full name to check for regional indicators
-		user, err := d.githubClient.FetchUserEnhancedGraphQL(ctx, username)
+		user, _, _, _, err := d.githubClient.FetchUserEnhancedGraphQL(ctx, username)
 		if err != nil && !errors.Is(err, github.ErrNoGitHubToken) && !errors.Is(err, github.ErrUserNotFound) {
 			d.logger.Debug("failed to fetch user for regional check", "username", username, "error", err)
 		}
@@ -974,8 +1025,9 @@ func (d *Detector) tryActivityPatternsWithEvents(ctx context.Context, username s
 		Timezone:         detectedTimezone,
 		ActivityTimezone: detectedTimezone, // Pure activity-based result
 		SleepHoursUTC:    refinedSleepHours,
-		SleepRangesLocal: sleepRanges,  // Pre-calculated sleep ranges in local time
-		SleepBucketsUTC:  sleepBuckets, // 30-minute resolution sleep periods
+		SleepRangesLocal: sleepRanges,   // Pre-calculated sleep ranges in local time
+		SleepBucketsUTC:  sleepBuckets,  // 30-minute resolution sleep periods
+		Timeline:         allTimestamps, // Store the full timeline for text sample generation
 		ActiveHoursLocal: struct {
 			Start float64 `json:"start"`
 			End   float64 `json:"end"`
@@ -1147,41 +1199,14 @@ func (d *Detector) fetchSupplementalActivityWithDepth(ctx context.Context, usern
 
 	select {
 	case res := <-ch:
-		// Convert starred timestamps to comments for inclusion in activity analysis
-		starComments := make([]github.Comment, len(res.stars))
-		for i, starTime := range res.stars {
-			var repository string
-			// Match up with repository info if available (first 25 repos returned)
-			if i < len(res.starredRepos) {
-				repository = res.starredRepos[i].FullName
-			}
-			starComments[i] = github.Comment{
-				CreatedAt:  starTime,
-				Body:       "starred repository",
-				HTMLURL:    "",
-				Repository: repository,
-			}
-		}
-
-		// Convert commit activities to comments for inclusion in activity analysis
-		commitComments := make([]github.Comment, len(res.commitActivities))
-		for i, commitActivity := range res.commitActivities {
-			commitComments[i] = github.Comment{
-				CreatedAt:  commitActivity.AuthorDate,
-				Body:       "authored commit",
-				HTMLURL:    "",
-				Repository: commitActivity.Repository,
-			}
-		}
-
-		// Combine all comment types
-		allComments := append(append(res.comments, starComments...), commitComments...)
-
+		// Return all activity types separately
 		return &ActivityData{
-			PullRequests: res.prs,
-			Issues:       res.issues,
-			Comments:     allComments,
-			StarredRepos: res.starredRepos,
+			PullRequests:     res.prs,
+			Issues:           res.issues,
+			Comments:         res.comments,
+			StarredRepos:     res.starredRepos,
+			CommitActivities: res.commitActivities,
+			StarTimestamps:   res.stars,
 		}
 	case <-ctx.Done():
 		return &ActivityData{}

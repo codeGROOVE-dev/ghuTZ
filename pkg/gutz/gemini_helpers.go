@@ -480,7 +480,7 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 	if dateRange, ok := contextData["activity_date_range"].(map[string]any); ok {
 		if totalEvents, ok := dateRange["total_events"].(int); ok {
 			if totalDays, ok := dateRange["total_days"].(int); ok {
-				fmt.Fprintf(&sb, "Activity: %d events over %d days\n", totalEvents, totalDays)
+				fmt.Fprintf(&sb, "Activity: %d data points over %d days\n", totalEvents, totalDays)
 			}
 		}
 	}
@@ -678,34 +678,11 @@ func (d *Detector) formatEvidenceForGemini(contextData map[string]any) string {
 		sb.WriteString("\n")
 	}
 
-	// Commit messages can reveal language patterns and work style.
-	if commitSamples, ok := contextData["commit_message_samples"].([]CommitMessageSample); ok && len(commitSamples) > 0 {
-		sb.WriteString("Recent Commit Messages:\n")
-		for i, sample := range commitSamples {
-			if i >= maxRecentCommits {
-				break
-			}
-			msg := sample.Message
-			if len(msg) > commitMessageMaxLen {
-				msg = msg[:commitMessageMaxLen] + "..."
-			}
-			repoInfo := ""
-			if sample.Repository != "" {
-				repoInfo = " - " + sample.Repository
-			}
-			fmt.Fprintf(&sb, "* \"%s\"%s\n", msg, repoInfo)
-		}
-		sb.WriteString("\n")
-	}
-
-	// Text samples provide language and cultural indicators.
+	// Text samples from timeline provide language and cultural indicators
 	if textSamples, ok := contextData["text_samples"].([]string); ok && len(textSamples) > 0 {
-		sb.WriteString("Text samples from PRs/issues/comments (with source repository):\n")
-		for i, sample := range textSamples {
-			if i >= maxTextSamples {
-				break
-			}
-			fmt.Fprintf(&sb, "%s\n", sample)
+		sb.WriteString("Recent writing samples (PRs/Issues/Comments/Commits/Gists):\n")
+		for _, sample := range textSamples {
+			fmt.Fprintf(&sb, "* %s\n", sample)
 		}
 		sb.WriteString("\n")
 	}

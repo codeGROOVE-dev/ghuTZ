@@ -515,7 +515,7 @@ func printActivitySummary(result *gutz.Result) {
 		newestStr := result.ActivityDateRange.NewestActivity.Format("2006-01-02")
 
 		if totalEvents > 0 {
-			fmt.Printf("📊 Activity:      %d events from %s to %s",
+			fmt.Printf("📊 Activity:      %d data points from %s to %s",
 				totalEvents,
 				oldestStr,
 				newestStr)
