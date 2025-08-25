@@ -110,6 +110,17 @@ type ActiveHours struct {
 	End   float64 `json:"end"`
 }
 
+// ActivityPeriod represents a continuous period of activity during the day.
+type ActivityPeriod struct {
+	Type          string  `json:"type,omitempty"`
+	StartLocal    float64 `json:"start_local"`
+	EndLocal      float64 `json:"end_local"`
+	StartUTC      float64 `json:"start_utc"`
+	EndUTC        float64 `json:"end_utc"`
+	Activity      int     `json:"activity"`
+	DurationHours float64 `json:"duration_hours"`
+}
+
 // SleepRange represents a sleep period.
 type SleepRange struct {
 	Start    float64 `json:"start"`
@@ -388,14 +399,13 @@ type OrgActivity struct {
 // Result represents timezone detection results.
 type Result struct {
 	DetectionTime              time.Time              `json:"detection_time"`
+	Verification               *VerificationResult    `json:"verification,omitempty"`
 	CreatedAt                  *time.Time             `json:"created_at,omitempty"`
 	HourlyOrganizationActivity map[int]map[string]int `json:"hourly_organization_activity,omitempty"`
 	HalfHourlyActivityUTC      map[float64]int        `json:"half_hourly_activity_utc,omitempty"`
-	Timeline                   []timestampEntry       `json:"-"` // Don't serialize, internal use only
 	Location                   *Location              `json:"location,omitempty"`
-	Verification               *VerificationResult    `json:"verification,omitempty"`
-	GeminiReasoning            string                 `json:"gemini_reasoning,omitempty"`
 	Name                       string                 `json:"name,omitempty"`
+	GeminiReasoning            string                 `json:"gemini_reasoning,omitempty"`
 	GeminiSuggestedLocation    string                 `json:"gemini_suggested_location,omitempty"`
 	Username                   string                 `json:"username"`
 	Timezone                   string                 `json:"timezone"`
@@ -406,15 +416,17 @@ type Result struct {
 	GeminiMismatchReason       string                 `json:"gemini_mismatch_reason,omitempty"`
 	ActivityDateRange          DateRange              `json:"activity_date_range,omitempty"`
 	SleepHoursUTC              []int                  `json:"sleep_hours_utc,omitempty"`
+	ActivityPeriods            []ActivityPeriod       `json:"activity_periods,omitempty"`
 	TopOrganizations           []OrgActivity          `json:"top_organizations"`
 	TimezoneCandidates         []timezone.Candidate   `json:"timezone_candidates,omitempty"`
 	DataSources                []string               `json:"data_sources,omitempty"`
 	SleepRangesLocal           []SleepRange           `json:"sleep_ranges_local,omitempty"`
 	SleepBucketsUTC            []float64              `json:"sleep_buckets_utc,omitempty"`
-	LunchHoursLocal            LunchBreak             `json:"lunch_hours_local,omitempty"`
+	Timeline                   []timestampEntry       `json:"-"`
 	PeakProductivityLocal      PeakTime               `json:"peak_productivity_local"`
 	PeakProductivityUTC        PeakTime               `json:"peak_productivity_utc"`
 	LunchHoursUTC              LunchBreak             `json:"lunch_hours_utc,omitempty"`
+	LunchHoursLocal            LunchBreak             `json:"lunch_hours_local,omitempty"`
 	ActiveHoursLocal           ActiveHours            `json:"active_hours_local,omitempty"`
 	ActiveHoursUTC             ActiveHours            `json:"active_hours_utc,omitempty"`
 	LocationConfidence         float64                `json:"location_confidence,omitempty"`

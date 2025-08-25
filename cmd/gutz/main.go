@@ -445,14 +445,41 @@ func abs(n int) int {
 }
 
 func printWorkSchedule(result *gutz.Result) {
-	if result.ActiveHoursLocal.Start == 0 && result.ActiveHoursLocal.End == 0 {
+	// Check if we have multiple activity periods to display
+	if len(result.ActivityPeriods) > 1 {
+		// Show multiple activity periods
+		fmt.Printf("🏃 Activity Periods (%s):\n", result.Timezone)
+
+		// Define emoji for different period types
+		periodEmoji := map[string]string{
+			"morning":       "🌅",
+			"afternoon":     "☀️",
+			"evening":       "🌆",
+			"late_night":    "🌙",
+			"early_morning": "🌄",
+		}
+
+		for _, period := range result.ActivityPeriods {
+			emoji := periodEmoji[period.Type]
+			if emoji == "" {
+				emoji = "⏰"
+			}
+			fmt.Printf("   %s %s → %s (%.1fh, %d events)\n",
+				emoji,
+				formatHour(period.StartLocal),
+				formatHour(period.EndLocal),
+				period.DurationHours,
+				period.Activity)
+		}
+	} else if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
+		// Fall back to single period display
+		fmt.Printf("🏃 Active Time:   %s → %s (%s)",
+			formatHour(result.ActiveHoursLocal.Start),
+			formatHour(result.ActiveHoursLocal.End),
+			result.Timezone)
+	} else {
 		return
 	}
-
-	fmt.Printf("🏃 Active Time:   %s → %s (%s)",
-		formatHour(result.ActiveHoursLocal.Start),
-		formatHour(result.ActiveHoursLocal.End),
-		result.Timezone)
 
 	if result.LunchHoursUTC.Confidence > 0 {
 		fmt.Printf("\n🍽️  Lunch Break:   %s → %s (%s)",

@@ -1007,6 +1007,9 @@ func (d *Detector) analyzeTimestampsCore(ctx context.Context, username string, a
 	// Calculate sleep ranges from buckets for 30-minute granularity
 	sleepRanges := CalculateSleepRangesFromBuckets(sleepBuckets, detectedTimezone)
 
+	// Detect and classify all activity periods
+	activityPeriods := ClassifyActivityPeriods(halfHourCounts, offsetInt)
+
 	result := &Result{
 		Username:         username,
 		Timezone:         detectedTimezone,
@@ -1035,6 +1038,7 @@ func (d *Detector) analyzeTimestampsCore(ctx context.Context, username string, a
 		HalfHourlyActivityUTC:      halfHourCounts,  // Store 30-minute resolution data
 		HourlyOrganizationActivity: hourOrgActivity, // Store org-specific activity
 		TimezoneCandidates:         candidates,      // Top 3 timezone candidates with analysis
+		ActivityPeriods:            activityPeriods, // Multiple activity periods throughout the day
 	}
 
 	// Add activity date range information
