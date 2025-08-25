@@ -11,9 +11,15 @@ import (
 // - Ends when we hit two consecutive buckets with 3+ events
 // - Maximum 12 hours per rest period.
 // - Strongly prefers nighttime periods (starting search at 9pm local time).
+func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
+	return DetectSleepPeriodsWithOffset(halfHourCounts, 0)
+}
+
+// DetectSleepPeriodsWithOffset identifies sleep periods for a specific timezone offset.
+// The offset parameter adjusts the search to look for sleep at appropriate local times.
 //
-//nolint:gocognit // Complex sleep detection algorithm
-func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 { //nolint:revive // Complex sleep detection
+//nolint:gocognit,revive,maintidx // Complex sleep detection algorithm
+func DetectSleepPeriodsWithOffset(halfHourCounts map[float64]int, timezoneOffset int) []float64 {
 	// Find all potential rest periods
 	type restPeriod struct {
 		buckets []float64
@@ -23,25 +29,58 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 	}
 	var allPeriods []restPeriod
 
-	// Start search at 21:00 (9pm) and scan through all 48 half-hour buckets
-	// This gives preference to nighttime sleep periods
+	// Calculate the UTC hour that corresponds to 21:00 (9pm) in the target timezone
+	// For example, if timezoneOffset is +8 (China), 21:00 local = 13:00 UTC
+	localNightStart := 21.0 // 9pm local time
+	utcNightStart := localNightStart - float64(timezoneOffset)
+	// Normalize to 0-24 range
+	for utcNightStart < 0 {
+		utcNightStart += 24
+	}
+	for utcNightStart >= 24 {
+		utcNightStart -= 24
+	}
+
+	// Start search at the UTC time that corresponds to 9pm local
+	// This gives preference to nighttime sleep periods in the target timezone
 	searchOrder := make([]float64, 0, 48)
-	// First add 21:00 to 09:00 (nighttime hours)
-	for h := 21.0; h < 24.0; h += 0.5 {
+
+	// Add 12 hours starting from utcNightStart (covers 9pm to 9am local)
+	for i := range 24 { // 24 half-hour buckets = 12 hours
+		h := utcNightStart + float64(i)*0.5
+		// Wrap around at 24
+		for h >= 24.0 {
+			h -= 24.0
+		}
 		searchOrder = append(searchOrder, h)
 	}
-	for h := 0.0; h < 9.0; h += 0.5 {
+
+	// Then add the remaining daytime hours (less preferred)
+	for i := 24; i < 48; i++ { // Remaining 24 half-hour buckets
+		h := utcNightStart + float64(i)*0.5
+		// Wrap around at 24
+		for h >= 24.0 {
+			h -= 24.0
+		}
 		searchOrder = append(searchOrder, h)
 	}
-	// Then add daytime hours (9:00 to 21:00) - less preferred
-	for h := 9.0; h < 21.0; h += 0.5 {
-		searchOrder = append(searchOrder, h)
+
+	// Calculate total activity to determine if we have sparse data
+	totalActivity := 0
+	for _, count := range halfHourCounts {
+		totalActivity += count
+	}
+
+	// For sparse data (< 50 events total), use stricter criteria
+	quietThreshold := 2
+	if totalActivity < 50 {
+		quietThreshold = 0 // Only consider buckets with NO activity as quiet
 	}
 
 	// Scan through buckets in our preferred order
 	for _, startBucket := range searchOrder {
 		// Skip if this bucket is active
-		if halfHourCounts[startBucket] > 2 {
+		if halfHourCounts[startBucket] > quietThreshold {
 			continue
 		}
 
@@ -65,14 +104,22 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 				previousCount = -1
 			} else {
 				// Halting conditions for end of sleep:
-				// 1. Two consecutive active buckets (2+ followed by 3+)
-				// 2. A burst of activity (3+ followed by 2+) indicating wake-up
-				if (previousCount >= 2 && count >= 3) || (previousCount >= 3 && count >= 2) {
-					// Don't include the previous bucket if it's too active
-					if len(currentPeriod) > 0 && previousCount >= 2 {
-						currentPeriod = currentPeriod[:len(currentPeriod)-1]
+				// For sparse data: any activity ends sleep
+				// For normal data: two consecutive active buckets
+				if totalActivity < 50 {
+					// Sparse data: any activity > 0 ends sleep
+					if count > 0 && previousCount >= 0 {
+						break
 					}
-					break
+				} else {
+					// Normal data: original logic
+					if (previousCount >= 2 && count >= 3) || (previousCount >= 3 && count >= 2) {
+						// Don't include the previous bucket if it's too active
+						if len(currentPeriod) > 0 && previousCount >= 2 {
+							currentPeriod = currentPeriod[:len(currentPeriod)-1]
+						}
+						break
+					}
 				}
 
 				// Include this bucket in the period (it has ≤5 events)
@@ -95,7 +142,11 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 		// If we found a rest period of 4+ hours (8+ buckets), save it
 		if len(currentPeriod) >= 8 {
 			// Calculate preference score based on how "nighttime" this period is
-			score := calculateNighttimeScore(currentPeriod)
+			score := calculateNighttimeScore(currentPeriod, timezoneOffset)
+			// For sparse data, skip periods with zero nighttime score (likely work hours)
+			if totalActivity < 50 && score == 0.0 {
+				continue
+			}
 			allPeriods = append(allPeriods, restPeriod{
 				buckets: currentPeriod,
 				start:   startBucket,
@@ -107,6 +158,16 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 
 	// Sort periods by preference: nighttime score first, then length
 	sort.Slice(allPeriods, func(i, j int) bool {
+		// For sparse data, VERY strongly prefer nighttime periods
+		if totalActivity < 50 {
+			// Only consider periods with >50% nighttime overlap
+			iIsNight := allPeriods[i].score > 0.5
+			jIsNight := allPeriods[j].score > 0.5
+			if iIsNight != jIsNight {
+				return iIsNight
+			}
+		}
+
 		// Strongly prefer nighttime periods
 		if allPeriods[i].score != allPeriods[j].score {
 			return allPeriods[i].score > allPeriods[j].score
@@ -191,15 +252,39 @@ func DetectSleepPeriodsWithHalfHours(halfHourCounts map[float64]int) []float64 {
 }
 
 // calculateNighttimeScore returns a score indicating how much a period overlaps with typical nighttime hours.
-// Nighttime is considered 21:00-09:00. Higher scores mean more nighttime overlap.
-func calculateNighttimeScore(buckets []float64) float64 {
+// Nighttime is considered 21:00-09:00 LOCAL time. Higher scores mean more nighttime overlap.
+// Periods during work hours (9:00-17:00 local) get heavily penalized.
+func calculateNighttimeScore(buckets []float64, timezoneOffset int) float64 {
 	nighttimeCount := 0
+	worktimeCount := 0
+
 	for _, bucket := range buckets {
-		// Hours 21:00-23:30 and 00:00-08:30 are considered nighttime
-		if bucket >= 21.0 || bucket < 9.0 {
+		// Convert UTC bucket to local time
+		localHour := bucket + float64(timezoneOffset)
+		// Normalize to 0-24 range
+		for localHour >= 24.0 {
+			localHour -= 24.0
+		}
+		for localHour < 0.0 {
+			localHour += 24.0
+		}
+
+		// Hours 21:00-23:30 and 00:00-08:30 LOCAL are considered nighttime
+		if localHour >= 21.0 || localHour < 9.0 {
 			nighttimeCount++
 		}
+
+		// Hours 9:00-17:00 LOCAL are work hours - sleep shouldn't be here
+		if localHour >= 9.0 && localHour < 17.0 {
+			worktimeCount++
+		}
 	}
+
+	// If more than 30% of the period is during work hours, heavily penalize
+	if float64(worktimeCount)/float64(len(buckets)) > 0.3 {
+		return 0.0 // This can't be a sleep period
+	}
+
 	// Return percentage of buckets that are during nighttime
 	return float64(nighttimeCount) / float64(len(buckets))
 }

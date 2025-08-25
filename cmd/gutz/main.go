@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/codeGROOVE-dev/guTZ/pkg/gutz"
+	"github.com/codeGROOVE-dev/guTZ/pkg/sleep"
 	"github.com/codeGROOVE-dev/guTZ/pkg/timezone"
 	"github.com/codeGROOVE-dev/guTZ/pkg/tzconvert"
 )
@@ -213,6 +214,16 @@ func main() { //nolint:gocognit,revive,maintidx // Main function orchestrates co
 					End:   peakLocalEnd,
 					Count: peakCount,
 				}
+			}
+
+			// Recalculate sleep periods for the forced timezone offset
+			// This is critical to avoid mismatched sleep markers in the histogram
+			if result.HalfHourlyActivityUTC != nil {
+				sleepBuckets := sleep.DetectSleepPeriodsWithOffset(result.HalfHourlyActivityUTC, *forceOffset)
+				modifiedResult.SleepBucketsUTC = sleepBuckets
+
+				// Recalculate sleep ranges for the forced timezone display
+				modifiedResult.SleepRangesLocal = gutz.CalculateSleepRangesFromBuckets(sleepBuckets, displayTimezone)
 			}
 
 			displayResult = &modifiedResult

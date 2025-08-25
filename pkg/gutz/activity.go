@@ -972,8 +972,8 @@ func (d *Detector) analyzeTimestampsCore(ctx context.Context, username string, a
 	// Active hours are already in UTC from calculateTypicalActiveHours
 	// No conversion needed for storage
 
-	// Detect sleep periods using 30-minute resolution with buffer
-	sleepBuckets := sleep.DetectSleepPeriodsWithHalfHours(halfHourCounts)
+	// Detect sleep periods using 30-minute resolution with timezone awareness
+	sleepBuckets := sleep.DetectSleepPeriodsWithOffset(halfHourCounts, offsetInt)
 	d.logger.Info("detected sleep buckets UTC",
 		"username", username,
 		"sleepBuckets", sleepBuckets,
