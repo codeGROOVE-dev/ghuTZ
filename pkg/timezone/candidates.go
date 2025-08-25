@@ -60,16 +60,6 @@ func findBestWorkStartForTimezone(halfHourCounts map[float64]int, testOffset int
 		}
 	}
 
-	// Debug: log found periods
-	if len(periods) > 0 && testOffset == 0 {
-		fmt.Printf("DEBUG UTC%+d: found %d periods: ", testOffset, len(periods))
-		for _, p := range periods {
-			localStart := math.Mod(p.startUTC+float64(testOffset)+24, 24)
-			fmt.Printf("%.1f(local:%.1f) ", p.startUTC, localStart)
-		}
-		fmt.Println()
-	}
-
 	if len(periods) == 0 {
 		return fallbackStart // No periods found, use fallback
 	}
@@ -83,18 +73,19 @@ func findBestWorkStartForTimezone(halfHourCounts map[float64]int, testOffset int
 		score := 0.0
 
 		// Strong preference for morning starts (7am-11am)
-		if localStart >= 7 && localStart <= 11 {
+		switch {
+		case localStart >= 7 && localStart <= 11:
 			score += 100
 			if localStart >= 8 && localStart <= 10 {
 				score += 50 // Extra bonus for 8-10am
 			}
-		} else if localStart >= 6 && localStart < 7 {
+		case localStart >= 6 && localStart < 7:
 			score += 50 // 6am is early but acceptable
-		} else if localStart >= 11 && localStart <= 14 {
+		case localStart >= 11 && localStart <= 14:
 			score += 20 // Afternoon start is less ideal
-		} else if localStart >= 14 && localStart <= 18 {
+		case localStart >= 14 && localStart <= 18:
 			score -= 50 // Late afternoon start is suspicious
-		} else {
+		default:
 			score -= 100 // Evening/night/early morning start is very unlikely
 		}
 
@@ -132,12 +123,7 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		// This is crucial for users with multiple activity periods (morning work + evening coding)
 		testActiveStartUTC := findBestWorkStartForTimezone(halfHourCounts, testOffset, activeStart)
 
-		// Debug: Log work start detection for all users and timezones
-		if testActiveStartUTC != activeStart {
-			fmt.Printf("DEBUG [%s] UTC%+d: work start changed from %.1f to %.1f (local: %.1f)\n",
-				username, testOffset, activeStart, testActiveStartUTC,
-				math.Mod(testActiveStartUTC+float64(testOffset)+24, 24))
-		}
+		// Work start was changed from the global active start
 		testWorkStart := math.Mod(testActiveStartUTC+float64(testOffset)+24, 24)
 		firstActivityLocal := testWorkStart
 
@@ -487,16 +473,17 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			afternoonRatio := float64(noonToSixActivity) / float64(totalActivity)
 
 			// If there's more activity midnight-6am than noon-6pm, this timezone is WRONG
-			if earlyMorningActivity > noonToSixActivity && earlyMorningRatio > 0.15 {
+			switch {
+			case earlyMorningActivity > noonToSixActivity && earlyMorningRatio > 0.15:
 				// Massive penalty for having more night activity than afternoon
 				testConfidence -= 50
 				adjustments = append(adjustments, fmt.Sprintf("-50 (MORE night activity %.1f%% than afternoon %.1f%%)",
 					earlyMorningRatio*100, afternoonRatio*100))
-			} else if earlyMorningRatio > 0.25 {
+			case earlyMorningRatio > 0.25:
 				// Large penalty for excessive early morning activity (>25% of total)
 				testConfidence -= 30
 				adjustments = append(adjustments, fmt.Sprintf("-30 (excessive midnight-6am activity: %.1f%%)", earlyMorningRatio*100))
-			} else if earlyMorningRatio > 0.15 {
+			case earlyMorningRatio > 0.15:
 				// Moderate penalty for substantial early morning activity (>15%)
 				testConfidence -= 10
 				adjustments = append(adjustments, fmt.Sprintf("-10 (high midnight-6am activity: %.1f%%)", earlyMorningRatio*100))
@@ -1096,9 +1083,7 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 		// Scale confidence by 1.5x for better dynamic range
 		testConfidence *= 1.5
 
-		// Log ALL timezones with confidence scores for ALL users
-		fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f adjustments=%v\n",
-			username, testOffset, testConfidence, adjustments)
+		// All timezones have been evaluated with confidence scores
 
 		// Add ALL candidates regardless of confidence to ensure complete coverage
 		// This ensures --force-offset works and profile locations are always considered

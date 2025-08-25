@@ -148,22 +148,22 @@ func (c *Client) FetchUserEnhancedGraphQL( //nolint:revive // Multiple return va
 		} else {
 			// Merge the additional data (avoiding duplicates based on URL)
 			existingPRURLs := make(map[string]bool)
-			for _, pr := range pullRequests {
-				existingPRURLs[pr.HTMLURL] = true
+			for i := range pullRequests {
+				existingPRURLs[pullRequests[i].HTMLURL] = true
 			}
-			for _, pr := range additionalPRs {
-				if !existingPRURLs[pr.HTMLURL] {
-					pullRequests = append(pullRequests, pr)
+			for i := range additionalPRs {
+				if !existingPRURLs[additionalPRs[i].HTMLURL] {
+					pullRequests = append(pullRequests, additionalPRs[i])
 				}
 			}
 
 			existingIssueURLs := make(map[string]bool)
-			for _, issue := range issues {
-				existingIssueURLs[issue.HTMLURL] = true
+			for i := range issues {
+				existingIssueURLs[issues[i].HTMLURL] = true
 			}
-			for _, issue := range additionalIssues {
-				if !existingIssueURLs[issue.HTMLURL] {
-					issues = append(issues, issue)
+			for i := range additionalIssues {
+				if !existingIssueURLs[additionalIssues[i].HTMLURL] {
+					issues = append(issues, additionalIssues[i])
 				}
 			}
 
@@ -247,12 +247,15 @@ func (c *Client) FetchActivityWithGraphQL(ctx context.Context, username string) 
 	// Calculate max pages based on how sparse the data is
 	// If we have very few data points, fetch more pages
 	maxAdditionalPages := 3 // Default to fetching more pages
-	if totalDataPoints < 20 {
+	switch {
+	case totalDataPoints < 20:
 		maxAdditionalPages = 8 // Fetch up to 8 additional pages for very sparse data
-	} else if totalDataPoints < 50 {
+	case totalDataPoints < 50:
 		maxAdditionalPages = 6 // Fetch up to 6 additional pages for sparse data
-	} else if totalDataPoints < 100 {
+	case totalDataPoints < 100:
 		maxAdditionalPages = 4 // Fetch up to 4 additional pages for moderate data
+	default:
+		// Keep default of 3 pages
 	}
 
 	pagesFetched := 1

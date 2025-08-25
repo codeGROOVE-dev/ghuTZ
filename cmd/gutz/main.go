@@ -446,7 +446,8 @@ func abs(n int) int {
 
 func printWorkSchedule(result *gutz.Result) {
 	// Check if we have multiple activity periods to display
-	if len(result.ActivityPeriods) > 1 {
+	switch {
+	case len(result.ActivityPeriods) > 1:
 		// Show multiple activity periods
 		fmt.Printf("🏃 Activity Periods (%s):\n", result.Timezone)
 
@@ -471,13 +472,13 @@ func printWorkSchedule(result *gutz.Result) {
 				period.DurationHours,
 				period.Activity)
 		}
-	} else if result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0 {
+	case result.ActiveHoursLocal.Start != 0 || result.ActiveHoursLocal.End != 0:
 		// Fall back to single period display
 		fmt.Printf("🏃 Active Time:   %s → %s (%s)",
 			formatHour(result.ActiveHoursLocal.Start),
 			formatHour(result.ActiveHoursLocal.End),
 			result.Timezone)
-	} else {
+	default:
 		return
 	}
 
