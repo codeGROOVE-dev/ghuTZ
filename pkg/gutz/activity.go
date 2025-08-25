@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codeGROOVE-dev/guTZ/pkg/constants"
 	"github.com/codeGROOVE-dev/guTZ/pkg/github"
 	"github.com/codeGROOVE-dev/guTZ/pkg/lunch"
 	"github.com/codeGROOVE-dev/guTZ/pkg/sleep"
@@ -145,9 +146,8 @@ func (d *Detector) analyzeActivityTimestampsWithoutSupplemental(ctx context.Cont
 //nolint:gocognit,revive,maintidx // Complex timezone detection logic requires detailed analysis
 func (d *Detector) analyzeTimestampsCore(ctx context.Context, username string, allTimestamps []timestampEntry, orgCounts map[string]int, claimedTimezone string, _ time.Time) *Result {
 	// Filter and sort timestamps, then apply progressive time window
-	const targetDataPoints = 160
 	allTimestamps = filterAndSortTimestamps(allTimestamps, 5)
-	allTimestamps = applyProgressiveTimeWindow(allTimestamps, targetDataPoints)
+	allTimestamps = applyProgressiveTimeWindow(allTimestamps, constants.TargetDataPoints)
 
 	// Log each timeline item for debugging
 	d.logger.Debug("Final timeline assembled", "username", username, "total_items", len(allTimestamps))

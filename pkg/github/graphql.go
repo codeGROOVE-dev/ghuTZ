@@ -474,7 +474,7 @@ func (c *GraphQLClient) FetchComments(ctx context.Context, username string, issu
 	query := `
 	query($login: String!, $issueCursor: String, $commitCursor: String) {
 		user(login: $login) {
-			issueComments(first: 100, orderBy: {field: CREATED_AT, direction: DESC}, after: $issueCursor) {
+			issueComments(first: 100, orderBy: {field: UPDATED_AT, direction: DESC}, after: $issueCursor) {
 				nodes {
 					body
 					createdAt
@@ -485,7 +485,7 @@ func (c *GraphQLClient) FetchComments(ctx context.Context, username string, issu
 					endCursor
 				}
 			}
-			commitComments(first: 100, orderBy: {field: CREATED_AT, direction: DESC}, after: $commitCursor) {
+			commitComments(first: 100, after: $commitCursor) {
 				nodes {
 					body
 					createdAt

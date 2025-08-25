@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/codeGROOVE-dev/guTZ/pkg/constants"
 )
 
 // Common errors.
@@ -125,6 +127,54 @@ func (c *Client) FetchUserEnhancedGraphQL( //nolint:revive // Multiple return va
 	c.logger.Debug("extracted PRs and issues from GraphQL", "username", username,
 		"pr_count", len(pullRequests), "issue_count", len(issues))
 
+	// Check if we need to fetch more data for better timezone detection
+	totalDataPoints := len(pullRequests) + len(issues)
+	minDesiredDataPoints := constants.TargetDataPoints
+
+	// If we need more data, fetch additional pages using the paginated API
+	if totalDataPoints < minDesiredDataPoints {
+		// Log prominently when we need to fetch more data
+		c.logger.Info("📊 INSUFFICIENT DATA - FETCHING MORE",
+			"username", username,
+			"initial_data_points", totalDataPoints,
+			"target", minDesiredDataPoints,
+			"reason", "Need more data for accurate timezone detection")
+
+		// Fetch additional pages using the paginated activity API
+		additionalPRs, additionalIssues, err := c.FetchActivityWithGraphQL(ctx, username)
+		if err != nil {
+			c.logger.Warn("failed to fetch additional activity data", "error", err)
+			// Continue with what we have rather than failing entirely
+		} else {
+			// Merge the additional data (avoiding duplicates based on URL)
+			existingPRURLs := make(map[string]bool)
+			for _, pr := range pullRequests {
+				existingPRURLs[pr.HTMLURL] = true
+			}
+			for _, pr := range additionalPRs {
+				if !existingPRURLs[pr.HTMLURL] {
+					pullRequests = append(pullRequests, pr)
+				}
+			}
+
+			existingIssueURLs := make(map[string]bool)
+			for _, issue := range issues {
+				existingIssueURLs[issue.HTMLURL] = true
+			}
+			for _, issue := range additionalIssues {
+				if !existingIssueURLs[issue.HTMLURL] {
+					issues = append(issues, issue)
+				}
+			}
+
+			c.logger.Info("📈 FETCHED ADDITIONAL DATA",
+				"username", username,
+				"total_prs_now", len(pullRequests),
+				"total_issues_now", len(issues),
+				"total_data_points_now", len(pullRequests)+len(issues))
+		}
+	}
+
 	return user, repositories, pullRequests, issues, nil
 }
 
@@ -190,17 +240,45 @@ func (c *Client) FetchActivityWithGraphQL(ctx context.Context, username string) 
 	}
 
 	// If we need more data and it's available, fetch additional pages
-	// (but limit to avoid excessive API usage)
-	maxAdditionalPages := 2
+	// Calculate how many pages we need based on current data density
+	totalDataPoints := len(prs) + len(issues)
+	minDesiredDataPoints := constants.TargetDataPoints // Use the shared constant for consistency
+
+	// Calculate max pages based on how sparse the data is
+	// If we have very few data points, fetch more pages
+	maxAdditionalPages := 3 // Default to fetching more pages
+	if totalDataPoints < 20 {
+		maxAdditionalPages = 8 // Fetch up to 8 additional pages for very sparse data
+	} else if totalDataPoints < 50 {
+		maxAdditionalPages = 6 // Fetch up to 6 additional pages for sparse data
+	} else if totalDataPoints < 100 {
+		maxAdditionalPages = 4 // Fetch up to 4 additional pages for moderate data
+	}
+
 	pagesFetched := 1
 
 	prCursor := activityData.User.PullRequests.PageInfo.EndCursor
 	issueCursor := activityData.User.Issues.PageInfo.EndCursor
 
-	for pagesFetched < maxAdditionalPages {
+	// Log prominently when we need to fetch more data
+	if totalDataPoints < minDesiredDataPoints {
+		c.logger.Info("📊 INSUFFICIENT DATA - FETCHING MORE",
+			"username", username,
+			"initial_data_points", totalDataPoints,
+			"target", minDesiredDataPoints,
+			"max_additional_pages", maxAdditionalPages,
+			"reason", "Need more data for accurate timezone detection")
+	}
+
+	c.logger.Debug("determining additional pages to fetch",
+		"initial_data_points", totalDataPoints,
+		"max_additional_pages", maxAdditionalPages,
+		"min_desired", minDesiredDataPoints)
+
+	for pagesFetched < maxAdditionalPages && totalDataPoints < minDesiredDataPoints {
 		if !activityData.User.PullRequests.PageInfo.HasNextPage &&
 			!activityData.User.Issues.PageInfo.HasNextPage {
-			break // No more data
+			break // No more data available
 		}
 
 		// Fetch next page
@@ -247,10 +325,16 @@ func (c *Client) FetchActivityWithGraphQL(ctx context.Context, username string) 
 
 		pagesFetched++
 
-		c.logger.Debug("fetched additional activity page",
+		// Update total data points count
+		totalDataPoints = len(prs) + len(issues)
+
+		// Log progress prominently
+		c.logger.Info("📈 FETCHED ADDITIONAL DATA PAGE",
 			"page", pagesFetched,
 			"new_prs", len(nextData.User.PullRequests.Nodes),
-			"new_issues", len(nextData.User.Issues.Nodes))
+			"new_issues", len(nextData.User.Issues.Nodes),
+			"total_data_points_now", totalDataPoints,
+			"target", minDesiredDataPoints)
 	}
 
 	c.logger.Info("GraphQL activity fetch complete",
@@ -329,7 +413,7 @@ func (c *Client) FetchCommentsWithGraphQL(ctx context.Context, username string) 
 		})
 	}
 
-	// Fetch one more page if available and we don't have enough data
+	// Fetch additional pages if available and we don't have enough data
 	issueCursor := ""
 	commitCursor := ""
 	hasMoreIssueComments := commentData.User.IssueComments.PageInfo.HasNextPage
@@ -342,37 +426,78 @@ func (c *Client) FetchCommentsWithGraphQL(ctx context.Context, username string) 
 		commitCursor = commentData.User.CommitComments.PageInfo.EndCursor
 	}
 
-	if (hasMoreIssueComments || hasMoreCommitComments) && len(comments) < 200 {
-		nextData, err := graphql.FetchComments(ctx, username, issueCursor, commitCursor)
-		if err == nil {
-			// Process additional issue comments
-			for _, comment := range nextData.User.IssueComments.Nodes {
-				repo := extractRepoFromURL(comment.URL)
-				comments = append(comments, Comment{
-					Body:       comment.Body,
-					CreatedAt:  comment.CreatedAt,
-					UpdatedAt:  comment.CreatedAt, // Use CreatedAt as UpdatedAt for histogram data
-					HTMLURL:    comment.URL,
-					Repository: repo,
-				})
-			}
+	// Fetch multiple pages if needed for better data coverage
+	minDesiredComments := 200
+	maxCommentPages := 3
+	commentPagesFetched := 1
 
-			// Process additional commit comments
-			for _, comment := range nextData.User.CommitComments.Nodes {
-				url := ""
-				if comment.Commit.URL != "" {
-					url = comment.Commit.URL
-				}
-				repo := extractRepoFromURL(url)
-				comments = append(comments, Comment{
-					Body:       comment.Body,
-					CreatedAt:  comment.CreatedAt,
-					UpdatedAt:  comment.CreatedAt, // Use CreatedAt as UpdatedAt for histogram data
-					HTMLURL:    url,
-					Repository: repo,
-				})
-			}
+	// Log if we need more comment data
+	if len(comments) < minDesiredComments && (hasMoreIssueComments || hasMoreCommitComments) {
+		c.logger.Info("💬 FETCHING ADDITIONAL COMMENT DATA",
+			"username", username,
+			"initial_comments", len(comments),
+			"target", minDesiredComments,
+			"max_pages", maxCommentPages)
+	}
+
+	for commentPagesFetched < maxCommentPages && len(comments) < minDesiredComments {
+		if !hasMoreIssueComments && !hasMoreCommitComments {
+			break // No more data available
 		}
+
+		nextData, err := graphql.FetchComments(ctx, username, issueCursor, commitCursor)
+		if err != nil {
+			c.logger.Warn("failed to fetch additional comment page", "error", err, "page", commentPagesFetched+1)
+			break
+		}
+
+		// Process additional issue comments
+		for _, comment := range nextData.User.IssueComments.Nodes {
+			repo := extractRepoFromURL(comment.URL)
+			comments = append(comments, Comment{
+				Body:       comment.Body,
+				CreatedAt:  comment.CreatedAt,
+				UpdatedAt:  comment.CreatedAt, // Use CreatedAt as UpdatedAt for histogram data
+				HTMLURL:    comment.URL,
+				Repository: repo,
+			})
+		}
+
+		// Process additional commit comments
+		for _, comment := range nextData.User.CommitComments.Nodes {
+			url := ""
+			if comment.Commit.URL != "" {
+				url = comment.Commit.URL
+			}
+			repo := extractRepoFromURL(url)
+			comments = append(comments, Comment{
+				Body:       comment.Body,
+				CreatedAt:  comment.CreatedAt,
+				UpdatedAt:  comment.CreatedAt, // Use CreatedAt as UpdatedAt for histogram data
+				HTMLURL:    url,
+				Repository: repo,
+			})
+		}
+
+		// Update cursors and flags for next iteration
+		hasMoreIssueComments = nextData.User.IssueComments.PageInfo.HasNextPage
+		hasMoreCommitComments = nextData.User.CommitComments.PageInfo.HasNextPage
+
+		if hasMoreIssueComments {
+			issueCursor = nextData.User.IssueComments.PageInfo.EndCursor
+		}
+		if hasMoreCommitComments {
+			commitCursor = nextData.User.CommitComments.PageInfo.EndCursor
+		}
+
+		commentPagesFetched++
+
+		c.logger.Info("💬 FETCHED COMMENT PAGE",
+			"page", commentPagesFetched,
+			"total_comments_now", len(comments),
+			"new_issue_comments", len(nextData.User.IssueComments.Nodes),
+			"new_commit_comments", len(nextData.User.CommitComments.Nodes),
+			"target", minDesiredComments)
 	}
 
 	c.logger.Info("GraphQL comment fetch complete",

@@ -62,8 +62,9 @@ func (d *Detector) collectActivityTimestampsWithContext(
 		d.logger.Info("📝 Added gist creations to timeline", "username", userCtx.Username, "count", gistCount)
 	}
 
-	// Add repository creation events to timeline
+	// Add repository events to timeline
 	repoCount := 0
+	forkCount := 0
 	d.logger.Debug("Processing repositories for timeline", "username", userCtx.Username, "total_repos", len(userCtx.Repositories))
 	for i := range userCtx.Repositories {
 		repo := &userCtx.Repositories[i]
@@ -75,12 +76,48 @@ func (d *Detector) collectActivityTimestampsWithContext(
 			continue
 		}
 
-		// Skip forks - they weren't really "created" by the user
+		// For forks, we still want the timestamp data but use different labeling
 		if repo.Fork {
-			d.logger.Debug("skipping forked repo", "repo", repo.Name)
+			// Forks provide valuable timestamp data even if we don't show them to Gemini
+			d.logger.Debug("processing forked repo for timestamps", "repo", repo.Name)
+
+			// Add fork timestamp - the CreatedAt for a fork is when the user forked it
+			allTimestamps = append(allTimestamps, timestampEntry{
+				time:       repo.CreatedAt,
+				source:     "fork_created",
+				org:        userCtx.Username, // User's own fork
+				title:      "forked repository: " + repo.Name,
+				repository: repo.FullName,
+				url:        repo.HTMLURL,
+			})
+			forkCount++
+			orgCounts[userCtx.Username]++
+
+			// Also check UpdatedAt and PushedAt for fork activity
+			if !repo.UpdatedAt.IsZero() && !repo.UpdatedAt.Equal(repo.CreatedAt) {
+				allTimestamps = append(allTimestamps, timestampEntry{
+					time:       repo.UpdatedAt,
+					source:     "fork_updated",
+					org:        userCtx.Username,
+					title:      "updated fork: " + repo.Name,
+					repository: repo.FullName,
+					url:        repo.HTMLURL,
+				})
+			}
+			if !repo.PushedAt.IsZero() && !repo.PushedAt.Equal(repo.CreatedAt) {
+				allTimestamps = append(allTimestamps, timestampEntry{
+					time:       repo.PushedAt,
+					source:     "fork_pushed",
+					org:        userCtx.Username,
+					title:      "pushed to fork: " + repo.Name,
+					repository: repo.FullName,
+					url:        repo.HTMLURL,
+				})
+			}
 			continue
 		}
 
+		// Original repositories (not forks)
 		// Use description as the main title if available, otherwise use a generic message
 		title := repo.Description
 		if title == "" {
@@ -100,10 +137,11 @@ func (d *Detector) collectActivityTimestampsWithContext(
 		orgCounts[userCtx.Username]++
 	}
 
-	if repoCount > 0 {
-		d.logger.Info("✅ Added repository creations to timeline", "username", userCtx.Username, "count", repoCount)
+	if repoCount > 0 || forkCount > 0 {
+		d.logger.Info("✅ Added repository events to timeline", "username", userCtx.Username,
+			"repos_created", repoCount, "forks", forkCount)
 	} else {
-		d.logger.Info("⚠️ No repository creations to add", "username", userCtx.Username, "total_repos", len(userCtx.Repositories))
+		d.logger.Info("⚠️ No repository events to add", "username", userCtx.Username, "total_repos", len(userCtx.Repositories))
 	}
 
 	// Add PRs from GraphQL (these supplement the event data which only covers ~30 days)
@@ -162,6 +200,40 @@ func (d *Detector) collectActivityTimestampsWithContext(
 
 	if issueCount > 0 {
 		d.logger.Info("🐛 Added issues to timeline", "username", userCtx.Username, "count", issueCount)
+	}
+
+	// Process comments for timeline
+	d.logger.Debug("Processing comments for timeline", "username", userCtx.Username, "total_comments", len(userCtx.Comments))
+	commentCount := 0
+	for i := range userCtx.Comments {
+		comment := &userCtx.Comments[i]
+		if comment.CreatedAt.IsZero() || comment.CreatedAt.Year() < 2000 {
+			d.logger.Debug("skipping comment with invalid date", "created_at", comment.CreatedAt)
+			continue
+		}
+
+		org := extractOrganization(comment.Repository)
+		// Truncate comment body for timeline entry
+		commentText := comment.Body
+		if len(commentText) > 100 {
+			commentText = commentText[:100] + "..."
+		}
+		allTimestamps = append(allTimestamps, timestampEntry{
+			time:       comment.CreatedAt,
+			source:     "comment",
+			org:        org,
+			title:      commentText,
+			repository: comment.Repository,
+			url:        comment.HTMLURL,
+		})
+		commentCount++
+		if org != "" {
+			orgCounts[org]++
+		}
+	}
+
+	if commentCount > 0 {
+		d.logger.Info("💬 Added comments to timeline", "username", userCtx.Username, "count", commentCount)
 	}
 
 	// Don't call collectSupplementalTimestamps here - we already have all the data

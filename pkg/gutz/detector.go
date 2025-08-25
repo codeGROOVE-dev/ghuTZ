@@ -670,12 +670,24 @@ func (d *Detector) fetchAllUserData(
 		mu.Unlock()
 	}()
 
-	// NOTE: PRs, Issues, and Comments are now fetched as part of the activity timeline
-	// to avoid duplicate API calls. The data will be available through the activity result.
+	// NOTE: PRs and Issues are fetched as part of the GraphQL user profile query
 	// Keeping empty slices for now to avoid breaking existing code that expects these fields.
 	userCtx.PullRequests = []github.PullRequest{}
 	userCtx.Issues = []github.Issue{}
-	userCtx.Comments = []github.Comment{}
+
+	// Fetch comments (issue comments and commit comments)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.logger.Debug("checking user comments", "username", username)
+		comments, err := d.githubClient.FetchCommentsWithGraphQL(ctx, username)
+		if err != nil {
+			d.logger.Debug("failed to fetch user comments", "username", username, "error", err)
+		}
+		mu.Lock()
+		userCtx.Comments = comments
+		mu.Unlock()
+	}()
 
 	// Fetch gists
 	wg.Add(1)
@@ -729,8 +741,7 @@ func (d *Detector) fetchAllUserData(
 	}
 
 	// Log summary
-	// Note: PRs, Issues, and Comments are fetched separately through activity analysis
-	// and not stored in userCtx to avoid duplicate API calls
+	// Note: PRs and Issues are fetched as part of the GraphQL user profile query
 	d.logger.Info("fetched all user data",
 		"username", username,
 		"events", len(userCtx.Events),
@@ -739,6 +750,7 @@ func (d *Detector) fetchAllUserData(
 		"starred", len(userCtx.StarredRepos),
 		"gists", len(userCtx.Gists),
 		"commit_activities", len(userCtx.CommitActivities),
+		"comments", len(userCtx.Comments),
 		"ssh_keys", len(userCtx.SSHKeys))
 
 	return userCtx, nil
