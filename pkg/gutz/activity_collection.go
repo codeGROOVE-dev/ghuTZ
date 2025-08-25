@@ -33,8 +33,78 @@ func (d *Detector) collectActivityTimestampsWithContext(
 
 	allTimestamps, orgCounts := d.collectActivityTimestampsWithSSHKeys(ctx, userCtx.Username, userCtx.Events, userCtx.SSHKeys)
 
-	// Add gist creation events to timeline
+	// Process gists and repositories
+	gistTimestamps, gistCount := d.processGistsForTimeline(userCtx)
+	allTimestamps = append(allTimestamps, gistTimestamps...)
+	for _, ts := range gistTimestamps {
+		if ts.org != "" {
+			orgCounts[ts.org]++
+		}
+	}
+	if gistCount > 0 {
+		d.logger.Info("📝 Added gist creations to timeline", "username", userCtx.Username, "count", gistCount)
+	}
+
+	repoTimestamps, repoCount, forkCount := d.processRepositoriesForTimeline(userCtx)
+	allTimestamps = append(allTimestamps, repoTimestamps...)
+	for _, ts := range repoTimestamps {
+		if ts.org != "" {
+			orgCounts[ts.org]++
+		}
+	}
+	if repoCount > 0 || forkCount > 0 {
+		d.logger.Info("✅ Added repository events to timeline", "username", userCtx.Username,
+			"repos_created", repoCount, "forks", forkCount)
+	} else {
+		d.logger.Info("⚠️ No repository events to add", "username", userCtx.Username, "total_repos", len(userCtx.Repositories))
+	}
+
+	// Process PRs and issues
+	prTimestamps, prCount := d.processPRsForTimeline(userCtx)
+	allTimestamps = append(allTimestamps, prTimestamps...)
+	for _, ts := range prTimestamps {
+		if ts.org != "" {
+			orgCounts[ts.org]++
+		}
+	}
+	if prCount > 0 {
+		d.logger.Info("🔀 Added pull requests to timeline", "username", userCtx.Username, "count", prCount)
+	}
+
+	issueTimestamps, issueCount := d.processIssuesForTimeline(userCtx)
+	allTimestamps = append(allTimestamps, issueTimestamps...)
+	for _, ts := range issueTimestamps {
+		if ts.org != "" {
+			orgCounts[ts.org]++
+		}
+	}
+	if issueCount > 0 {
+		d.logger.Info("🐛 Added issues to timeline", "username", userCtx.Username, "count", issueCount)
+	}
+
+	// Process comments
+	commentTimestamps, commentCount := d.processCommentsForTimeline(userCtx)
+	allTimestamps = append(allTimestamps, commentTimestamps...)
+	for _, ts := range commentTimestamps {
+		if ts.org != "" {
+			orgCounts[ts.org]++
+		}
+	}
+	if commentCount > 0 {
+		d.logger.Info("💬 Added comments to timeline", "username", userCtx.Username, "count", commentCount)
+	}
+
+	d.logger.Info("📊 Unified timeline built",
+		"username", userCtx.Username,
+		"total_events", len(allTimestamps))
+
+	return allTimestamps, orgCounts
+}
+
+// processGistsForTimeline processes gists for the activity timeline.
+func (d *Detector) processGistsForTimeline(userCtx *UserContext) (timestamps []timestampEntry, count int) {
 	gistCount := 0
+
 	d.logger.Info("📝 Processing gists for timeline", "username", userCtx.Username, "total_gists", len(userCtx.Gists))
 	for _, gist := range userCtx.Gists {
 		if gist.CreatedAt.IsZero() || gist.CreatedAt.Year() < 2000 {
@@ -46,7 +116,7 @@ func (d *Detector) collectActivityTimestampsWithContext(
 			title = "created gist: " + gist.Description
 		}
 
-		allTimestamps = append(allTimestamps, timestampEntry{
+		timestamps = append(timestamps, timestampEntry{
 			time:       gist.CreatedAt,
 			source:     "gist",
 			org:        userCtx.Username, // Gists belong to the user
@@ -55,16 +125,12 @@ func (d *Detector) collectActivityTimestampsWithContext(
 			url:        gist.HTMLURL,
 		})
 		gistCount++
-		orgCounts[userCtx.Username]++
 	}
+	return timestamps, gistCount
+}
 
-	if gistCount > 0 {
-		d.logger.Info("📝 Added gist creations to timeline", "username", userCtx.Username, "count", gistCount)
-	}
-
-	// Add repository events to timeline
-	repoCount := 0
-	forkCount := 0
+// processRepositoriesForTimeline processes repositories for the activity timeline.
+func (d *Detector) processRepositoriesForTimeline(userCtx *UserContext) (timestamps []timestampEntry, repoCount int, forkCount int) {
 	d.logger.Debug("Processing repositories for timeline", "username", userCtx.Username, "total_repos", len(userCtx.Repositories))
 	for i := range userCtx.Repositories {
 		repo := &userCtx.Repositories[i]
@@ -82,7 +148,7 @@ func (d *Detector) collectActivityTimestampsWithContext(
 			d.logger.Debug("processing forked repo for timestamps", "repo", repo.Name)
 
 			// Add fork timestamp - the CreatedAt for a fork is when the user forked it
-			allTimestamps = append(allTimestamps, timestampEntry{
+			timestamps = append(timestamps, timestampEntry{
 				time:       repo.CreatedAt,
 				source:     "fork_created",
 				org:        userCtx.Username, // User's own fork
@@ -91,11 +157,10 @@ func (d *Detector) collectActivityTimestampsWithContext(
 				url:        repo.HTMLURL,
 			})
 			forkCount++
-			orgCounts[userCtx.Username]++
 
 			// Also check UpdatedAt and PushedAt for fork activity
 			if !repo.UpdatedAt.IsZero() && !repo.UpdatedAt.Equal(repo.CreatedAt) {
-				allTimestamps = append(allTimestamps, timestampEntry{
+				timestamps = append(timestamps, timestampEntry{
 					time:       repo.UpdatedAt,
 					source:     "fork_updated",
 					org:        userCtx.Username,
@@ -105,7 +170,7 @@ func (d *Detector) collectActivityTimestampsWithContext(
 				})
 			}
 			if !repo.PushedAt.IsZero() && !repo.PushedAt.Equal(repo.CreatedAt) {
-				allTimestamps = append(allTimestamps, timestampEntry{
+				timestamps = append(timestamps, timestampEntry{
 					time:       repo.PushedAt,
 					source:     "fork_pushed",
 					org:        userCtx.Username,
@@ -125,7 +190,7 @@ func (d *Detector) collectActivityTimestampsWithContext(
 		}
 
 		d.logger.Debug("Adding repo to timeline", "repo", repo.Name, "created_at", repo.CreatedAt)
-		allTimestamps = append(allTimestamps, timestampEntry{
+		timestamps = append(timestamps, timestampEntry{
 			time:       repo.CreatedAt,
 			source:     "repo_created",
 			org:        userCtx.Username, // User's own repositories
@@ -134,18 +199,14 @@ func (d *Detector) collectActivityTimestampsWithContext(
 			url:        repo.HTMLURL,
 		})
 		repoCount++
-		orgCounts[userCtx.Username]++
 	}
+	return timestamps, repoCount, forkCount
+}
 
-	if repoCount > 0 || forkCount > 0 {
-		d.logger.Info("✅ Added repository events to timeline", "username", userCtx.Username,
-			"repos_created", repoCount, "forks", forkCount)
-	} else {
-		d.logger.Info("⚠️ No repository events to add", "username", userCtx.Username, "total_repos", len(userCtx.Repositories))
-	}
-
-	// Add PRs from GraphQL (these supplement the event data which only covers ~30 days)
+// processPRsForTimeline processes pull requests for the activity timeline.
+func (d *Detector) processPRsForTimeline(userCtx *UserContext) (timestamps []timestampEntry, count int) {
 	prCount := 0
+
 	d.logger.Debug("Processing PRs for timeline", "username", userCtx.Username, "total_prs", len(userCtx.PullRequests))
 	for i := range userCtx.PullRequests {
 		pr := &userCtx.PullRequests[i]
@@ -155,7 +216,7 @@ func (d *Detector) collectActivityTimestampsWithContext(
 		}
 
 		org := extractOrganization(pr.RepoName)
-		allTimestamps = append(allTimestamps, timestampEntry{
+		timestamps = append(timestamps, timestampEntry{
 			time:       pr.CreatedAt,
 			source:     "pr",
 			org:        org,
@@ -164,17 +225,14 @@ func (d *Detector) collectActivityTimestampsWithContext(
 			url:        pr.HTMLURL,
 		})
 		prCount++
-		if org != "" {
-			orgCounts[org]++
-		}
 	}
+	return timestamps, prCount
+}
 
-	if prCount > 0 {
-		d.logger.Info("🔀 Added pull requests to timeline", "username", userCtx.Username, "count", prCount)
-	}
-
-	// Add Issues from GraphQL (these supplement the event data which only covers ~30 days)
+// processIssuesForTimeline processes issues for the activity timeline.
+func (d *Detector) processIssuesForTimeline(userCtx *UserContext) (timestamps []timestampEntry, count int) {
 	issueCount := 0
+
 	d.logger.Debug("Processing issues for timeline", "username", userCtx.Username, "total_issues", len(userCtx.Issues))
 	for i := range userCtx.Issues {
 		issue := &userCtx.Issues[i]
@@ -184,7 +242,7 @@ func (d *Detector) collectActivityTimestampsWithContext(
 		}
 
 		org := extractOrganization(issue.RepoName)
-		allTimestamps = append(allTimestamps, timestampEntry{
+		timestamps = append(timestamps, timestampEntry{
 			time:       issue.CreatedAt,
 			source:     "issue",
 			org:        org,
@@ -193,18 +251,15 @@ func (d *Detector) collectActivityTimestampsWithContext(
 			url:        issue.HTMLURL,
 		})
 		issueCount++
-		if org != "" {
-			orgCounts[org]++
-		}
 	}
+	return timestamps, issueCount
+}
 
-	if issueCount > 0 {
-		d.logger.Info("🐛 Added issues to timeline", "username", userCtx.Username, "count", issueCount)
-	}
-
-	// Process comments for timeline
-	d.logger.Debug("Processing comments for timeline", "username", userCtx.Username, "total_comments", len(userCtx.Comments))
+// processCommentsForTimeline processes comments for the activity timeline.
+func (d *Detector) processCommentsForTimeline(userCtx *UserContext) (timestamps []timestampEntry, count int) {
 	commentCount := 0
+
+	d.logger.Debug("Processing comments for timeline", "username", userCtx.Username, "total_comments", len(userCtx.Comments))
 	for i := range userCtx.Comments {
 		comment := &userCtx.Comments[i]
 		if comment.CreatedAt.IsZero() || comment.CreatedAt.Year() < 2000 {
@@ -218,7 +273,7 @@ func (d *Detector) collectActivityTimestampsWithContext(
 		if len(commentText) > 100 {
 			commentText = commentText[:100] + "..."
 		}
-		allTimestamps = append(allTimestamps, timestampEntry{
+		timestamps = append(timestamps, timestampEntry{
 			time:       comment.CreatedAt,
 			source:     "comment",
 			org:        org,
@@ -227,24 +282,8 @@ func (d *Detector) collectActivityTimestampsWithContext(
 			url:        comment.HTMLURL,
 		})
 		commentCount++
-		if org != "" {
-			orgCounts[org]++
-		}
 	}
-
-	if commentCount > 0 {
-		d.logger.Info("💬 Added comments to timeline", "username", userCtx.Username, "count", commentCount)
-	}
-
-	// Don't call collectSupplementalTimestamps here - we already have all the data
-	// from UserContext. The supplemental data fetching happens separately in
-	// analyzeActivityTimestampsWithoutSupplemental
-
-	d.logger.Info("📊 Unified timeline built",
-		"username", userCtx.Username,
-		"total_events", len(allTimestamps))
-
-	return allTimestamps, orgCounts
+	return timestamps, commentCount
 }
 
 // collectActivityTimestampsWithSSHKeys gathers all activity timestamps including SSH keys.
