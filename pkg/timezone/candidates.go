@@ -35,6 +35,81 @@ func calculateEasternLunchBonus(dropRatio, lunchLocalStart float64) (bonus float
 
 // EvaluateCandidates evaluates multiple timezone offsets to find the best candidates.
 //
+// findBestWorkStartForTimezone finds the most likely work start time for a given timezone
+// It looks for activity periods that, when converted to local time, look like morning work hours.
+func findBestWorkStartForTimezone(halfHourCounts map[float64]int, testOffset int, fallbackStart float64) float64 {
+	// Find all continuous activity periods (at least 3 events in consecutive buckets)
+	type period struct {
+		startUTC float64
+		activity int
+	}
+
+	var periods []period
+
+	// Scan for activity periods
+	for hour := 0.0; hour < 24.0; hour += 0.5 {
+		count := halfHourCounts[hour]
+		nextCount := halfHourCounts[math.Mod(hour+0.5, 24)]
+
+		// Need at least 3 events in this bucket and the next to start a period
+		if count >= 3 && nextCount >= 3 {
+			periods = append(periods, period{
+				startUTC: hour,
+				activity: count + nextCount,
+			})
+		}
+	}
+
+	// Debug: log found periods
+	if len(periods) > 0 && testOffset == 0 {
+		fmt.Printf("DEBUG UTC%+d: found %d periods: ", testOffset, len(periods))
+		for _, p := range periods {
+			localStart := math.Mod(p.startUTC+float64(testOffset)+24, 24)
+			fmt.Printf("%.1f(local:%.1f) ", p.startUTC, localStart)
+		}
+		fmt.Println()
+	}
+
+	if len(periods) == 0 {
+		return fallbackStart // No periods found, use fallback
+	}
+
+	// Score each period based on how reasonable it looks as work start in this timezone
+	bestScore := -1000.0
+	bestStart := fallbackStart
+
+	for _, p := range periods {
+		localStart := math.Mod(p.startUTC+float64(testOffset)+24, 24)
+		score := 0.0
+
+		// Strong preference for morning starts (7am-11am)
+		if localStart >= 7 && localStart <= 11 {
+			score += 100
+			if localStart >= 8 && localStart <= 10 {
+				score += 50 // Extra bonus for 8-10am
+			}
+		} else if localStart >= 6 && localStart < 7 {
+			score += 50 // 6am is early but acceptable
+		} else if localStart >= 11 && localStart <= 14 {
+			score += 20 // Afternoon start is less ideal
+		} else if localStart >= 14 && localStart <= 18 {
+			score -= 50 // Late afternoon start is suspicious
+		} else {
+			score -= 100 // Evening/night/early morning start is very unlikely
+		}
+
+		// Prefer periods with more activity
+		score += float64(p.activity)
+
+		if score > bestScore {
+			bestScore = score
+			bestStart = p.startUTC
+		}
+	}
+
+	return bestStart
+}
+
 //nolint:gocognit,nestif,revive,maintidx // Timezone evaluation requires comprehensive multi-factor analysis
 func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts map[float64]int, totalActivity int, quietHours []int, midQuiet float64, activeStart float64, bestGlobalLunch GlobalLunchPattern, profileTimezone string, newestActivity time.Time) []Candidate {
 	var candidates []Candidate // Store timezone candidates for Gemini
@@ -53,9 +128,17 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 
 		lunchLocalStart := math.Mod(testLunchStart+float64(testOffset)+24, 24)
 
-		// Work start time - use the activeStart which is calculated based on sustained activity
-		// activeStart is in UTC, convert to local time for this offset
-		testWorkStart := math.Mod(activeStart+float64(testOffset)+24, 24)
+		// Find the best work period for this specific timezone
+		// This is crucial for users with multiple activity periods (morning work + evening coding)
+		testActiveStartUTC := findBestWorkStartForTimezone(halfHourCounts, testOffset, activeStart)
+
+		// Debug: Log work start detection for all users and timezones
+		if testActiveStartUTC != activeStart {
+			fmt.Printf("DEBUG [%s] UTC%+d: work start changed from %.1f to %.1f (local: %.1f)\n",
+				username, testOffset, activeStart, testActiveStartUTC,
+				math.Mod(testActiveStartUTC+float64(testOffset)+24, 24))
+		}
+		testWorkStart := math.Mod(testActiveStartUTC+float64(testOffset)+24, 24)
 		firstActivityLocal := testWorkStart
 
 		// Lunch is only reasonable if:
@@ -164,8 +247,16 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 				adjustments = append(adjustments, fmt.Sprintf("+5 (acceptable sleep, mid=%.1f)", sleepLocalMid))
 			default:
 				// Sleep pattern exists but timing is very unusual (mid-day sleep)
-				testConfidence -= 5 // Increased penalty for truly unusual sleep
-				adjustments = append(adjustments, fmt.Sprintf("-5 (daytime sleep, mid=%.1f)", sleepLocalMid))
+				// CRITICAL: Daytime sleep (10am-10pm) is IMPOSSIBLE for normal work patterns
+				if sleepLocalMid >= 10 && sleepLocalMid <= 22 {
+					// This is daytime sleep - MASSIVE penalty
+					testConfidence -= 100 // Effectively disqualifies this timezone
+					adjustments = append(adjustments, fmt.Sprintf("-100 (IMPOSSIBLE daytime sleep, mid=%.1f)", sleepLocalMid))
+				} else {
+					// Other unusual sleep patterns get smaller penalty
+					testConfidence -= 20
+					adjustments = append(adjustments, fmt.Sprintf("-20 (very unusual sleep, mid=%.1f)", sleepLocalMid))
+				}
 			}
 		} else {
 			adjustments = append(adjustments, "0 (no reasonable sleep pattern)")
@@ -312,15 +403,18 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 				// Only give bonuses for reasonable starts (6am+)
 				actualWorkStart := int(preciseWorkStart) // Convert back to int for existing logic
 				switch {
-				case actualWorkStart >= 7 && actualWorkStart <= 9:
-					testConfidence += 12 // Good work start (7-9am) - increased from 8 to 12
+				case actualWorkStart >= 8 && actualWorkStart <= 10:
+					testConfidence += 12 // Good work start (8-10am) - perfect for GitHub activity
 					adjustments = append(adjustments, fmt.Sprintf("+12 (good work start %dam)", actualWorkStart))
+				case actualWorkStart == 7:
+					testConfidence += 8 // 7am is good but slightly early
+					adjustments = append(adjustments, "+8 (early bird 7am work start)")
 				case actualWorkStart == 6:
 					testConfidence += 4 // 6am is early but some people do it
 					adjustments = append(adjustments, "+4 (early 6am work start)")
-				case actualWorkStart >= 6 && actualWorkStart <= 10:
-					testConfidence += 2 // Acceptable but unusual
-					adjustments = append(adjustments, fmt.Sprintf("+2 (unusual work start %dam)", actualWorkStart))
+				case actualWorkStart == 11:
+					testConfidence += 4 // 11am is late but acceptable
+					adjustments = append(adjustments, "+4 (late 11am work start)")
 				default:
 					testConfidence++ // Work hours detected but very unusual
 					adjustments = append(adjustments, fmt.Sprintf("+1 (very unusual work start %dam)", actualWorkStart))
@@ -372,6 +466,43 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			}
 		}
 
+		// PENALTY for excessive early morning activity (midnight to 6am local)
+		// This is a strong indicator that the timezone is wrong
+		// Calculate early morning activity (midnight-6am local)
+		earlyMorningActivity := 0
+		for localHour := range 6 {
+			utcHour := (localHour - testOffset + 24) % 24
+			earlyMorningActivity += hourCounts[utcHour]
+		}
+
+		// Also calculate afternoon activity (noon-6pm) for comparison
+		noonToSixActivity := 0
+		for localHour := 12; localHour <= 17; localHour++ {
+			utcHour := (localHour - testOffset + 24) % 24
+			noonToSixActivity += hourCounts[utcHour]
+		}
+
+		if totalActivity > 0 {
+			earlyMorningRatio := float64(earlyMorningActivity) / float64(totalActivity)
+			afternoonRatio := float64(noonToSixActivity) / float64(totalActivity)
+
+			// If there's more activity midnight-6am than noon-6pm, this timezone is WRONG
+			if earlyMorningActivity > noonToSixActivity && earlyMorningRatio > 0.15 {
+				// Massive penalty for having more night activity than afternoon
+				testConfidence -= 50
+				adjustments = append(adjustments, fmt.Sprintf("-50 (MORE night activity %.1f%% than afternoon %.1f%%)",
+					earlyMorningRatio*100, afternoonRatio*100))
+			} else if earlyMorningRatio > 0.25 {
+				// Large penalty for excessive early morning activity (>25% of total)
+				testConfidence -= 30
+				adjustments = append(adjustments, fmt.Sprintf("-30 (excessive midnight-6am activity: %.1f%%)", earlyMorningRatio*100))
+			} else if earlyMorningRatio > 0.15 {
+				// Moderate penalty for substantial early morning activity (>15%)
+				testConfidence -= 10
+				adjustments = append(adjustments, fmt.Sprintf("-10 (high midnight-6am activity: %.1f%%)", earlyMorningRatio*100))
+			}
+		}
+
 		// Work hours activity bonus - 2 points max
 		// Check activity during expected work hours (9am-5pm local) for this timezone
 		workHoursActivity := 0
@@ -417,18 +548,19 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 				// 5-6pm peak is suspicious - transition/dinner time (increased penalty)
 				peakBonus = -8.0 // Increased from -3 to -8
 				adjustments = append(adjustments, fmt.Sprintf("-8 (suspicious peak at %d:00, dinner/transition time)", peakLocalHour))
-			case peakLocalHour >= 19 && peakLocalHour <= 21:
-				// 7-9pm peak is common for OSS hobbyists working from home
+			case peakLocalHour >= 19 && peakLocalHour <= 22:
+				// 7-10pm peak is common for OSS hobbyists working from home
+				// Many developers do their best work in the evening
 				peakBonus = 2.0
 				adjustments = append(adjustments, fmt.Sprintf("+2 (evening OSS peak at %dpm)", peakLocalHour-12))
-			case peakLocalHour >= 22 || peakLocalHour <= 6:
-				// After 10pm or before 7am peak is very unusual - likely wrong timezone
+			case peakLocalHour == 23:
+				// 11pm is late but still possible for night owls
+				peakBonus = -5.0
+				adjustments = append(adjustments, "-5 (late peak at 11pm)")
+			case peakLocalHour <= 6:
+				// Peak between midnight and 6am is very unusual - likely wrong timezone
 				peakBonus = -20.0
-				if peakLocalHour <= 6 {
-					adjustments = append(adjustments, fmt.Sprintf("-20 (peak at %dam - night owl unlikely)", peakLocalHour))
-				} else {
-					adjustments = append(adjustments, fmt.Sprintf("-20 (very late peak at %dpm)", peakLocalHour-12))
-				}
+				adjustments = append(adjustments, fmt.Sprintf("-20 (peak at %dam - night owl unlikely)", peakLocalHour))
 			case peakLocalHour >= 13 && peakLocalHour <= 15:
 				// 1-3pm is ideal afternoon work time
 				peakBonus = 5.0
@@ -958,35 +1090,15 @@ func EvaluateCandidates(username string, hourCounts map[int]int, halfHourCounts 
 			}
 		}
 
-		// Ensure confidence stays above 0 and scale up for better dynamic range
-		testConfidence = math.Max(0, testConfidence)
-		// Scale confidence by 1.5x for better dynamic range (50% -> 75%)
+		// Allow negative confidence for truly bad timezones
+		// This ensures timezones with impossible patterns (daytime sleep, excessive early morning)
+		// rank lower than timezones that are merely uncertain
+		// Scale confidence by 1.5x for better dynamic range
 		testConfidence *= 1.5
 
-		// Debug: Log scoring details for all candidates
-		// For egibs debugging specifically
-		if username == "egibs" && (testOffset == -3 || testOffset == -5 || testOffset == -6) {
-			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f adjustments=%v\n",
-				username, testOffset, testConfidence, adjustments)
-		}
-
-		// Debug for stevebeattie - log UTC-7, UTC-8, UTC-9
-		if username == "stevebeattie" && (testOffset == -7 || testOffset == -8 || testOffset == -9) {
-			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f adjustments=%v\n",
-				username, testOffset, testConfidence, adjustments)
-		}
-
-		// Debug for tstromberg - log UTC+0, UTC-4, UTC-5 to see overnight penalty
-		if username == "tstromberg" && (testOffset == 0 || testOffset == -4 || testOffset == -5) {
-			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f adjustments=%v\n",
-				username, testOffset, testConfidence, adjustments)
-		}
-
-		// Debug for mattmoor - show all timezones to see if profile timezone is included
-		if username == "mattmoor" {
-			fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f isProfile=%v adjustments=%v\n",
-				username, testOffset, testConfidence, isProfileTimezone, adjustments)
-		}
+		// Log ALL timezones with confidence scores for ALL users
+		fmt.Printf("DEBUG [%s] UTC%+d: confidence=%.1f adjustments=%v\n",
+			username, testOffset, testConfidence, adjustments)
 
 		// Add ALL candidates regardless of confidence to ensure complete coverage
 		// This ensures --force-offset works and profile locations are always considered
