@@ -254,7 +254,8 @@
             }
 
             @keyframes funkDots {
-                0%, 20% {
+                0%,
+                20% {
                     content: ".";
                     color: #007aff;
                 }
@@ -266,7 +267,8 @@
                     content: "...";
                     color: #af52de;
                 }
-                80%, 100% {
+                80%,
+                100% {
                     content: "...";
                     color: #007aff;
                 }
@@ -328,7 +330,7 @@
             .result-row {
                 transition: all 0.2s ease;
             }
-            
+
             .result-row:hover {
                 background: linear-gradient(90deg, #fafafa 0%, #ffffff 100%);
                 transform: translateX(2px);
@@ -400,7 +402,7 @@
                 position: relative;
                 transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
             }
-            
+
             #map:hover {
                 transform: scale(1.02) rotate(0.5deg);
                 box-shadow: 0 8px 24px rgba(0, 122, 255, 0.1);
@@ -492,7 +494,8 @@
             }
 
             @keyframes getOnUp {
-                0%, 100% {
+                0%,
+                100% {
                     transform: rotate(0deg) scale(1);
                 }
                 15% {
@@ -783,7 +786,9 @@
                     href="https://codegroove.dev/products/hub/"
                     style="font-weight: 600"
                     >grooveHUB</a
-                >'s ability to find candidates for real-time code reviews.
+                >'s ability to find candidates for real-time code reviews. In
+                production, we allow gutz to trust user-set locations and
+                timezones for improved latency.
             </p>
             <p style="margin: 0; line-height: 1.5">
                 It also has a useful
